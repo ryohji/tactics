@@ -188,3 +188,42 @@ FP視点・遮蔽フォグ・脅威圏は○（あれば）。トグル枠とロ
 ヘッドレス環境で `/browse` が WebGL を撮れず、毎イテレーション QA が「ユーザ目視待ち」で停滞していた慢性ブロッカーへの対処。
 `terrain.ts` が Three 非依存な点を使い、**Node で `Terrain.mesh()` を焼き、自前ソフトウェアレンダラ（zバッファ + Lambert）で複数アングルの PNG に落とす**（`scripts/preview-terrain.ts`）。
 ブラウザを起動せず地形のシルエットを反復確認でき、SDF/ブループリントの盲目チューニングを解消する。出力は `docs/qa/preview/`。
+
+---
+
+## 11. ゲームルール層(it-6)
+
+移動基盤(§1-10)の上に載せる層。数値・ルールの確定値は DECISIONS 2026-07-02。
+
+### 11.1 モジュール構成
+```
+model/units.ts   クラス定義(ステータス・飛行/歩行・スキル)・陣営ロスター。純TS。
+model/rules.ts   足場判定・ZOC・移動範囲BFS・射線(clear/cover/blocked)・戦闘予測/解決・支援/高低差補正。純TS。
+model/ai.ts      敵行動プラン(移動先×対象のスコアリング)。純TS。
+state/game.ts    ゲーム状態機械(zustand)。フェーズ・ユニット・選択・演出キュー・RNG・勝敗。
+render/Units.tsx / TargetField.tsx / Effects.tsx   ユニット・対象セル・戦闘演出。
+ui/GameHud.tsx   DOMオーバーレイ(バナー・パネル・行動メニュー・予測・ログ・勝敗)。
+audio/sfx.ts     WebAudio 合成効果音。
+```
+既存 `state/store.ts` は**盤面ストア**(terrain / arena / occluder / params / toggles)に縮退。
+プロトタイプ専用だった active / enemies / reachableSet / threatSet と Markers / Region / activeAnim は撤去し、ゲーム層が置き換える。データフローは一方向のまま: `盤面ストア(占有情報) → game.ts(ルール適用) → render/ui`。
+
+### 11.2 状態機械
+```
+phase: deploy → player ⇄ enemy → over(勝敗)
+uiMode(player中): idle → unitSelected(移動範囲表示) → actionMenu(移動後)
+                → targetSelect(攻撃/ヒール/浮遊) → (解決アニメ) → idle
+```
+- 移動は確定前キャンセル可(行動前なら元位置へ戻す)。行動(攻撃/スキル/待機)で acted 確定。
+- 全味方 acted で自動ターン終了(手動「ターン終了」も可)。陣営ターン終了時に浮遊カウンタを減算し、切れた空中ユニットは直下の足場へ降着。
+- 敵ターンは AI が1体ずつ順次実行(演出ディレイ付き・カメラが行動ユニットへフォーカス)。
+- 勝敗: リーダー hp0 で即 over。
+
+### 11.3 演出・音
+- ユニット = クラス別プリミティブ合成(帽子・翼・盾など)+ 陣営色。HP バー/ダメージ数字は drei Html。
+- 演出キュー: game.ts が fx イベント(投射体・被弾・回復・死亡)を発行し Effects.tsx が消費。解決は setTimeout ベースの逐次シーケンス(状態遷移は演出完了後)。
+- 効果音は AudioContext + オシレータ/ノイズ合成。初回ユーザ操作で resume。ミュートトグルあり。
+
+### 11.4 性能
+- 移動範囲 BFS は Move≤5 で高々数百セル。ZOC/支援判定は12近傍走査。占有 Set はユニット数 O(12)。
+- occluderSet は盤面ストアの前計算を共有(ユニット移動では再計算しない — it-5 の教訓を維持)。

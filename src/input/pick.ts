@@ -1,26 +1,21 @@
-// クリック移動のピッキング（W7 の一部 / 仕様10章・DESIGN §7）。
+// クリックのピッキング（it-6）。TargetField の InstancedMesh がクリックされたとき、
+// instanceId から Cell を逆引きして game 層へ渡す。ハイライトの意味（移動先/配置先/対象）は
+// game 側が知っているので、ここでは cell を届けるだけ（対象セルはユニットへ解決して clickUnit）。
 //
-// クリック対象の球は1つの InstancedMesh で描く（Markers.tsx）。it-4 以降、その対象は
-// active の「到達セル」群（十数個）に絞ってある。R3F のレイキャストが返す instanceId から
-// 元の Cell を逆引きするための共有レジストリをここに置く。Markers と本ファイルは
-// 同一担当（W5+W7 統合）なので内部結合でよい（DESIGN §8）。
-//
-// クリックで setActive を呼ぶだけ。到達セル外は store.setActive が自前で弾くので、
-// ここでは判定しない（一方向データフロー: 入力→store→導出）。レイキャストは onClick 時のみ。
+// カメラドラッグ直後の「離した瞬間のクリック」を誤認しないための抑制フラグは it-1 から踏襲。
 
-import { type Cell } from '../model/fcc';
-import { useStore } from '../state/store';
+import { cellKey, type Cell } from '../model/fcc';
+import { useGame } from '../state/game';
 
-// instanceId → Cell（到達セル列）。Markers が到達セルを再計算するたびに上書きする。
-let markerCells: Cell[] = [];
+// instanceId → Cell（TargetField が描画のたびに登録する。並びは instanceId と同じ）。
+let fieldCells: Cell[] = [];
 
-// カメラドラッグ直後の「離した瞬間のクリック」を移動と誤認しないための抑制フラグ。
-// CameraRig がドラッグ終了時に立て、次のクリックを1回だけ無視する。
+// ドラッグ終了直後の1クリックを無視する抑制フラグ（CameraRig が立てる）。
 let suppressNextClick = false;
 
-/** Markers から描画順の Cell 配列を登録する（instanceId と同じ並び）。 */
-export function setMarkerCells(cells: Cell[]): void {
-  markerCells = cells;
+/** TargetField から描画順の Cell 配列を登録する。 */
+export function setFieldCells(cells: Cell[]): void {
+  fieldCells = cells;
 }
 
 /** 次の1クリックを無視するか設定する（CameraRig のドラッグ判定から呼ぶ）。 */
@@ -28,17 +23,28 @@ export function setSuppressNextClick(v: boolean): void {
   suppressNextClick = v;
 }
 
-/**
- * レイキャストでヒットしたインスタンスを active 移動に解決する。
- * instanceId から Cell を引き、store.setActive へ渡す（到達外は store が弾く）。
- */
-export function pickInstance(instanceId: number | undefined): void {
+/** ドラッグ直後クリックなら true を返しつつ消費する（Units のクリックでも使う）。 */
+export function consumeSuppressedClick(): boolean {
   if (suppressNextClick) {
-    suppressNextClick = false; // ドラッグ直後の1クリックを消費して終わり
+    suppressNextClick = false;
+    return true;
+  }
+  return false;
+}
+
+/** レイキャストでヒットしたインスタンスをゲーム入力に解決する。 */
+export function pickInstance(instanceId: number | undefined): void {
+  if (consumeSuppressedClick()) return;
+  if (instanceId === undefined) return;
+  const cell = fieldCells[instanceId];
+  if (!cell) return;
+  const g = useGame.getState();
+  if (g.highlightKind === 'target') {
+    // 対象セル: そのセルに立つユニットへ解決して行動確定。
+    const k = cellKey(cell);
+    const t = g.units.find((u) => u.alive && cellKey(u.pos) === k);
+    if (t) g.clickUnit(t.id);
     return;
   }
-  if (instanceId === undefined) return;
-  const cell = markerCells[instanceId];
-  if (!cell) return;
-  useStore.getState().setActive(cell);
+  g.clickCell(cell);
 }
