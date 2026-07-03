@@ -1,13 +1,11 @@
 import { useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Leva } from 'leva';
-import { Scene } from './render/Scene';
-import { Controls } from './ui/Controls';
-import { GameHud } from './ui/GameHud';
+import { RogueScene } from './render/rogue/RogueScene';
+import { RogueHud } from './ui/RogueHud';
 import { unlock } from './audio/sfx';
 
-// it-6 合成点。Canvas 内は <Scene/>（空気感・地形・ユニット・エフェクト・カメラ）。
-// Canvas 外に <GameHud/>（ゲーム操作の DOM オーバーレイ）と <Controls/>（leva デバッグ、畳んで置く）。
+// rogue-1 合成点。Canvas 内は <RogueScene/>(洞窟・敵・宝・マーカー・カメラ)。
+// tactics(it-6)の Scene/GameHud/Controls は温存してあるが、このブランチでは配線しない。
 // 効果音の AudioContext は自動再生制限のため初回 pointerdown で unlock する。
 export function App() {
   useEffect(() => {
@@ -18,12 +16,10 @@ export function App() {
 
   return (
     <>
-      <Canvas camera={{ position: [40, 30, 40], fov: 42 }}>
-        <Scene />
+      <Canvas camera={{ position: [24, 18, 24], fov: 46 }}>
+        <RogueScene />
       </Canvas>
-      <GameHud />
-      <Leva collapsed titleBar={{ title: 'デバッグ' }} />
-      <Controls />
+      <RogueHud />
     </>
   );
 }

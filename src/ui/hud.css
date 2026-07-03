@@ -183,6 +183,68 @@
 .hud-over .win { color: #fbbf24; }
 .hud-over .lose { color: #94a3b8; }
 
+/* --- rogue: 左上プレイヤー状態 --- */
+.hud-rogue-status {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 230px;
+  background: rgba(15, 12, 40, 0.85);
+  border: 1px solid #4c467e;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  pointer-events: auto;
+}
+.hud-rogue-status h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: #7dd3fc;
+}
+.hud-rogue-status .tag { font-size: 11px; color: #c4b5fd; }
+.hud-equip {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+/* --- rogue: 所持品 --- */
+.hud-pack {
+  position: absolute;
+  right: 14px;
+  top: 64px;
+  width: 190px;
+  background: rgba(15, 12, 40, 0.85);
+  border: 1px solid #4c467e;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: auto;
+}
+.hud-pack h4 { margin: 0 0 2px; font-size: 13px; color: #a5b4fc; }
+.hud-pack .empty { color: #64748b; font-size: 12px; }
+.hud-pack button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  text-align: left;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.hud-pack button .use { font-size: 11px; color: #94a3b8; margin-left: 8px; }
+
+/* --- rogue: スコア表示(死亡オーバーレイ) --- */
+.hud-score { font-size: 18px; color: #e2e8f0; letter-spacing: 0.08em; }
+
 /* --- ダメージポップアップ（Effects の Html） --- */
 .fx-popup {
   font-family: 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;

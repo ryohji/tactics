@@ -22,7 +22,10 @@ export type SfxName =
   | 'death' // 撃破（下降）
   | 'turn' // ターン交代（太鼓）
   | 'victory' // 勝利ファンファーレ
-  | 'defeat'; // 敗北
+  | 'defeat' // 敗北
+  | 'step' // 足音(rogue)
+  | 'pickup' // 拾得(rogue)
+  | 'alert'; // 敵が気づく(rogue)
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -175,6 +178,12 @@ const SFX: Record<SfxName, () => void> = {
     const seq = [440, 415, 349, 262];
     seq.forEach((f, i) => tone(f, 0.4, { type: 'triangle', gain: 0.4, delay: i * 0.22 }));
   },
+  step: () => noise(0.05, { filter: 'lowpass', freq: 480, gain: 0.28 }),
+  pickup: () => {
+    tone(880, 0.07, { type: 'triangle', gain: 0.3 });
+    tone(1320, 0.09, { type: 'triangle', gain: 0.25, delay: 0.06 });
+  },
+  alert: () => tone(950, 0.12, { type: 'square', gain: 0.35, sweepTo: 1250 }),
 };
 
 /** 名前で鳴らす。Audio 不可環境では静かに何もしない。 */

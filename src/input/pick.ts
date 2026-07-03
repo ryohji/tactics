@@ -6,30 +6,17 @@
 
 import { cellKey, type Cell } from '../model/fcc';
 import { useGame } from '../state/game';
+import { consumeSuppressedClick } from './suppress';
+
+// 抑制フラグの実体は suppress.ts へ分離(rogue と共用)。既存の import 先を保つため再 export。
+export { setSuppressNextClick, consumeSuppressedClick } from './suppress';
 
 // instanceId → Cell（TargetField が描画のたびに登録する。並びは instanceId と同じ）。
 let fieldCells: Cell[] = [];
 
-// ドラッグ終了直後の1クリックを無視する抑制フラグ（CameraRig が立てる）。
-let suppressNextClick = false;
-
 /** TargetField から描画順の Cell 配列を登録する。 */
 export function setFieldCells(cells: Cell[]): void {
   fieldCells = cells;
-}
-
-/** 次の1クリックを無視するか設定する（CameraRig のドラッグ判定から呼ぶ）。 */
-export function setSuppressNextClick(v: boolean): void {
-  suppressNextClick = v;
-}
-
-/** ドラッグ直後クリックなら true を返しつつ消費する（Units のクリックでも使う）。 */
-export function consumeSuppressedClick(): boolean {
-  if (suppressNextClick) {
-    suppressNextClick = false;
-    return true;
-  }
-  return false;
 }
 
 /** レイキャストでヒットしたインスタンスをゲーム入力に解決する。 */
