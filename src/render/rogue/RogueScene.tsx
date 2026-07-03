@@ -16,8 +16,9 @@ const S = ROGUE_S;
 export function RogueScene() {
   return (
     <>
-      <color attach="background" args={['#08060d']} />
-      <fog attach="fog" args={[new THREE.Color('#08060d'), 10 * S, 46 * S]} />
+      {/* 土色寄りの闇: カットアウェイの切り口の外=「まだ岩の中」を示唆する */}
+      <color attach="background" args={['#0d0a07']} />
+      <fog attach="fog" args={[new THREE.Color('#0d0a07'), 10 * S, 46 * S]} />
 
       {/* 全暗にはしない(輪郭が読める程度の底上げ)。主光源はたいまつ。 */}
       <ambientLight intensity={0.3} color="#8a7fae" />
