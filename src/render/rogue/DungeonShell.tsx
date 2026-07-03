@@ -1,31 +1,36 @@
 // 洞窟の壁描画(rogue-1)。「発見済みの空洞セルに接する、空洞でない or 未発見のセル」を
-// 岩ブロック(RD)としてインスタンス描画する。RD は空間充填なので壁面は厳密に閉じ、
-// 未発見の空洞は壁のまま・発見と同時に開く(discoveredRev で全再構築。差分更新は先送り)。
-// 色は深さで暖色の岩 → 冷たい深部へ遷移し、セルごとのハッシュで僅かに揺らす。
+// 岩としてメッシュ化する。RD は空間充填なので壁面は厳密に閉じ、未発見の空洞は壁のまま・
+// 発見と同時に開く(discoveredRev で全再構築。差分更新は先送り)。
 //
-// カットアウェイ(QAフィードバック対応):
-// 壁セルに阻まれて広間の形状が見えない問題への対処。毎フレーム「視線に直交し、
-// 注視点(プレイヤー/視点モードの旋回中心)より少し視点寄り」の平面を更新し、
-// これよりカメラ側の壁をクリッピングで消す。あわせて同じインスタンス群を
-// 「裏面のみ・無陰影の茶色」でもう1パス描く。RD ブロックは閉メッシュなので、
-// 表が切り取られた部分では内側の裏面=茶色が見え、「岩の断面(見えない部分)」を示す
-// (ステンシルキャップの安価な近似)。
+// ジオメトリはブロックのインスタンス描画ではなく「露出面だけをマージした単一メッシュ」。
+// 隣も岩セルなら間の面を出さない。理由(目視フィードバック第2回):
+//   - 隣接ブロック同士の共有面は「Aの表面」と「Bの裏面」が同一平面に重なり、
+//     切断時に Z ファイト(市松模様のちらつき)を起こしていた。マージで重複自体を消す。
+//   - rd.ts の RD_FACES は面ごとに巻き方向が不揃いで、裏返った面が黒く欠けて見えていた。
+//     ここでは各面の法線を「セル→隣」方向と照合して巻きを統一する。
+// 結果として岩塊の境界は水密な閉曲面になり、裏面パス(無陰影の土色)が
+// 「切断で露出した岩の内部」を常に正しく塗る。
+//
+// カットアウェイ: 毎フレーム「視線に直交し、注視点より CUT_OFFSET 視点寄り」の平面を
+// 更新し clippingPlanes に渡す。オフセットは隣接セルの壁面(中心から ~0.71 格子 =
+// √2S/2 ≈ 1.41)より内側の 0.5S にする。これより大きいと、壁際に立つプレイヤーを
+// 壁越しに見たとき背後の壁が切れずに視界を塞ぐ。
 
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../../model/fcc';
 import { useRogue, ROGUE_S } from '../../state/rogue';
 import { view } from '../../state/view';
-import { buildRhombicDodecahedron } from '../rd';
+import { RD_FACES, RD_VERTICES } from '../rd';
 import { currentFocusGrid } from './rogueFocus';
 
 const ROCK_SHALLOW = new THREE.Color('#7a6a55');
 const ROCK_DEEP = new THREE.Color('#3a3452');
-/** 切断面(ブロック内側)の土色。 */
+/** 切断面(岩の内部)の土色。 */
 const CUT_COLOR = '#5c422e';
-/** カット平面の注視点からのオフセット(視点寄り)。プレイヤーと足元は残す。 */
-const CUT_OFFSET = 2.5 * ROGUE_S;
+/** カット平面の注視点からのオフセット(視点寄り)。隣接セルの壁面(√2S/2)より内側に。 */
+const CUT_OFFSET = 0.5 * ROGUE_S;
 
 // 全シェルマテリアルで共有するクリッピング平面(毎フレーム更新)。
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6);
@@ -37,6 +42,64 @@ function hash01(c: Cell): number {
   return ((h ^ (h >>> 16)) >>> 0) / 0x100000000;
 }
 
+/**
+ * オフセット方向 → 巻きを統一した RD 面(格子単位の4頂点、外向き)。
+ * RD_FACES から面中心 = offset/2 で対応を取り、ワールド空間の法線が
+ * offset 方向を向くよう必要なら巻きを反転する(worldPos は向きを反転する
+ * 等長変換 det=-1 なので、格子空間の見た目では判定しない)。
+ */
+const ORIENTED_FACES: { off: Cell; verts: [Cell, Cell, Cell, Cell] }[] = OFFSETS.map((off) => {
+  const face = RD_FACES.find((f) => {
+    const cx = (RD_VERTICES[f[0]][0] + RD_VERTICES[f[1]][0] + RD_VERTICES[f[2]][0] + RD_VERTICES[f[3]][0]) / 4;
+    const cy = (RD_VERTICES[f[0]][1] + RD_VERTICES[f[1]][1] + RD_VERTICES[f[2]][1] + RD_VERTICES[f[3]][1]) / 4;
+    const cz = (RD_VERTICES[f[0]][2] + RD_VERTICES[f[1]][2] + RD_VERTICES[f[2]][2] + RD_VERTICES[f[3]][2]) / 4;
+    return Math.abs(cx * 2 - off[0]) < 1e-9 && Math.abs(cy * 2 - off[1]) < 1e-9 && Math.abs(cz * 2 - off[2]) < 1e-9;
+  })!;
+  let verts = face.map((i) => RD_VERTICES[i]) as [Cell, Cell, Cell, Cell];
+  const a = worldPos(verts[0][0], verts[0][1], verts[0][2], 1);
+  const b = worldPos(verts[1][0], verts[1][1], verts[1][2], 1);
+  const c = worldPos(verts[2][0], verts[2][1], verts[2][2], 1);
+  const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+  const ac = { x: c.x - a.x, y: c.y - a.y, z: c.z - a.z };
+  const n = {
+    x: ab.y * ac.z - ab.z * ac.y,
+    y: ab.z * ac.x - ab.x * ac.z,
+    z: ab.x * ac.y - ab.y * ac.x,
+  };
+  const ow = worldPos(off[0], off[1], off[2], 1);
+  if (n.x * ow.x + n.y * ow.y + n.z * ow.z < 0) {
+    verts = [verts[0], verts[3], verts[2], verts[1]];
+  }
+  return { off, verts };
+});
+
+/** 露出面だけの水密メッシュを構築(位置+頂点色、フラット法線)。 */
+function buildShellGeometry(shellSet: Set<CellKey>, S: number): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const col: number[] = [];
+  const c3 = new THREE.Color();
+  for (const k of shellSet) {
+    const c = keyToCell(k);
+    const t = Math.min(1, Math.max(0, -layer(c) / 26));
+    c3.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
+    c3.multiplyScalar(0.82 + 0.36 * hash01(c));
+    for (const { off, verts } of ORIENTED_FACES) {
+      // 隣も描画対象の岩なら共有面は完全に隠れる(かつ Z ファイトの元)ので出さない。
+      if (shellSet.has(`${c[0] + off[0]},${c[1] + off[1]},${c[2] + off[2]}`)) continue;
+      const w = verts.map((v) => worldPos(c[0] + v[0], c[1] + v[1], c[2] + v[2], S));
+      for (const i of [0, 1, 2, 0, 2, 3]) {
+        pos.push(w[i].x, w[i].y, w[i].z);
+        col.push(c3.r, c3.g, c3.b);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals(); // 非インデックスなので面フラット法線になる
+  return g;
+}
+
 export function DungeonShell() {
   const discoveredRev = useRogue((s) => s.discoveredRev);
   const gl = useThree((s) => s.gl);
@@ -46,93 +109,51 @@ export function DungeonShell() {
     gl.localClippingEnabled = true;
   }, [gl]);
 
-  const shell = useMemo(() => {
+  const geom = useMemo(() => {
     const { dungeon, discovered } = useRogue.getState();
-    const out = new Set<CellKey>();
+    const shell = new Set<CellKey>();
     for (const k of discovered) {
       const c = keyToCell(k);
       for (const o of OFFSETS) {
-        const n: Cell = [c[0] + o[0], c[1] + o[1], c[2] + o[2]];
-        const nk = `${n[0]},${n[1]},${n[2]}`;
-        if (!dungeon.open.has(nk) || !discovered.has(nk)) out.add(nk);
+        const nk = `${c[0] + o[0]},${c[1] + o[1]},${c[2] + o[2]}`;
+        if (!dungeon.open.has(nk) || !discovered.has(nk)) shell.add(nk);
       }
     }
-    return [...out].map(keyToCell);
+    return buildShellGeometry(shell, ROGUE_S);
     // discoveredRev が唯一の変更検知キー(dungeon/discovered は in-place 更新)。
   }, [discoveredRev]);
-
-  const geom = useMemo(() => buildRhombicDodecahedron(ROGUE_S), []);
-
-  const frontRef = useRef<THREE.InstancedMesh>(null);
-  const backRef = useRef<THREE.InstancedMesh>(null);
-  useLayoutEffect(() => {
-    const mat = new THREE.Matrix4();
-    const col = new THREE.Color();
-    for (const m of [frontRef.current, backRef.current]) {
-      if (!m) continue;
-      shell.forEach((c, i) => {
-        const w = worldPos(c[0], c[1], c[2], ROGUE_S);
-        mat.makeTranslation(w.x, w.y, w.z);
-        m.setMatrixAt(i, mat);
-      });
-      m.count = shell.length;
-      m.instanceMatrix.needsUpdate = true;
-      m.computeBoundingSphere();
-    }
-    const m = frontRef.current;
-    if (m) {
-      shell.forEach((c, i) => {
-        const t = Math.min(1, Math.max(0, -layer(c) / 26));
-        col.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
-        col.multiplyScalar(0.82 + 0.36 * hash01(c));
-        m.setColorAt(i, col);
-      });
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    }
-  }, [shell]);
+  useEffect(() => () => geom.dispose(), [geom]);
 
   // カット平面の更新: 法線=視線方向、通過点=注視点から視点側へ CUT_OFFSET 戻した点。
   // 「平面よりカメラ側」(n·p + c < 0)が描画されない。
-  const target = useRef(new THREE.Vector3());
-  const nrm = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
     const free = useRogue.getState().freeCam;
     const g = free && view.base ? view.base : currentFocusGrid();
     const w = worldPos(g[0], g[1], g[2], ROGUE_S);
-    target.current.set(w.x, w.y, w.z);
-    nrm.current.copy(target.current).sub(camera.position).normalize();
-    target.current.addScaledVector(nrm.current, -CUT_OFFSET);
-    cutPlane.setFromNormalAndCoplanarPoint(nrm.current, target.current);
+    const target = new THREE.Vector3(w.x, w.y, w.z);
+    const n = target.clone().sub(camera.position).normalize();
+    target.addScaledVector(n, -CUT_OFFSET);
+    cutPlane.setFromNormalAndCoplanarPoint(n, target);
   });
 
-  if (shell.length === 0) return null;
   return (
     <group>
       {/* 表面: 通常の岩肌(カメラ側はクリップ) */}
-      <instancedMesh
-        key={`f${shell.length}`}
-        ref={frontRef}
-        args={[undefined, undefined, shell.length]}
-        frustumCulled={false}
-      >
+      <mesh frustumCulled={false}>
         <primitive object={geom} attach="geometry" />
         <meshStandardMaterial
+          vertexColors
           roughness={0.95}
           metalness={0.02}
           flatShading
           clippingPlanes={[cutPlane]}
         />
-      </instancedMesh>
-      {/* 裏面: 切断で露出したブロック内側を土色で塗る(断面の示唆) */}
-      <instancedMesh
-        key={`b${shell.length}`}
-        ref={backRef}
-        args={[undefined, undefined, shell.length]}
-        frustumCulled={false}
-      >
+      </mesh>
+      {/* 裏面: 切断で露出した岩の内部を土色で塗る(断面の示唆) */}
+      <mesh frustumCulled={false}>
         <primitive object={geom} attach="geometry" />
         <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
-      </instancedMesh>
+      </mesh>
     </group>
   );
 }

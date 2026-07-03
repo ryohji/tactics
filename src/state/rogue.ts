@@ -32,8 +32,8 @@ import * as sfx from '../audio/sfx';
 export const ROGUE_S = 2;
 /** unitAnim 上のプレイヤー id(敵は 1〜)。 */
 export const PLAYER_ID = 0;
-/** 1クリックで歩ける最大歩数。 */
-export const REACH_STEPS = 3;
+/** 1クリックで歩ける最大歩数(洞窟は狭いので2近傍)。 */
+export const REACH_STEPS = 2;
 /** 発見(たいまつの明かり)の届く距離(格子ワールド単位)。 */
 const SEE_R = 6;
 /** スタブ終端がこの距離に入ると次の広間が生成される。 */
@@ -99,6 +99,8 @@ export interface RogueState {
   uiMode: 'walk' | 'throw';
   /** クリック可能な移動先(BFS≤REACH_STEPS)。 */
   reach: { cells: Cell[]; parent: Map<CellKey, CellKey> };
+  /** ホバー中の移動マーカーのセル(同レベルのヘックスオーバーレイ表示に使う)。 */
+  hoverMarker: CellKey | null;
   /** HUD に情報を出す敵 id(ホバー)。 */
   hoverBeastId: number | null;
   focus: Cell;
@@ -113,6 +115,7 @@ export interface RogueState {
   useItem: (index: number) => void;
   wait: () => void;
   cancelThrow: () => void;
+  setHoverMarker: (k: CellKey | null) => void;
   hoverBeast: (id: number | null) => void;
   toggleFreeCam: () => void;
   toggleMute: () => void;
@@ -432,7 +435,7 @@ export const useRogue = create<RogueState>((set, get) => {
   /** 経路を1歩=1ターンで自動歩行。敵に気づかれた/攻撃されたら中断。 */
   async function walkPath(path: Cell[]): Promise<void> {
     const run = runSeq;
-    set({ busy: true, reach: { cells: [], parent: new Map() }, hoverBeastId: null });
+    set({ busy: true, reach: { cells: [], parent: new Map() }, hoverBeastId: null, hoverMarker: null });
     for (let i = 1; i < path.length; i++) {
       if (runSeq !== run || get().phase !== 'play') break;
       const next = path[i];
@@ -529,7 +532,7 @@ export const useRogue = create<RogueState>((set, get) => {
     RogueState,
     | 'seed' | 'dungeon' | 'discovered' | 'discoveredRev' | 'player' | 'beasts' | 'items'
     | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'reach'
-    | 'hoverBeastId' | 'focus' | 'log' | 'fx'
+    | 'hoverMarker' | 'hoverBeastId' | 'focus' | 'log' | 'fx'
   > {
     clearUnitAnims();
     runSeq++;
@@ -562,6 +565,7 @@ export const useRogue = create<RogueState>((set, get) => {
       busy: false,
       uiMode: 'walk',
       reach: { cells: [], parent: new Map() },
+      hoverMarker: null,
       hoverBeastId: null,
       focus: [0, 0, 0],
       log: ['蟻巣迷宮に踏み込んだ。青いマーカーで移動、隣接した敵はクリックで攻撃。'],
@@ -676,6 +680,12 @@ export const useRogue = create<RogueState>((set, get) => {
       if (get().uiMode !== 'throw') return;
       sfx.play('cancel');
       set({ uiMode: 'walk' });
+    },
+
+    setHoverMarker: (k) => {
+      if (get().hoverMarker === k) return;
+      if (k !== null) sfx.play('cursor');
+      set({ hoverMarker: k });
     },
 
     hoverBeast: (id) => {
