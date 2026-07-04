@@ -233,9 +233,11 @@ export function DungeonShell() {
 
   return (
     <group>
+      {/* 同一ジオメトリを複数パスで共有するため geometry プロップで渡す(単純な代入)。
+          <primitive attach> 共有は差し替え時の付け外し帳簿が絡み、発見のたびの再構築で
+          一部メッシュが空ジオメトリへ戻る(壁が消える)ことがあった(第10回)。 */}
       {/* 表面: 通常の岩肌(カメラ側はクリップ) */}
-      <mesh frustumCulled={false}>
-        <primitive object={geom} attach="geometry" />
+      <mesh geometry={geom} frustumCulled={false}>
         <meshStandardMaterial
           vertexColors
           roughness={0.95}
@@ -248,15 +250,13 @@ export function DungeonShell() {
           平面上で必ず先に遮る(内部への視線は平面を岩の中で横切る)ため描かない —
           描くと遠方の断面までキャップの放射フェードを無視して明るく見えてしまう。 */}
       {!hasStencil && (
-        <mesh frustumCulled={false}>
-          <primitive object={geom} attach="geometry" />
+        <mesh geometry={geom} frustumCulled={false}>
           <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
         </mesh>
       )}
       {/* ステンシル計数: 切断立体の裏面 +1 / 表面 -1(色・深度は書かない) */}
       {hasStencil && (
-      <mesh frustumCulled={false} renderOrder={1}>
-        <primitive object={geom} attach="geometry" />
+      <mesh geometry={geom} frustumCulled={false} renderOrder={1}>
         <meshBasicMaterial
           colorWrite={false}
           depthWrite={false}
@@ -272,8 +272,7 @@ export function DungeonShell() {
       </mesh>
       )}
       {hasStencil && (
-      <mesh frustumCulled={false} renderOrder={1}>
-        <primitive object={geom} attach="geometry" />
+      <mesh geometry={geom} frustumCulled={false} renderOrder={1}>
         <meshBasicMaterial
           colorWrite={false}
           depthWrite={false}
