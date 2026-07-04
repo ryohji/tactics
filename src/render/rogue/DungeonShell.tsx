@@ -15,8 +15,15 @@
 // 更新し clippingPlanes に渡す。オフセットは隣接セルの壁面(中心から ~0.71 格子 =
 // √2S/2 ≈ 1.41)より内側の 0.5S にする。これより大きいと、壁際に立つプレイヤーを
 // 壁越しに見たとき背後の壁が切れずに視界を塞ぐ。
+//
+// 断面はステンシルキャップで塞ぐ(目視フィードバック第3回)。裏面パスだけの近似では、
+// 「平面の手前側で壁の厚みを視線が丸ごと通過する」箇所は表も裏も両方クリップされて
+// 背景が透けていた(=穴あき。メッシュ自体は有向辺対の検査で水密・巻き整合を確認済み)。
+// three.js 公式 clipping_stencil の手法: 切断立体の裏面で stencil を+1、表面で-1 すると
+// 「切り口が見えているピクセル」だけ stencil≠0 になる。そこへ切断平面上の大きな板を
+// stencil テスト付きで描けば、断面がちょうど土色で塗り潰される(水密メッシュが前提)。
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../../model/fcc';
@@ -31,9 +38,13 @@ const ROCK_DEEP = new THREE.Color('#3a3452');
 const CUT_COLOR = '#5c422e';
 /** カット平面の注視点からのオフセット(視点寄り)。隣接セルの壁面(√2S/2)より内側に。 */
 const CUT_OFFSET = 0.5 * ROGUE_S;
+/** キャップ板の一辺(視錐台と平面の交差を覆う大きさ。遠方は霧に溶ける)。 */
+const CAP_SIZE = 200 * ROGUE_S;
 
 // 全シェルマテリアルで共有するクリッピング平面(毎フレーム更新)。
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6);
+
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 /** セル座標の決定的ハッシュ(0..1)。岩肌の色むらに使う。 */
 function hash01(c: Cell): number {
@@ -125,15 +136,24 @@ export function DungeonShell() {
   useEffect(() => () => geom.dispose(), [geom]);
 
   // カット平面の更新: 法線=視線方向、通過点=注視点から視点側へ CUT_OFFSET 戻した点。
-  // 「平面よりカメラ側」(n·p + c < 0)が描画されない。
+  // 「平面よりカメラ側」(n·p + c < 0)が描画されない。キャップ板は平面に一致させ、
+  // 共面 Z ファイトを避けて僅かにカメラ側へ寄せる。
+  const capRef = useRef<THREE.Mesh>(null);
+  const tmpP = useRef(new THREE.Vector3());
+  const tmpN = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
     const free = useRogue.getState().freeCam;
     const g = free && view.base ? view.base : currentFocusGrid();
     const w = worldPos(g[0], g[1], g[2], ROGUE_S);
-    const target = new THREE.Vector3(w.x, w.y, w.z);
-    const n = target.clone().sub(camera.position).normalize();
-    target.addScaledVector(n, -CUT_OFFSET);
-    cutPlane.setFromNormalAndCoplanarPoint(n, target);
+    const p = tmpP.current.set(w.x, w.y, w.z);
+    const n = tmpN.current.copy(p).sub(camera.position).normalize();
+    p.addScaledVector(n, -CUT_OFFSET);
+    cutPlane.setFromNormalAndCoplanarPoint(n, p);
+    const cap = capRef.current;
+    if (cap) {
+      cap.position.copy(p).addScaledVector(n, -0.02 * ROGUE_S);
+      cap.quaternion.setFromUnitVectors(Z_AXIS, n);
+    }
   });
 
   return (
@@ -149,10 +169,55 @@ export function DungeonShell() {
           clippingPlanes={[cutPlane]}
         />
       </mesh>
-      {/* 裏面: 切断で露出した岩の内部を土色で塗る(断面の示唆) */}
+      {/* 裏面: 切断で露出した岩の内部の土色(キャップの背後の保険。stencil 不可環境の退路) */}
       <mesh frustumCulled={false}>
         <primitive object={geom} attach="geometry" />
         <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
+      </mesh>
+      {/* ステンシル計数: 切断立体の裏面 +1 / 表面 -1(色・深度は書かない) */}
+      <mesh frustumCulled={false} renderOrder={1}>
+        <primitive object={geom} attach="geometry" />
+        <meshBasicMaterial
+          colorWrite={false}
+          depthWrite={false}
+          depthTest={false}
+          side={THREE.BackSide}
+          clippingPlanes={[cutPlane]}
+          stencilWrite
+          stencilFunc={THREE.AlwaysStencilFunc}
+          stencilFail={THREE.IncrementWrapStencilOp}
+          stencilZFail={THREE.IncrementWrapStencilOp}
+          stencilZPass={THREE.IncrementWrapStencilOp}
+        />
+      </mesh>
+      <mesh frustumCulled={false} renderOrder={1}>
+        <primitive object={geom} attach="geometry" />
+        <meshBasicMaterial
+          colorWrite={false}
+          depthWrite={false}
+          depthTest={false}
+          side={THREE.FrontSide}
+          clippingPlanes={[cutPlane]}
+          stencilWrite
+          stencilFunc={THREE.AlwaysStencilFunc}
+          stencilFail={THREE.DecrementWrapStencilOp}
+          stencilZFail={THREE.DecrementWrapStencilOp}
+          stencilZPass={THREE.DecrementWrapStencilOp}
+        />
+      </mesh>
+      {/* キャップ: stencil≠0 のピクセル(=切り口)だけ土色の板が残る */}
+      <mesh ref={capRef} frustumCulled={false} renderOrder={2}>
+        <planeGeometry args={[CAP_SIZE, CAP_SIZE]} />
+        <meshBasicMaterial
+          color={CUT_COLOR}
+          side={THREE.DoubleSide}
+          stencilWrite
+          stencilRef={0}
+          stencilFunc={THREE.NotEqualStencilFunc}
+          stencilFail={THREE.ReplaceStencilOp}
+          stencilZFail={THREE.ReplaceStencilOp}
+          stencilZPass={THREE.ReplaceStencilOp}
+        />
       </mesh>
     </group>
   );

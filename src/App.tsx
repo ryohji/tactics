@@ -16,7 +16,8 @@ export function App() {
 
   return (
     <>
-      <Canvas camera={{ position: [24, 18, 24], fov: 46 }}>
+      {/* stencil: カットアウェイの断面キャップ用(three r163+ は既定 off) */}
+      <Canvas gl={{ stencil: true }} camera={{ position: [24, 18, 24], fov: 46 }}>
         <RogueScene />
       </Canvas>
       <RogueHud />
