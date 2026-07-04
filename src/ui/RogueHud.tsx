@@ -7,6 +7,7 @@
 //   死亡: スコアオーバーレイ
 
 import { useRogue, playerAtk, playerDef, depthOf } from '../state/rogue';
+import { stepDist } from '../model/dungeon';
 import { BEASTS } from '../model/beasts';
 import { ITEMS, type ItemId } from '../model/loot';
 import { resetView } from '../state/view';
@@ -110,6 +111,7 @@ function PackPanel() {
 function BeastPanel() {
   const hoverBeastId = useRogue((s) => s.hoverBeastId);
   const beasts = useRogue((s) => s.beasts);
+  const playerPos = useRogue((s) => s.player.pos);
   const b = beasts.find((x) => x.id === hoverBeastId && x.alive);
   if (!b) return null;
   const def = BEASTS[b.kind];
@@ -126,6 +128,7 @@ function BeastPanel() {
         <span>HP<b>{b.hp}/{def.hp}</b></span>
         <span>攻<b>{def.atk}</b></span>
         <span>防<b>{def.def}</b></span>
+        <span>距離<b>{stepDist(playerPos, b.pos)}歩</b></span>
       </div>
     </div>
   );

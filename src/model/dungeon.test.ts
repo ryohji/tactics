@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { cellKey, layer } from './fcc';
-import { createDungeon, expandAt, maybeExpand, reachableCount, distW } from './dungeon';
+import { createDungeon, expandAt, maybeExpand, reachableCount, distW, stepDist } from './dungeon';
+
+describe('stepDist(FCC 最短歩数)', () => {
+  it('近傍は1歩、軸方向2は2歩', () => {
+    expect(stepDist([0, 0, 0], [1, 1, 0])).toBe(1);
+    expect(stepDist([0, 0, 0], [2, 0, 0])).toBe(2);
+    expect(stepDist([0, 0, 0], [0, 0, 0])).toBe(0);
+  });
+  it('複合方向も整数歩(1,1,2 は2歩・2,2,0 は2歩)', () => {
+    expect(stepDist([0, 0, 0], [1, 1, 2])).toBe(2);
+    expect(stepDist([0, 0, 0], [2, 2, 0])).toBe(2);
+    expect(stepDist([1, 1, 0], [3, 3, 2])).toBe(3);
+  });
+});
 
 describe('createDungeon', () => {
   it('同じ seed なら同じ巣になる(決定性)', () => {
@@ -60,6 +73,16 @@ describe('expandAt / maybeExpand', () => {
     for (const st of dg.stubs) {
       const home = dg.chambers[st.from];
       expect(distW(st.exit, home.center)).toBeGreaterThanOrEqual(home.r + 3);
+    }
+  });
+
+  it('通路の入り口(mouth)は掘削済みで、広間の縁の外・終端より内にある', () => {
+    const dg = createDungeon(17);
+    for (const st of dg.stubs) {
+      const home = dg.chambers[st.from];
+      expect(dg.open.has(cellKey(st.mouth))).toBe(true);
+      expect(distW(st.mouth, home.center)).toBeGreaterThan(home.r);
+      expect(distW(st.mouth, home.center)).toBeLessThanOrEqual(distW(st.exit, home.center));
     }
   });
 });

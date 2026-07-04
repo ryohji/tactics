@@ -49,6 +49,8 @@ export interface Beast {
   pos: Cell;
   hp: number;
   home: Cell;
+  /** ホームの広間 id(掃討判定に使う)。 */
+  homeChamber: number;
   layerFloor: number;
   layerCeil: number;
   awake: boolean;
@@ -88,6 +90,12 @@ export interface RogueState {
   discovered: Set<CellKey>;
   /** discovered が増えるたびに +1(シェル再構築のキー)。 */
   discoveredRev: number;
+  /** セル → 広間 id(通路セルは載らない)。 */
+  cellChamber: Map<CellKey, number>;
+  /** 訪問済みの広間 id。 */
+  visitedChambers: Set<number>;
+  /** 訪問/掃討の状態が変わるたびに +1(壁色の再構築キー)。 */
+  exploreRev: number;
   player: PlayerState;
   beasts: Beast[];
   items: GroundItem[];
@@ -115,6 +123,8 @@ export interface RogueState {
   useItem: (index: number) => void;
   wait: () => void;
   cancelThrow: () => void;
+  /** 発見済みセルへのファストトラベル(1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。 */
+  travelTo: (c: Cell) => void;
   setHoverMarker: (k: CellKey | null) => void;
   hoverBeast: (id: number | null) => void;
   toggleFreeCam: () => void;
@@ -170,6 +180,18 @@ export function playerDef(p: PlayerState): number {
   return p.armor ? ITEMS[p.armor].def ?? 0 : 0;
 }
 
+/** 掃討済みの広間(訪問済みで、そこをホームとする敵が全滅)。壁色の明化に使う。 */
+export function clearedChambers(
+  visited: ReadonlySet<number>,
+  beasts: readonly Beast[],
+): Set<number> {
+  const out = new Set(visited);
+  for (const b of beasts) {
+    if (b.alive) out.delete(b.homeChamber);
+  }
+  return out;
+}
+
 // --- ストア本体 -------------------------------------------------------------------
 
 export const useRogue = create<RogueState>((set, get) => {
@@ -210,9 +232,10 @@ export const useRogue = create<RogueState>((set, get) => {
     if (grew) set({ discoveredRev: get().discoveredRev + 1 });
   }
 
-  /** 新しく生成された広間に敵と宝を湧かせる。 */
+  /** 新しく生成された広間に敵と宝を湧かせる(セル→広間対応の登録も担う)。 */
   function populate(ch: Chamber): void {
-    const { dungeon, beasts, items } = get();
+    const { dungeon, beasts, items, cellChamber } = get();
+    for (const k of ch.cells) cellChamber.set(k, ch.id);
     const depth = Math.max(0, depthOf(ch.center));
     const spots = ch.cells.filter((k) => k !== cellKey(ch.center));
     const takeSpot = (): Cell | null => {
@@ -231,6 +254,7 @@ export const useRogue = create<RogueState>((set, get) => {
         pos,
         hp: def.hp,
         home: ch.center,
+        homeChamber: ch.id,
         layerFloor: homeL - def.vBelow,
         layerCeil: homeL + def.vAbove,
         awake: false,
@@ -276,6 +300,47 @@ export const useRogue = create<RogueState>((set, get) => {
 
   function refreshReach(): void {
     set({ reach: computeReach() });
+  }
+
+  /**
+   * 発見済み空洞を通る任意長の最短経路(生きた敵のセルは避ける)。
+   * [現在地, ..., 目的地] を返す。到達不能なら null。
+   */
+  function findPath(to: Cell): Cell[] | null {
+    const { dungeon, discovered, beasts, player } = get();
+    const goal = cellKey(to);
+    const start = cellKey(player.pos);
+    if (goal === start) return null;
+    if (!dungeon.open.has(goal) || !discovered.has(goal)) return null;
+    const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
+    if (occupied.has(goal)) return null;
+    const parent = new Map<CellKey, CellKey>();
+    const seen = new Set<CellKey>([start]);
+    const queue: Cell[] = [player.pos];
+    let guard = 0;
+    while (queue.length > 0 && guard++ < 6000) {
+      const c = queue.shift()!;
+      const ck = cellKey(c);
+      for (const o of OFFSETS) {
+        const n: Cell = [c[0] + o[0], c[1] + o[1], c[2] + o[2]];
+        const nk = cellKey(n);
+        if (seen.has(nk)) continue;
+        if (!dungeon.open.has(nk) || !discovered.has(nk) || occupied.has(nk)) continue;
+        seen.add(nk);
+        parent.set(nk, ck);
+        if (nk === goal) {
+          const path: Cell[] = [n];
+          let k = nk;
+          while (k !== start) {
+            k = parent.get(k)!;
+            path.unshift(keyToCell(k));
+          }
+          return path;
+        }
+        queue.push(n);
+      }
+    }
+    return null;
   }
 
   /** parent 木から経路を復元([現在地, ..., 目的地])。 */
@@ -395,7 +460,7 @@ export const useRogue = create<RogueState>((set, get) => {
     set({ turn });
   }
 
-  /** プレイヤーを隣へ1歩(発見・拡張・拾得込み)。 */
+  /** プレイヤーを隣へ1歩(発見・拡張・拾得・訪問記録込み)。 */
   function stepPlayer(next: Cell): void {
     const { player, dungeon, items } = get();
     animateUnit(PLAYER_ID, [player.pos, next]);
@@ -407,6 +472,12 @@ export const useRogue = create<RogueState>((set, get) => {
       maxDepth: Math.max(get().maxDepth, depthOf(next)),
     });
     discover();
+    // 広間の訪問記録(壁色の変化キー)。
+    const chId = get().cellChamber.get(cellKey(next));
+    if (chId !== undefined && !get().visitedChambers.has(chId)) {
+      get().visitedChambers.add(chId);
+      set({ exploreRev: get().exploreRev + 1 });
+    }
     // 生成: スタブ終端に近づいたら次の広間。
     const grown = maybeExpand(dungeon, next, EXPAND_R);
     if (grown.length > 0) {
@@ -487,6 +558,11 @@ export const useRogue = create<RogueState>((set, get) => {
     pushFx({ kind: 'death', at: b.pos, dur: 700 });
     sfx.play('death');
     pushLog(`${BEASTS[b.kind].name} を倒した!`);
+    // ホーム広間の掃討判定(壁色の明化キー)。
+    if (!get().beasts.some((x) => x.alive && x.id !== b.id && x.homeChamber === b.homeChamber)) {
+      if (get().visitedChambers.has(b.homeChamber)) pushLog('この空間は静かになった…');
+      set({ exploreRev: get().exploreRev + 1 });
+    }
     // たまに戦利品を落とす。
     if (rand() < 0.3) {
       const drop = lootTable(Math.max(1, depthOf(b.pos)), rand)[0];
@@ -533,6 +609,7 @@ export const useRogue = create<RogueState>((set, get) => {
     | 'seed' | 'dungeon' | 'discovered' | 'discoveredRev' | 'player' | 'beasts' | 'items'
     | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'focus' | 'log' | 'fx'
+    | 'cellChamber' | 'visitedChambers' | 'exploreRev'
   > {
     clearUnitAnims();
     runSeq++;
@@ -543,11 +620,16 @@ export const useRogue = create<RogueState>((set, get) => {
     const entrance = dungeon.chambers[0];
     const spot = entrance.cells.find((k) => k !== cellKey(entrance.center));
     const items: GroundItem[] = spot ? [{ id: itemSeq++, item: 'potion', pos: keyToCell(spot) }] : [];
+    const cellChamber = new Map<CellKey, number>();
+    for (const k of entrance.cells) cellChamber.set(k, entrance.id);
     return {
       seed,
       dungeon,
       discovered: new Set<CellKey>(),
       discoveredRev: 0,
+      cellChamber,
+      visitedChambers: new Set<number>([entrance.id]),
+      exploreRev: 0,
       player: {
         pos: [0, 0, 0],
         hp: 24,
@@ -674,6 +756,18 @@ export const useRogue = create<RogueState>((set, get) => {
       beastsTurn();
       endTurn();
       refreshReach();
+    },
+
+    travelTo: (c) => {
+      const s = get();
+      if (s.phase !== 'play' || s.busy || s.uiMode === 'throw') return;
+      const path = findPath(c);
+      if (!path) {
+        pushLog('そこへは辿り着けない');
+        return;
+      }
+      sfx.play('select');
+      void walkPath(path);
     },
 
     cancelThrow: () => {

@@ -245,6 +245,26 @@
 /* --- rogue: スコア表示(死亡オーバーレイ) --- */
 .hud-score { font-size: 18px; color: #e2e8f0; letter-spacing: 0.08em; }
 
+/* --- rogue: 探索バブル(アイテム/通路入り口。クリックでファストトラベル) --- */
+.hud-bubble {
+  font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', system-ui, sans-serif;
+  font-size: 11px;
+  color: #e2e8f0;
+  background: rgba(15, 12, 40, 0.78);
+  border: 1px solid #6d6ab8;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  transition: background 0.15s;
+}
+.hud-bubble:hover { background: rgba(60, 52, 120, 0.9); }
+.hud-bubble b { margin-left: 2px; }
+.hud-bubble.item { border-color: #d9a441; color: #fde68a; }
+.hud-bubble.passage { border-color: #22d3ee; color: #a5f3fc; }
+
 /* --- ダメージポップアップ（Effects の Html） --- */
 .fx-popup {
   font-family: 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;

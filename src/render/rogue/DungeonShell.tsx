@@ -26,13 +26,17 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../../model/fcc';
-import { useRogue, ROGUE_S } from '../../state/rogue';
+import { useRogue, clearedChambers, ROGUE_S } from '../../state/rogue';
 import { view } from '../../state/view';
 import { RD_FACES, RD_VERTICES } from '../rd';
 import { currentFocusGrid } from './rogueFocus';
 
 const ROCK_SHALLOW = new THREE.Color('#7a6a55');
 const ROCK_DEEP = new THREE.Color('#3a3452');
+/** 訪問済みの広間の壁の色味(青紫寄りに寄せて「来たことがある」を示す)。 */
+const VISITED_TINT = new THREE.Color('#7d88c9');
+/** 掃討済み(敵全滅)の広間の壁の色味(明るい土色に寄せて「安全」を示す)。 */
+const CLEARED_TINT = new THREE.Color('#cdbb96');
 /** 切断面(岩の内部)の土色。 */
 const CUT_COLOR = '#5c422e';
 /** 背景(未発見の土の中)の色。RogueScene の背景・霧と揃える。 */
@@ -121,12 +125,16 @@ const ORIENTED_FACES: { off: Cell; verts: [Cell, Cell, Cell, Cell] }[] = OFFSETS
 /**
  * 空洞の内表面メッシュを構築(位置+頂点色、フラット法線)。
  * 発見済みセル c と「発見済み空洞でない」隣 n の間の菱形を、法線が空洞側(c 側)を
- * 向くように張る(ORIENTED_FACES は c→n 向きなので巻きを反転)。色は岩セル n 由来。
+ * 向くように張る(ORIENTED_FACES は c→n 向きなので巻きを反転)。色は岩セル n 由来に、
+ * 空洞側セル c の属する広間の探索状態(訪問済み=青紫 / 掃討済み=明るい土色)を重ねる。
  * 発見済み空洞の連結領域を囲む閉曲面になる(土の外側の面は存在しない)。
  */
 function buildShellGeometry(
   open: Set<CellKey>,
   discovered: Set<CellKey>,
+  cellChamber: ReadonlyMap<CellKey, number>,
+  visited: ReadonlySet<number>,
+  cleared: ReadonlySet<number>,
   S: number,
 ): THREE.BufferGeometry {
   const pos: number[] = [];
@@ -134,6 +142,7 @@ function buildShellGeometry(
   const c3 = new THREE.Color();
   for (const k of discovered) {
     const c = keyToCell(k);
+    const chamber = cellChamber.get(k);
     for (const { off, verts } of ORIENTED_FACES) {
       const n: Cell = [c[0] + off[0], c[1] + off[1], c[2] + off[2]];
       const nk = `${n[0]},${n[1]},${n[2]}`;
@@ -141,6 +150,11 @@ function buildShellGeometry(
       const t = Math.min(1, Math.max(0, -layer(n) / 26));
       c3.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
       c3.multiplyScalar(0.82 + 0.36 * hash01(n));
+      if (chamber !== undefined && cleared.has(chamber)) {
+        c3.lerp(CLEARED_TINT, 0.5); // 掃討済み: 明るく安全な色へ
+      } else if (chamber !== undefined && visited.has(chamber)) {
+        c3.lerp(VISITED_TINT, 0.3); // 訪問済み(敵が残る): 青紫寄り
+      }
       // 巻き反転 [0,3,2,1] で法線を -off(空洞側)へ。
       const q = [verts[0], verts[3], verts[2], verts[1]];
       const w = q.map((v) => worldPos(c[0] + v[0], c[1] + v[1], c[2] + v[2], S));
@@ -191,11 +205,21 @@ export function DungeonShell() {
     });
   }, [hasStencil]);
 
+  const exploreRev = useRogue((s) => s.exploreRev);
   const geom = useMemo(() => {
-    const { dungeon, discovered } = useRogue.getState();
-    return buildShellGeometry(dungeon.open, discovered, ROGUE_S);
-    // discoveredRev が唯一の変更検知キー(dungeon/discovered は in-place 更新)。
-  }, [discoveredRev]);
+    const s = useRogue.getState();
+    const cleared = clearedChambers(s.visitedChambers, s.beasts);
+    return buildShellGeometry(
+      s.dungeon.open,
+      s.discovered,
+      s.cellChamber,
+      s.visitedChambers,
+      cleared,
+      ROGUE_S,
+    );
+    // 変更検知キー: discoveredRev(掘削・発見)+ exploreRev(訪問・掃討)。
+    // dungeon/discovered/visited は in-place 更新のため rev で追う。
+  }, [discoveredRev, exploreRev]);
   useEffect(() => () => geom.dispose(), [geom]);
 
   // カット平面の更新。「平面よりカメラ側」(n·p + c < 0)が描画されない。

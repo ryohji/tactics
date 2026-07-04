@@ -20,6 +20,8 @@ export interface Stub {
   id: number;
   from: number;
   exit: Cell;
+  /** 通路の入り口(広間の縁を出た最初のセル)。探索バブルの表示位置。 */
+  mouth: Cell;
   used: boolean;
 }
 
@@ -45,6 +47,18 @@ export function adjacent(a: Cell, b: Cell): boolean {
   const dy = a[1] - b[1];
   const dz = a[2] - b[2];
   return dx * dx + dy * dy + dz * dz === 2;
+}
+
+/**
+ * FCC 格子の最短歩数(障害物なし)。12近傍の1歩は2成分を±1する(和は偶数を保つ)ので、
+ * max(各成分の絶対値, 成分絶対値和の半分) が下限かつ達成可能
+ * (マンハッタン距離の FCC 版。両引数が正規セルなら整数になる)。
+ */
+export function stepDist(a: Cell, b: Cell): number {
+  const dx = Math.abs(a[0] - b[0]);
+  const dy = Math.abs(a[1] - b[1]);
+  const dz = Math.abs(a[2] - b[2]);
+  return Math.max(dx, dy, dz, (dx + dy + dz) / 2);
 }
 
 /** seed 付き LCG。 */
@@ -86,7 +100,8 @@ function carveChamber(dg: Dungeon, center: Cell, r: number): CellKey[] {
 
 /**
  * start から方向 dir(ワールド単位ベクトル)へ長さ len の通路を掘る。
- * 各歩で目標点へ最も近づく近傍を選ぶ(確率 0.35 で次点=蛇行)。終端セルを返す。
+ * 各歩で目標点へ最も近づく近傍を選ぶ(確率 0.35 で次点=蛇行)。
+ * 終端セルと、start から mouthR を最初に越えたセル(=通路の入り口)を返す。
  * 注: かつて「確率 0.3 で脇を1胞広げる」処理があったが、開口1面だけの壁内ポケット
  * (見た目は壁なのに歩けて、切断時はセル形の穴に見える)を量産したため撤去した。
  */
@@ -95,10 +110,12 @@ function carveTunnel(
   start: Cell,
   dir: { x: number; y: number; z: number },
   len: number,
-): Cell {
+  mouthR: number,
+): { exit: Cell; mouth: Cell } {
   const s = worldPos(start[0], start[1], start[2], 1);
   const goal = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
   let cur = start;
+  let mouth: Cell | null = null;
   const maxSteps = Math.ceil(len) + 8;
   for (let i = 0; i < maxSteps; i++) {
     // 目標への距離が近い順に近傍を2つ選ぶ。
@@ -122,10 +139,11 @@ function carveTunnel(
     }
     cur = dg.rng() < 0.35 && second ? second : best!;
     dg.open.add(cellKey(cur));
+    if (mouth === null && distW(start, cur) > mouthR) mouth = cur;
     if (Math.min(bd, sd) < 1.0) break;
   }
   dg.rev++;
-  return cur;
+  return { exit: cur, mouth: mouth ?? cur };
 }
 
 /** 広間から 2〜3 本の通路を掘り、終端をスタブ登録する(少なくとも1本は下向き)。 */
@@ -143,10 +161,10 @@ function spawnStubs(dg: Dungeon, ch: Chamber): void {
       z: Math.cos(el) * Math.sin(az),
     };
     const len = ch.r + 7 + dg.rng() * 7;
-    const exit = carveTunnel(dg, ch.center, dir, len);
+    const { exit, mouth } = carveTunnel(dg, ch.center, dir, len, ch.r + 1);
     // 壁に沿って戻ってきた等で広間の縁に留まった通路はスタブにしない(掘った跡は残る)。
     if (distW(exit, ch.center) < ch.r + 3) continue;
-    dg.stubs.push({ id: dg.stubs.length, from: ch.id, exit, used: false });
+    dg.stubs.push({ id: dg.stubs.length, from: ch.id, exit, mouth, used: false });
   }
 }
 

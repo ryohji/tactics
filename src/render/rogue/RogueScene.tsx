@@ -4,10 +4,12 @@
 import * as THREE from 'three';
 import { ROGUE_S } from '../../state/rogue';
 import { DungeonShell } from './DungeonShell';
+import { LevelFloor } from './LevelFloor';
 import { PlayerView } from './PlayerView';
 import { BeastsView } from './BeastsView';
 import { LootView } from './LootView';
 import { MoveMarkers } from './MoveMarkers';
+import { Bubbles } from './Bubbles';
 import { RogueEffects } from './RogueEffects';
 import { RogueCamera } from './RogueCamera';
 
@@ -26,10 +28,12 @@ export function RogueScene() {
       <directionalLight position={[10, 24, 8]} intensity={0.22} color="#a5b4fc" />
 
       <DungeonShell />
+      <LevelFloor />
       <LootView />
       <BeastsView />
       <PlayerView />
       <MoveMarkers />
+      <Bubbles />
       <RogueEffects />
       <RogueCamera />
     </>

@@ -1,8 +1,9 @@
 // rogue ストアのターン進行テスト。演出の sleep は fake timers で進める(game.test.ts と同型)。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { cellKey, layer, neighbors } from '../model/fcc';
-import { useRogue, seedRogueRng, depthOf, playerAtk, type Beast } from './rogue';
+import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
+import { stepDist } from '../model/dungeon';
+import { useRogue, seedRogueRng, depthOf, playerAtk, clearedChambers, type Beast } from './rogue';
 import { BEASTS } from '../model/beasts';
 
 function player() {
@@ -31,6 +32,7 @@ function placeBeastAdjacent(kind: keyof typeof BEASTS, hp?: number): Beast {
     pos,
     hp: hp ?? def.hp,
     home: pos,
+    homeChamber: 0,
     layerFloor: -999,
     layerCeil: 999,
     awake: true,
@@ -167,6 +169,69 @@ describe('アイテム', () => {
     expect(playerAtk(player())).toBeGreaterThan(atk0);
     expect(player().weapon).toBe('waraxe');
     expect(player().pack.includes('dagger')).toBe(true);
+  });
+});
+
+describe('探索支援(訪問/掃討/ファストトラベル)', () => {
+  it('初期状態で入口の広間が訪問済み', () => {
+    const s = useRogue.getState();
+    expect(s.visitedChambers.has(0)).toBe(true);
+    expect(s.cellChamber.get('0,0,0')).toBe(0);
+  });
+
+  it('広間のセルを踏むと訪問済みになり exploreRev が進む', async () => {
+    const s = useRogue.getState();
+    const n = freeNeighbor();
+    s.cellChamber.set(cellKey(n), 99); // 隣を仮想の広間 99 に見立てる
+    const rev0 = s.exploreRev;
+    s.clickCell(n);
+    await run();
+    expect(useRogue.getState().visitedChambers.has(99)).toBe(true);
+    expect(useRogue.getState().exploreRev).toBeGreaterThan(rev0);
+  });
+
+  it('掃討: ホームの敵を倒すと exploreRev が進み clearedChambers に載る', async () => {
+    const b = placeBeastAdjacent('bat', 1);
+    const rev0 = useRogue.getState().exploreRev;
+    useRogue.getState().clickBeast(b.id);
+    await run();
+    const s = useRogue.getState();
+    expect(s.exploreRev).toBeGreaterThan(rev0);
+    expect(clearedChambers(s.visitedChambers, s.beasts).has(0)).toBe(true);
+  });
+
+  it('生きた敵が残る広間は clearedChambers に載らない', () => {
+    placeBeastAdjacent('bat');
+    const s = useRogue.getState();
+    expect(clearedChambers(s.visitedChambers, s.beasts).has(0)).toBe(false);
+  });
+
+  it('travelTo: 発見済みの遠いセルへ複数ターンかけて自動移動する', async () => {
+    const s = useRogue.getState();
+    // 発見済みで最も遠いセルへ(入口広間に敵は居ないので中断されない)。
+    let far = s.player.pos;
+    let bestD = 0;
+    for (const k of s.discovered) {
+      const c = keyToCell(k);
+      const d = stepDist(s.player.pos, c);
+      if (d > bestD) {
+        bestD = d;
+        far = c;
+      }
+    }
+    expect(bestD).toBeGreaterThan(2); // reach(2歩)の外
+    s.travelTo(far);
+    await run(20000);
+    expect(cellKey(useRogue.getState().player.pos)).toBe(cellKey(far));
+    expect(useRogue.getState().turn).toBeGreaterThanOrEqual(bestD);
+    expect(useRogue.getState().busy).toBe(false);
+  });
+
+  it('travelTo: 未発見セルへは移動しない', () => {
+    const s = useRogue.getState();
+    s.travelTo([99, 99, 0]);
+    expect(s.busy).toBe(false);
+    expect(useRogue.getState().log.at(-1)).toContain('辿り着けない');
   });
 });
 
