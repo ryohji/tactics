@@ -18,8 +18,11 @@ export function App() {
 
   return (
     <>
-      {/* stencil: カットアウェイの断面キャップ用(three r163+ は既定 off) */}
-      <Canvas gl={{ stencil: true }} camera={{ position: [24, 18, 24], fov: 46 }}>
+      {/* stencil: カットアウェイの断面キャップ用(three r163+ は既定 off)。
+          WebGL コンテキストは canvas 生成時にしか属性を変えられないため、key で
+          強制的に作り直す(HMR で生き残った stencil 無しの古いコンテキスト対策。
+          key を変えれば開きっぱなしのタブでも新コンテキストになる)。 */}
+      <Canvas key="gl-stencil-1" gl={{ stencil: true }} camera={{ position: [24, 18, 24], fov: 46 }}>
         <RogueScene />
       </Canvas>
       <RogueHud />

@@ -182,6 +182,15 @@ export function DungeonShell() {
     return ok;
   }, [gl]);
 
+  // 断面が簡易版(裏面塗り)へ退避したことを、console を見ない人にも分かるよう HUD ログへ。
+  useEffect(() => {
+    if (hasStencil) return;
+    const s = useRogue.getState();
+    useRogue.setState({
+      log: [...s.log, '⚠ 断面表示が簡易版です(stencil 無し)。ページを再読み込みしてください。'],
+    });
+  }, [hasStencil]);
+
   const geom = useMemo(() => {
     const { dungeon, discovered } = useRogue.getState();
     return buildShellGeometry(dungeon.open, discovered, ROGUE_S);
