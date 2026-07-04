@@ -86,8 +86,9 @@ function carveChamber(dg: Dungeon, center: Cell, r: number): CellKey[] {
 
 /**
  * start から方向 dir(ワールド単位ベクトル)へ長さ len の通路を掘る。
- * 各歩で目標点へ最も近づく近傍を選ぶ(確率 0.35 で次点=蛇行、確率 0.3 で脇を1胞広げる)。
- * 終端セルを返す。
+ * 各歩で目標点へ最も近づく近傍を選ぶ(確率 0.35 で次点=蛇行)。終端セルを返す。
+ * 注: かつて「確率 0.3 で脇を1胞広げる」処理があったが、開口1面だけの壁内ポケット
+ * (見た目は壁なのに歩けて、切断時はセル形の穴に見える)を量産したため撤去した。
  */
 function carveTunnel(
   dg: Dungeon,
@@ -121,10 +122,6 @@ function carveTunnel(
     }
     cur = dg.rng() < 0.35 && second ? second : best!;
     dg.open.add(cellKey(cur));
-    if (dg.rng() < 0.3) {
-      const o = OFFSETS[Math.floor(dg.rng() * OFFSETS.length)];
-      dg.open.add(cellKey([cur[0] + o[0], cur[1] + o[1], cur[2] + o[2]]));
-    }
     if (Math.min(bd, sd) < 1.0) break;
   }
   dg.rev++;
