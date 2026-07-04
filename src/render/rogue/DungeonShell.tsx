@@ -120,6 +120,22 @@ export function DungeonShell() {
     gl.localClippingEnabled = true;
   }, [gl]);
 
+  // ステンシルバッファの実在確認。無い環境ではステンシルテストが「常に合格」になり
+  // キャップ板が全画面を塗り潰してしまう(WebGL 仕様)ため、キャップを無効化して
+  // 裏面塗りのみに退避する。App の Canvas は gl={{ stencil: true }} を要求しているが、
+  // コンテキスト属性は生成時にしか効かない(HMR で開きっぱなしのタブは古いまま)。
+  const hasStencil = useMemo(() => {
+    const attrs = gl.getContext().getContextAttributes?.();
+    const ok = !!attrs?.stencil;
+    if (!ok) {
+      console.warn(
+        'WebGL コンテキストに stencil バッファがありません。断面キャップを無効化します。' +
+          'ページを再読み込み(ハードリロード)すると有効になります。',
+      );
+    }
+    return ok;
+  }, [gl]);
+
   const geom = useMemo(() => {
     const { dungeon, discovered } = useRogue.getState();
     const shell = new Set<CellKey>();
@@ -175,6 +191,7 @@ export function DungeonShell() {
         <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
       </mesh>
       {/* ステンシル計数: 切断立体の裏面 +1 / 表面 -1(色・深度は書かない) */}
+      {hasStencil && (
       <mesh frustumCulled={false} renderOrder={1}>
         <primitive object={geom} attach="geometry" />
         <meshBasicMaterial
@@ -190,6 +207,8 @@ export function DungeonShell() {
           stencilZPass={THREE.IncrementWrapStencilOp}
         />
       </mesh>
+      )}
+      {hasStencil && (
       <mesh frustumCulled={false} renderOrder={1}>
         <primitive object={geom} attach="geometry" />
         <meshBasicMaterial
@@ -205,7 +224,9 @@ export function DungeonShell() {
           stencilZPass={THREE.DecrementWrapStencilOp}
         />
       </mesh>
+      )}
       {/* キャップ: stencil≠0 のピクセル(=切り口)だけ土色の板が残る */}
+      {hasStencil && (
       <mesh ref={capRef} frustumCulled={false} renderOrder={2}>
         <planeGeometry args={[CAP_SIZE, CAP_SIZE]} />
         <meshBasicMaterial
@@ -219,6 +240,7 @@ export function DungeonShell() {
           stencilZPass={THREE.ReplaceStencilOp}
         />
       </mesh>
+      )}
     </group>
   );
 }

@@ -16,9 +16,10 @@ const S = ROGUE_S;
 export function RogueScene() {
   return (
     <>
-      {/* 土色寄りの闇: カットアウェイの切り口の外=「まだ岩の中」を示唆する */}
-      <color attach="background" args={['#0d0a07']} />
-      <fog attach="fog" args={[new THREE.Color('#0d0a07'), 10 * S, 46 * S]} />
+      {/* 暗い土色の背景・霧: 幾何が何も無い方向(未発見の岩の中)も「土」として読める。
+          断面キャップの明るい土色 → 遠景の暗い土色、の層で奥行きを出す。 */}
+      <color attach="background" args={['#2a1e14']} />
+      <fog attach="fog" args={[new THREE.Color('#2a1e14'), 10 * S, 46 * S]} />
 
       {/* 全暗にはしない(輪郭が読める程度の底上げ)。主光源はたいまつ。 */}
       <ambientLight intensity={0.3} color="#8a7fae" />
