@@ -36,15 +36,46 @@ const ROCK_SHALLOW = new THREE.Color('#7a6a55');
 const ROCK_DEEP = new THREE.Color('#3a3452');
 /** 切断面(岩の内部)の土色。 */
 const CUT_COLOR = '#5c422e';
+/** 背景(未発見の土の中)の色。RogueScene の背景・霧と揃える。 */
+const EARTH_BG = '#2a1e14';
 /** カット平面の注視点からのオフセット(視点寄り)。隣接セルの壁面(√2S/2)より内側に。 */
 const CUT_OFFSET = 0.5 * ROGUE_S;
-/** キャップ板の一辺(視錐台と平面の交差を覆う大きさ。遠方は霧に溶ける)。 */
+/** キャップ板の一辺(視錐台と平面の交差を覆う大きさ)。 */
 const CAP_SIZE = 200 * ROGUE_S;
+/** キャップの放射フェード: 視軸からこの距離までは明るい断面色。 */
+const CAP_R0 = 5 * ROGUE_S;
+/** キャップの放射フェード: この距離で背景色に溶け切る。 */
+const CAP_R1 = 13 * ROGUE_S;
 
 // 全シェルマテリアルで共有するクリッピング平面(毎フレーム更新)。
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6);
 
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+// キャップ用シェーダ: 無限平面は視界の脇や周囲の岩まで切って大面積の断面を作るため、
+// 断面色を視軸中心からの距離でフェードさせる(近く=明るい土色 → 遠く=背景の暗い土色)。
+// 幾何は正確なまま「プレイヤーの周りだけ掘削した」ように読める。
+// 板は視軸上に置かれるので、板ローカルの xy 距離がそのまま視軸からの距離になる。
+const CAP_VERT = /* glsl */ `
+  varying vec2 vPos;
+  void main() {
+    vPos = position.xy;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const CAP_FRAG = /* glsl */ `
+  uniform vec3 uNear;
+  uniform vec3 uFar;
+  uniform float uR0;
+  uniform float uR1;
+  varying vec2 vPos;
+  void main() {
+    float t = smoothstep(uR0, uR1, length(vPos));
+    gl_FragColor = vec4(mix(uNear, uFar, t), 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
 
 /** セル座標の決定的ハッシュ(0..1)。岩肌の色むらに使う。 */
 function hash01(c: Cell): number {
@@ -185,11 +216,15 @@ export function DungeonShell() {
           clippingPlanes={[cutPlane]}
         />
       </mesh>
-      {/* 裏面: 切断で露出した岩の内部の土色(キャップの背後の保険。stencil 不可環境の退路) */}
-      <mesh frustumCulled={false}>
-        <primitive object={geom} attach="geometry" />
-        <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
-      </mesh>
+      {/* 裏面の土色: stencil 不可環境のフォールバック。stencil 有効時はキャップが
+          平面上で必ず先に遮る(内部への視線は平面を岩の中で横切る)ため描かない —
+          描くと遠方の断面までキャップの放射フェードを無視して明るく見えてしまう。 */}
+      {!hasStencil && (
+        <mesh frustumCulled={false}>
+          <primitive object={geom} attach="geometry" />
+          <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
+        </mesh>
+      )}
       {/* ステンシル計数: 切断立体の裏面 +1 / 表面 -1(色・深度は書かない) */}
       {hasStencil && (
       <mesh frustumCulled={false} renderOrder={1}>
@@ -225,12 +260,20 @@ export function DungeonShell() {
         />
       </mesh>
       )}
-      {/* キャップ: stencil≠0 のピクセル(=切り口)だけ土色の板が残る */}
+      {/* キャップ: stencil≠0 のピクセル(=切り口)だけ板が残る。色は視軸からの
+          距離で 明るい断面色→背景色 にフェード(遠くの断面は「暗い土」に沈む)。 */}
       {hasStencil && (
       <mesh ref={capRef} frustumCulled={false} renderOrder={2}>
         <planeGeometry args={[CAP_SIZE, CAP_SIZE]} />
-        <meshBasicMaterial
-          color={CUT_COLOR}
+        <shaderMaterial
+          vertexShader={CAP_VERT}
+          fragmentShader={CAP_FRAG}
+          uniforms={{
+            uNear: { value: new THREE.Color(CUT_COLOR) },
+            uFar: { value: new THREE.Color(EARTH_BG) },
+            uR0: { value: CAP_R0 },
+            uR1: { value: CAP_R1 },
+          }}
           side={THREE.DoubleSide}
           stencilWrite
           stencilRef={0}
