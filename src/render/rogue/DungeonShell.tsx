@@ -1,27 +1,26 @@
-// 洞窟の壁描画(rogue-1)。「発見済みの空洞セルに接する、空洞でない or 未発見のセル」を
-// 岩としてメッシュ化する。RD は空間充填なので壁面は厳密に閉じ、未発見の空洞は壁のまま・
-// 発見と同時に開く(discoveredRev で全再構築。差分更新は先送り)。
+// 洞窟の壁描画(rogue-1)。世界モデルは「無限の土の塊から発見済みの空洞だけが
+// くり抜かれている」。描くのは**空洞の内表面**(発見済みセルと、そうでない隣の間の
+// 境界面)だけで、法線は空洞側(=土の外)を向く。未発見の空洞は面を張らない=
+// 土の中に埋まったまま。発見と同時に開く(discoveredRev で全再構築。差分は先送り)。
 //
-// ジオメトリはブロックのインスタンス描画ではなく「露出面だけをマージした単一メッシュ」。
-// 隣も岩セルなら間の面を出さない。理由(目視フィードバック第2回):
-//   - 隣接ブロック同士の共有面は「Aの表面」と「Bの裏面」が同一平面に重なり、
-//     切断時に Z ファイト(市松模様のちらつき)を起こしていた。マージで重複自体を消す。
-//   - rd.ts の RD_FACES は面ごとに巻き方向が不揃いで、裏返った面が黒く欠けて見えていた。
-//     ここでは各面の法線を「セル→隣」方向と照合して巻きを統一する。
-// 結果として岩塊の境界は水密な閉曲面になり、裏面パス(無陰影の土色)が
-// 「切断で露出した岩の内部」を常に正しく塗る。
+// 当初は「発見済みセルに接する岩セル」をブロック描画していたが、以下の経緯で今の形に:
+//   - 第2回: 隣接ブロック共有面の表裏が同一平面で Z ファイト → 露出面マージの単一メッシュ化。
+//     あわせて rd.ts の RD_FACES の巻き不揃い(12面中6面が逆)を世界空間の法線照合で統一。
+//   - 第6回: 殻(厚さ1セル)の外側の黒い面や背景が断面の隙間から覗いて不自然
+//     → 殻の外側の面を全廃し「内表面のみ+無限の土」モデルへ。土の中身はステンシル
+//     キャップが塗るので、面はくり抜きの境界にだけあればよい。
 //
 // カットアウェイ: 毎フレーム「視線に直交し、注視点より CUT_OFFSET 視点寄り」の平面を
 // 更新し clippingPlanes に渡す。オフセットは隣接セルの壁面(中心から ~0.71 格子 =
 // √2S/2 ≈ 1.41)より内側の 0.5S にする。これより大きいと、壁際に立つプレイヤーを
 // 壁越しに見たとき背後の壁が切れずに視界を塞ぐ。
 //
-// 断面はステンシルキャップで塞ぐ(目視フィードバック第3回)。裏面パスだけの近似では、
-// 「平面の手前側で壁の厚みを視線が丸ごと通過する」箇所は表も裏も両方クリップされて
-// 背景が透けていた(=穴あき。メッシュ自体は有向辺対の検査で水密・巻き整合を確認済み)。
-// three.js 公式 clipping_stencil の手法: 切断立体の裏面で stencil を+1、表面で-1 すると
-// 「切り口が見えているピクセル」だけ stencil≠0 になる。そこへ切断平面上の大きな板を
-// stencil テスト付きで描けば、断面がちょうど土色で塗り潰される(水密メッシュが前提)。
+// 断面はステンシルキャップで塞ぐ(three.js 公式 clipping_stencil の手法)。
+// 計数対象の立体 = 空洞内表面 + 全体を包む巨大球(土の外周)。この2つで
+// 「無限の土 ∖ 発見済み空洞」という閉じた立体の境界になる。切断立体の裏面で
+// stencil +1・表面で -1 すると「平面の横断点が土の中にあるピクセル」だけ ≠0 になり、
+// そこへ平面上の大板を描けば、断面は**空洞の断面だけ穴の開いた塗り潰しの土**になる。
+// 未発見の空洞は計数に現れない=土として塗られる(未知は土)。
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -46,6 +45,8 @@ const CAP_SIZE = 200 * ROGUE_S;
 const CAP_R0 = 5 * ROGUE_S;
 /** キャップの放射フェード: この距離で背景色に溶け切る。 */
 const CAP_R1 = 13 * ROGUE_S;
+/** ステンシル計数用の「土の外周」球の半径。注視点に追従(カメラ far=1000 未満に収める)。 */
+const EARTH_R = 300 * ROGUE_S;
 
 // 全シェルマテリアルで共有するクリッピング平面(毎フレーム更新)。
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6);
@@ -115,20 +116,32 @@ const ORIENTED_FACES: { off: Cell; verts: [Cell, Cell, Cell, Cell] }[] = OFFSETS
   return { off, verts };
 });
 
-/** 露出面だけの水密メッシュを構築(位置+頂点色、フラット法線)。 */
-function buildShellGeometry(shellSet: Set<CellKey>, S: number): THREE.BufferGeometry {
+/**
+ * 空洞の内表面メッシュを構築(位置+頂点色、フラット法線)。
+ * 発見済みセル c と「発見済み空洞でない」隣 n の間の菱形を、法線が空洞側(c 側)を
+ * 向くように張る(ORIENTED_FACES は c→n 向きなので巻きを反転)。色は岩セル n 由来。
+ * 発見済み空洞の連結領域を囲む閉曲面になる(土の外側の面は存在しない)。
+ */
+function buildShellGeometry(
+  open: Set<CellKey>,
+  discovered: Set<CellKey>,
+  S: number,
+): THREE.BufferGeometry {
   const pos: number[] = [];
   const col: number[] = [];
   const c3 = new THREE.Color();
-  for (const k of shellSet) {
+  for (const k of discovered) {
     const c = keyToCell(k);
-    const t = Math.min(1, Math.max(0, -layer(c) / 26));
-    c3.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
-    c3.multiplyScalar(0.82 + 0.36 * hash01(c));
     for (const { off, verts } of ORIENTED_FACES) {
-      // 隣も描画対象の岩なら共有面は完全に隠れる(かつ Z ファイトの元)ので出さない。
-      if (shellSet.has(`${c[0] + off[0]},${c[1] + off[1]},${c[2] + off[2]}`)) continue;
-      const w = verts.map((v) => worldPos(c[0] + v[0], c[1] + v[1], c[2] + v[2], S));
+      const n: Cell = [c[0] + off[0], c[1] + off[1], c[2] + off[2]];
+      const nk = `${n[0]},${n[1]},${n[2]}`;
+      if (open.has(nk) && discovered.has(nk)) continue; // 両側とも空洞: 境界でない
+      const t = Math.min(1, Math.max(0, -layer(n) / 26));
+      c3.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
+      c3.multiplyScalar(0.82 + 0.36 * hash01(n));
+      // 巻き反転 [0,3,2,1] で法線を -off(空洞側)へ。
+      const q = [verts[0], verts[3], verts[2], verts[1]];
+      const w = q.map((v) => worldPos(c[0] + v[0], c[1] + v[1], c[2] + v[2], S));
       for (const i of [0, 1, 2, 0, 2, 3]) {
         pos.push(w[i].x, w[i].y, w[i].z);
         col.push(c3.r, c3.g, c3.b);
@@ -169,15 +182,7 @@ export function DungeonShell() {
 
   const geom = useMemo(() => {
     const { dungeon, discovered } = useRogue.getState();
-    const shell = new Set<CellKey>();
-    for (const k of discovered) {
-      const c = keyToCell(k);
-      for (const o of OFFSETS) {
-        const nk = `${c[0] + o[0]},${c[1] + o[1]},${c[2] + o[2]}`;
-        if (!dungeon.open.has(nk) || !discovered.has(nk)) shell.add(nk);
-      }
-    }
-    return buildShellGeometry(shell, ROGUE_S);
+    return buildShellGeometry(dungeon.open, discovered, ROGUE_S);
     // discoveredRev が唯一の変更検知キー(dungeon/discovered は in-place 更新)。
   }, [discoveredRev]);
   useEffect(() => () => geom.dispose(), [geom]);
@@ -186,6 +191,7 @@ export function DungeonShell() {
   // 「平面よりカメラ側」(n·p + c < 0)が描画されない。キャップ板は平面に一致させ、
   // 共面 Z ファイトを避けて僅かにカメラ側へ寄せる。
   const capRef = useRef<THREE.Mesh>(null);
+  const sphereRef = useRef<THREE.Mesh>(null);
   const tmpP = useRef(new THREE.Vector3());
   const tmpN = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
@@ -193,6 +199,7 @@ export function DungeonShell() {
     const g = free && view.base ? view.base : currentFocusGrid();
     const w = worldPos(g[0], g[1], g[2], ROGUE_S);
     const p = tmpP.current.set(w.x, w.y, w.z);
+    if (sphereRef.current) sphereRef.current.position.copy(p); // 外周球は注視点に追従
     const n = tmpN.current.copy(p).sub(camera.position).normalize();
     p.addScaledVector(n, -CUT_OFFSET);
     cutPlane.setFromNormalAndCoplanarPoint(n, p);
@@ -257,6 +264,26 @@ export function DungeonShell() {
           stencilFail={THREE.DecrementWrapStencilOp}
           stencilZFail={THREE.DecrementWrapStencilOp}
           stencilZPass={THREE.DecrementWrapStencilOp}
+        />
+      </mesh>
+      )}
+      {/* 土の外周球: 計数立体を「無限の土 ∖ 空洞」として閉じる。空洞に入らない視線は
+          この球の裏面で +1 され、平面横断点が土の中なら stencil≠0 → 土として塗られる。
+          カメラは常に球の内側なので表面は描画されない(見た目には現れない)。 */}
+      {hasStencil && (
+      <mesh ref={sphereRef} frustumCulled={false} renderOrder={1}>
+        <sphereGeometry args={[EARTH_R, 24, 16]} />
+        <meshBasicMaterial
+          colorWrite={false}
+          depthWrite={false}
+          depthTest={false}
+          side={THREE.BackSide}
+          clippingPlanes={[cutPlane]}
+          stencilWrite
+          stencilFunc={THREE.AlwaysStencilFunc}
+          stencilFail={THREE.IncrementWrapStencilOp}
+          stencilZFail={THREE.IncrementWrapStencilOp}
+          stencilZPass={THREE.IncrementWrapStencilOp}
         />
       </mesh>
       )}
