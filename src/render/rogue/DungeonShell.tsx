@@ -39,6 +39,8 @@ const CUT_COLOR = '#5c422e';
 const EARTH_BG = '#2a1e14';
 /** カット平面の注視点からのオフセット(視点寄り)。隣接セルの壁面(√2S/2)より内側に。 */
 const CUT_OFFSET = 0.5 * ROGUE_S;
+/** 俯瞰時の水平カットの高さ(プレイヤー中心から上)。同層セルの上端(≈0.87S)より上に。 */
+const H_CUT = 1.3 * ROGUE_S;
 /** キャップ板の一辺(視錐台と平面の交差を覆う大きさ)。 */
 const CAP_SIZE = 200 * ROGUE_S;
 /** キャップの放射フェード: 視軸からこの距離までは明るい断面色。 */
@@ -187,9 +189,14 @@ export function DungeonShell() {
   }, [discoveredRev]);
   useEffect(() => () => geom.dispose(), [geom]);
 
-  // カット平面の更新: 法線=視線方向、通過点=注視点から視点側へ CUT_OFFSET 戻した点。
-  // 「平面よりカメラ側」(n·p + c < 0)が描画されない。キャップ板は平面に一致させ、
-  // 共面 Z ファイトを避けて僅かにカメラ側へ寄せる。
+  // カット平面の更新。「平面よりカメラ側」(n·p + c < 0)が描画されない。
+  // 視線直交のままだと、俯瞰時に平面がほぼ水平になってプレイヤー頭上すれすれに浮き、
+  // 周囲の床セルの上端を薄切りにした小さな菱形断面が散らばって「不定形の穴」に見える
+  // (目視フィードバック第8回。メッシュは水密検査済みで、断面自体は正しい)。
+  // そこで俯角に応じて法線を真下へブレンドする:
+  //   水平視 → 視線直交・注視点の 0.5S 手前(壁抜き)
+  //   俯瞰   → 水平カット・プレイヤー頭上 H_CUT(屋根を外した見え方。断面高さが揃う)
+  // どちらもカメラは常に切除側に居るので、ステンシル計数の前提は崩れない。
   const capRef = useRef<THREE.Mesh>(null);
   const sphereRef = useRef<THREE.Mesh>(null);
   const tmpP = useRef(new THREE.Vector3());
@@ -201,7 +208,12 @@ export function DungeonShell() {
     const p = tmpP.current.set(w.x, w.y, w.z);
     if (sphereRef.current) sphereRef.current.position.copy(p); // 外周球は注視点に追従
     const n = tmpN.current.copy(p).sub(camera.position).normalize();
-    p.addScaledVector(n, -CUT_OFFSET);
+    const t = THREE.MathUtils.smoothstep(-n.y, 0.25, 0.7); // 俯角が深いほど 1
+    n.multiplyScalar(1 - t);
+    n.y -= t;
+    n.normalize();
+    const off = CUT_OFFSET * (1 - t) + H_CUT * t;
+    p.addScaledVector(n, -off);
     cutPlane.setFromNormalAndCoplanarPoint(n, p);
     const cap = capRef.current;
     if (cap) {
