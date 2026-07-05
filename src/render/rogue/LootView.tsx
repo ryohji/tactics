@@ -12,7 +12,7 @@ const S = ROGUE_S;
 
 function ItemMesh({ g }: { g: GroundItem }) {
   const ref = useRef<THREE.Group>(null);
-  const def = ITEMS[g.item];
+  const def = ITEMS[g.stack.item];
   const w = worldPos(g.pos[0], g.pos[1], g.pos[2], S);
 
   useFrame(({ clock }) => {
@@ -45,6 +45,30 @@ function ItemMesh({ g }: { g: GroundItem }) {
         <mesh>
           <sphereGeometry args={[0.11 * S, 10, 10]} />
           <meshStandardMaterial color="#f87171" emissive="#dc2626" emissiveIntensity={0.9} transparent opacity={0.9} />
+        </mesh>
+      );
+      break;
+    case 'trap':
+      shape = (
+        <mesh rotation={[Math.PI, 0, 0]}>
+          <coneGeometry args={[0.13 * S, 0.18 * S, 5]} />
+          <meshStandardMaterial color="#b45309" emissive="#92400e" emissiveIntensity={0.6} roughness={0.6} />
+        </mesh>
+      );
+      break;
+    case 'turret':
+      shape = (
+        <mesh>
+          <cylinderGeometry args={[0.09 * S, 0.12 * S, 0.22 * S, 8]} />
+          <meshStandardMaterial color="#7dd3fc" emissive="#38bdf8" emissiveIntensity={0.7} metalness={0.6} roughness={0.4} />
+        </mesh>
+      );
+      break;
+    case 'decoy':
+      shape = (
+        <mesh>
+          <capsuleGeometry args={[0.08 * S, 0.16 * S, 4, 8]} />
+          <meshStandardMaterial color="#c9b37a" emissive="#8a7a52" emissiveIntensity={0.5} roughness={0.9} />
         </mesh>
       );
       break;

@@ -6,10 +6,10 @@
 //   右下: ログ / 下中央: 待機・投擲キャンセル
 //   死亡: スコアオーバーレイ
 
-import { useRogue, playerAtk, playerDef, depthOf } from '../state/rogue';
+import { useRogue, playerAtk, playerDef, depthOf, LIGHT } from '../state/rogue';
 import { stepDist } from '../model/dungeon';
 import { BEASTS } from '../model/beasts';
-import { ITEMS, type ItemId } from '../model/loot';
+import { ITEMS, itemLabel, statLabel, type ItemStack } from '../model/loot';
 import { resetView } from '../state/view';
 import './hud.css';
 
@@ -37,8 +37,12 @@ function StatusPanel() {
         <span>討伐<b>{kills}</b></span>
       </div>
       <div className="hud-equip">
-        <span>武器: {player.weapon ? ITEMS[player.weapon].name : 'なし'}</span>
-        <span>防具: {player.armor ? ITEMS[player.armor].name : 'なし'}</span>
+        <span>
+          武器: {player.weapon ? `${itemLabel(player.weapon)}(${statLabel(player.weapon)})` : 'なし'}
+        </span>
+        <span>
+          防具: {player.armor ? `${itemLabel(player.armor)}(${statLabel(player.armor)})` : 'なし'}
+        </span>
       </div>
     </div>
   );
@@ -82,40 +86,58 @@ function SystemButtons() {
 function PackPanel() {
   const pack = useRogue((s) => s.player.pack);
   const useItem = useRogue((s) => s.useItem);
+  const mergeItem = useRogue((s) => s.mergeItem);
   const uiMode = useRogue((s) => s.uiMode);
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const mapMode = useRogue((s) => s.mapMode);
   if (mapMode) return null;
 
-  // 同種をまとめて表示(クリックは最初の1個に対して)。
-  const groups: { item: ItemId; count: number; index: number }[] = [];
-  pack.forEach((item, index) => {
-    const g = groups.find((x) => x.item === item);
+  // 同種・同品質をまとめて表示(クリックは最初の1個に対して)。
+  const groups: { stack: ItemStack; count: number; index: number }[] = [];
+  pack.forEach((stack, index) => {
+    const g = groups.find((x) => x.stack.item === stack.item && x.stack.q === stack.q);
     if (g) g.count++;
-    else groups.push({ item, count: 1, index });
+    else groups.push({ stack, count: 1, index });
   });
+  const locked = phase !== 'play' || busy;
 
   return (
     <div className="hud-pack">
       <h4>所持品</h4>
       {groups.length === 0 && <div className="empty">(なし)</div>}
       {groups.map((g) => {
-        const def = ITEMS[g.item];
+        const def = ITEMS[g.stack.item];
         const throwing = def.kind === 'thrown' && uiMode === 'throw';
+        const verb =
+          def.kind === 'potion'
+            ? '飲む'
+            : def.kind === 'thrown'
+              ? throwing
+                ? '解除'
+                : '投げる'
+              : def.kind === 'weapon' || def.kind === 'armor'
+                ? '装備'
+                : '設置';
         return (
-          <button
-            key={g.item}
-            className={throwing ? 'active' : ''}
-            disabled={phase !== 'play' || busy}
-            onClick={() => useItem(g.index)}
-          >
-            {def.name}
-            {g.count > 1 ? ` ×${g.count}` : ''}
-            <span className="use">
-              {def.kind === 'potion' ? '飲む' : def.kind === 'thrown' ? (throwing ? '解除' : '投げる') : '装備'}
-            </span>
-          </button>
+          <div className="pack-row" key={`${g.stack.item}:${g.stack.q}`}>
+            <button
+              className={throwing ? 'active' : ''}
+              disabled={locked}
+              onClick={() => useItem(g.index)}
+            >
+              {itemLabel(g.stack)}
+              {g.count > 1 ? ` ×${g.count}` : ''}
+              <span className="use">
+                {statLabel(g.stack)}·{verb}
+              </span>
+            </button>
+            {g.count >= 2 && (
+              <button className="merge" disabled={locked} onClick={() => mergeItem(g.index)}>
+                合成
+              </button>
+            )}
+          </div>
         );
       })}
     </div>
@@ -166,12 +188,28 @@ function ActionBar() {
       ) : (
         <>
           <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃 / TAB=敵に視線</span>
+          <LightButton busy={busy} />
           <button disabled={busy} onClick={wait}>
             待機
           </button>
         </>
       )}
     </div>
+  );
+}
+
+/** 明かりの段階(視界・回復・敵の気づきやすさのトレードオフ)。 */
+function LightButton({ busy }: { busy: boolean }) {
+  const lightLevel = useRogue((s) => s.lightLevel);
+  const cycleLight = useRogue((s) => s.cycleLight);
+  return (
+    <button
+      disabled={busy}
+      onClick={cycleLight}
+      title="明かり: 広げるほど視界と回復が増すが、敵に気づかれやすくなる"
+    >
+      🔥{LIGHT[lightLevel].name}
+    </button>
   );
 }
 

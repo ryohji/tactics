@@ -10,7 +10,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { cellKey, neighbors, worldPos, type Cell } from '../../model/fcc';
 import { stepDist } from '../../model/dungeon';
-import { ITEMS } from '../../model/loot';
+import { itemLabel } from '../../model/loot';
 import { BEASTS } from '../../model/beasts';
 import { useRogue, ROGUE_S } from '../../state/rogue';
 
@@ -74,7 +74,7 @@ function GameBubbles() {
   return (
     <>
       {itemBubbles.map((i) => (
-        <Bubble key={`i${i.id}`} target={i.pos} label={ITEMS[i.item].name} kind="item" />
+        <Bubble key={`i${i.id}`} target={i.pos} label={itemLabel(i.stack)} kind="item" />
       ))}
       {passages.map((st) => (
         <Bubble
@@ -162,7 +162,7 @@ function MapBubbles() {
         <Bubble
           key={`i${it.id}`}
           target={it.pos}
-          label={ITEMS[it.item].name}
+          label={itemLabel(it.stack)}
           kind="item"
           lift={liftOf('item', i)}
           onClick={() => fetchItem(it.pos)}

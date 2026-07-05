@@ -14,7 +14,11 @@ export function PlayerView() {
   const pos = useRogue((s) => s.player.pos);
   const alive = useRogue((s) => s.phase === 'play');
   const mapMode = useRogue((s) => s.mapMode);
+  const lightLevel = useRogue((s) => s.lightLevel);
   const ref = useRef<THREE.Group>(null);
+  // 明かりの段階でたいまつの届く距離と強さを変える(ゲームルールの視界と揃える)。
+  const lightDist = [7, 11, 15][lightLevel] * S;
+  const lightInt = [2.2, 3.2, 4.4][lightLevel];
 
   useFrame(({ clock }) => {
     const g = ref.current;
@@ -29,8 +33,8 @@ export function PlayerView() {
       {/* たいまつの明かり(探索の可視域とゲーム内の「発見」を感覚的に一致させる) */}
       <pointLight
         color="#ffb469"
-        intensity={3.2}
-        distance={11 * S}
+        intensity={lightInt}
+        distance={lightDist}
         decay={1.4}
         position={[0, 0.5 * S, 0]}
       />

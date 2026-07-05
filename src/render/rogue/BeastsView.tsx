@@ -158,9 +158,30 @@ function BeastItem({ b }: { b: Beast }) {
           </mesh>
         </Billboard>
       )}
+      {/* 状態異常リング(延焼=橙 / 混乱=桃 / 恐慌=藤 / 昏睡=青) */}
+      {b.status && (
+        <Billboard position={[0, 0.3 * S, 0]}>
+          <mesh>
+            <torusGeometry args={[0.34 * S, 0.045 * S, 8, 24]} />
+            <meshBasicMaterial
+              color={STATUS_COLOR[b.status.kind]}
+              transparent
+              opacity={0.85}
+              depthWrite={false}
+            />
+          </mesh>
+        </Billboard>
+      )}
     </group>
   );
 }
+
+const STATUS_COLOR: Record<string, string> = {
+  burn: '#fb923c',
+  confuse: '#f472b6',
+  fear: '#a78bfa',
+  sleep: '#60a5fa',
+};
 
 export function BeastsView() {
   const beasts = useRogue((s) => s.beasts);

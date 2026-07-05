@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
+import type { ItemStack } from '../model/loot';
 import { useRogue, seedRogueRng, depthOf, playerAtk, clearedChambers, gazeAngles, type Beast } from './rogue';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
@@ -38,6 +39,7 @@ function placeBeastAdjacent(kind: keyof typeof BEASTS, hp?: number): Beast {
     layerCeil: 999,
     awake: true,
     alive: true,
+    status: null,
   };
   useRogue.setState({ beasts: [...s.beasts, b] });
   return b;
@@ -139,14 +141,14 @@ describe('戦闘', () => {
   it('投げナイフ: モードに入り射程内の敵へ当てて消費する', async () => {
     const b = placeBeastAdjacent('bat');
     const s = useRogue.getState();
-    const idx = s.player.pack.indexOf('knife');
-    const knives = s.player.pack.filter((i) => i === 'knife').length;
+    const idx = s.player.pack.findIndex((x) => x.item === 'knife');
+    const knives = s.player.pack.filter((x) => x.item === 'knife').length;
     s.useItem(idx);
     expect(useRogue.getState().uiMode).toBe('throw');
     useRogue.getState().clickBeast(b.id);
     await run();
     expect(useRogue.getState().uiMode).toBe('walk');
-    expect(player().pack.filter((i) => i === 'knife').length).toBe(knives - 1);
+    expect(player().pack.filter((x) => x.item === 'knife').length).toBe(knives - 1);
     const after = useRogue.getState().beasts.find((x) => x.id === b.id)!;
     expect(after.hp).toBeLessThan(BEASTS.bat.hp);
   });
@@ -155,21 +157,161 @@ describe('戦闘', () => {
 describe('アイテム', () => {
   it('水薬で回復し1ターン経過する', () => {
     useRogue.setState({ player: { ...player(), hp: 5 } });
-    const idx = player().pack.indexOf('potion');
+    const idx = player().pack.findIndex((x) => x.item === 'potion');
     useRogue.getState().useItem(idx);
     expect(player().hp).toBeGreaterThan(5);
     expect(useRogue.getState().turn).toBe(1);
-    expect(player().pack.includes('potion')).toBe(false);
+    expect(player().pack.some((x) => x.item === 'potion')).toBe(false);
   });
 
   it('武器を拾って構えると攻撃力が上がる(元の武器は所持品へ)', () => {
-    useRogue.setState({ player: { ...player(), pack: [...player().pack, 'waraxe'] } });
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'waraxe', q: 0 }] },
+    });
     const atk0 = playerAtk(player());
-    const idx = player().pack.indexOf('waraxe');
+    const idx = player().pack.findIndex((x) => x.item === 'waraxe');
     useRogue.getState().useItem(idx);
     expect(playerAtk(player())).toBeGreaterThan(atk0);
-    expect(player().weapon).toBe('waraxe');
-    expect(player().pack.includes('dagger')).toBe(true);
+    expect(player().weapon?.item).toBe('waraxe');
+    expect(player().pack.some((x) => x.item === 'dagger')).toBe(true);
+  });
+
+  it('合成: 同一アイテム・同一品質の2つが q+1 になる(+0と+1 は合成不可)', () => {
+    const knifeIdx = player().pack.findIndex((x) => x.item === 'knife');
+    useRogue.getState().mergeItem(knifeIdx); // knife×2(q0) → knife+1
+    const merged = player().pack.filter((x) => x.item === 'knife');
+    expect(merged).toHaveLength(1);
+    expect(merged[0].q).toBe(1);
+    expect(useRogue.getState().turn).toBe(1); // 合成は1ターン
+    // q1 のナイフに q0 を足しても合成できない。
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'knife', q: 0 }] },
+    });
+    const idx1 = player().pack.findIndex((x) => x.item === 'knife' && x.q === 1);
+    useRogue.getState().mergeItem(idx1);
+    expect(player().pack.filter((x) => x.item === 'knife' && x.q === 1)).toHaveLength(1);
+    expect(useRogue.getState().log.at(-1)).toContain('同じ品質');
+  });
+});
+
+describe('明かり(rogue-4)', () => {
+  it('広げるほど1歩あたりの発見が増える', async () => {
+    // 同じ seed で「絞る」と「広げる」を比較。
+    useRogue.getState().restart(7);
+    useRogue.setState({ lightLevel: 0 });
+    const to = freeNeighbor();
+    useRogue.getState().clickCell(to);
+    await run();
+    const narrow = useRogue.getState().discovered.size;
+
+    useRogue.getState().restart(7);
+    useRogue.getState().cycleLight(); // 1→2(広げる)
+    expect(useRogue.getState().lightLevel).toBe(2);
+    useRogue.getState().clickCell(to);
+    await run();
+    expect(useRogue.getState().discovered.size).toBeGreaterThan(narrow);
+  });
+
+  it('明かりが強いほど自然回復が早い(4ターンごと)', () => {
+    useRogue.setState({ lightLevel: 2, player: { ...player(), hp: 10 } });
+    for (let i = 0; i < 4; i++) useRogue.getState().wait();
+    expect(player().hp).toBe(11);
+  });
+});
+
+describe('設置物(rogue-4)', () => {
+  /** テスト用: パックへ入れて足元に設置する。 */
+  function placeDevice(item: ItemStack): void {
+    useRogue.setState({ player: { ...player(), pack: [...player().pack, item] } });
+    const idx = player().pack.findIndex((x) => x.item === item.item && x.q === item.q);
+    useRogue.getState().useItem(idx);
+  }
+
+  it('棘の罠: 敵が踏むと大ダメージ(弱敵は即死)して罠は消える', () => {
+    // 敵の接近先が必ず罠になるよう、プレイヤーの全隣接セルへ罠を敷き、
+    // 敵をプレイヤーから2歩の位置に置く(接近の1歩は隣接セル=罠に入る)。
+    placeDevice({ item: 'trapSpike', q: 0 });
+    expect(useRogue.getState().traps).toHaveLength(1);
+    const trapPos = useRogue.getState().traps[0].pos;
+    const s = useRogue.getState();
+    const occupied = new Set(s.beasts.filter((x) => x.alive).map((x) => cellKey(x.pos)));
+    const frees = neighbors(s.player.pos).filter(
+      (c) => s.dungeon.open.has(cellKey(c)) && !occupied.has(cellKey(c)),
+    );
+    const extraTraps = frees
+      .filter((c) => cellKey(c) !== cellKey(trapPos))
+      .map((c, i) => ({ id: 900 + i, item: 'trapSpike' as const, kind: 'spike' as const, q: 0, pos: c }));
+    useRogue.setState({ traps: [...s.traps, ...extraTraps] });
+    // 敵をプレイヤーから2歩の位置に置く(接近の1歩目で必ず隣接セル=罠に入る)。
+    const far = useRogue.getState().reach.cells.find(
+      (c) => !neighbors(useRogue.getState().player.pos).some((n) => cellKey(n) === cellKey(c)),
+    )!;
+    const beast: Beast = {
+      id: 950,
+      kind: 'bat',
+      pos: far,
+      hp: 5,
+      home: far,
+      homeChamber: 0,
+      layerFloor: -999,
+      layerCeil: 999,
+      awake: true,
+      alive: true,
+      status: null,
+    };
+    useRogue.setState({ beasts: [...useRogue.getState().beasts, beast] });
+    const traps0 = useRogue.getState().traps.length;
+    useRogue.getState().wait();
+    const after = useRogue.getState();
+    // 罠がひとつ消費され、コウモリ(hp5)は棘(威力8)で即死。
+    expect(after.traps.length).toBe(traps0 - 1);
+    expect(after.beasts.find((x) => x.id === 950)!.alive).toBe(false);
+  });
+
+  it('眠りの罠を踏んだ敵は行動不能になる', () => {
+    // 直接ステータスを与えて挙動を確認(発動経路は棘のテストで担保)。
+    const b = placeBeastAdjacent('ghoul');
+    b.status = { kind: 'sleep', turns: 3 };
+    const hp0 = player().hp;
+    useRogue.getState().wait();
+    useRogue.getState().wait();
+    expect(player().hp).toBe(hp0); // 眠っている間は攻撃されない
+    const after = useRogue.getState().beasts.find((x) => x.id === b.id)!;
+    expect(after.status?.kind).toBe('sleep');
+  });
+
+  it('魔導砲塔は射程内の敵を毎ターン撃ち、時限で沈黙する', () => {
+    placeDevice({ item: 'turret', q: 0 });
+    const b = placeBeastAdjacent('drake'); // hp20: 数ターンでは死なない
+    const hp0 = b.hp;
+    useRogue.getState().wait();
+    const after = useRogue.getState().beasts.find((x) => x.id === b.id)!;
+    expect(after.hp).toBeLessThan(hp0);
+    expect(useRogue.getState().turrets[0].turns).toBeLessThan(8);
+  });
+
+  it('囮人形は敵のターゲットを吸い、壊れるまで殴られる', () => {
+    // 囮を足元へ設置してからプレイヤーが離れる → 敵は近い囮を殴る。
+    placeDevice({ item: 'decoy', q: 0 });
+    const decoyPos = useRogue.getState().decoys[0].pos;
+    const b = placeBeastAdjacent('ghoul'); // 囮(=プレイヤー足元)にも隣接している
+    void b;
+    const hp0 = useRogue.getState().decoys[0].hp;
+    // プレイヤーを退避(囮の方が敵に厳密に近くなる位置へ: 囮にも敵にも隣接しない)。
+    const bPos = useRogue.getState().beasts.find((x) => x.id === 900)!.pos;
+    const far = useRogue.getState().reach.cells.find(
+      (c) =>
+        !neighbors(decoyPos).some((n) => cellKey(n) === cellKey(c)) &&
+        !neighbors(bPos).some((n) => cellKey(n) === cellKey(c)) &&
+        cellKey(c) !== cellKey(decoyPos) &&
+        cellKey(c) !== cellKey(bPos),
+    );
+    if (far) useRogue.setState({ player: { ...player(), pos: far } });
+    const hpP = player().hp;
+    useRogue.getState().wait();
+    const s = useRogue.getState();
+    expect(player().hp).toBe(hpP); // プレイヤーは無傷
+    if (s.decoys.length > 0) expect(s.decoys[0].hp).toBeLessThan(hp0);
   });
 });
 

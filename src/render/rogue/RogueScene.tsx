@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { useRogue, ROGUE_S } from '../../state/rogue';
 import { DungeonShell } from './DungeonShell';
 import { LevelFloor } from './LevelFloor';
+import { DevicesView } from './DevicesView';
 import { PlayerView } from './PlayerView';
 import { BeastsView } from './BeastsView';
 import { LootView } from './LootView';
@@ -37,6 +38,7 @@ export function RogueScene() {
 
       <DungeonShell />
       {!mapMode && <LevelFloor />}
+      {!mapMode && <DevicesView />}
       {!mapMode && <LootView />}
       {!mapMode && <BeastsView />}
       <PlayerView />
