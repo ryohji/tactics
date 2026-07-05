@@ -180,6 +180,8 @@ export interface RogueState {
   freeCam: boolean;
   /** マップモード(カット無しで巣全体を俯瞰。ゲーム画面とトグル)。 */
   mapMode: boolean;
+  /** マップの TAB 巡回でフォーカス中の広間 id(プレイヤー位置のときは null)。 */
+  mapFocusChamber: number | null;
   muted: boolean;
   log: string[];
   fx: RogueFx[];
@@ -203,6 +205,8 @@ export interface RogueState {
   toggleMap: () => void;
   /** TAB: ゲーム=部屋内の敵へ視線を巡回 / マップ=訪問済み広間の中央を巡回。 */
   cycleTarget: () => void;
+  /** マップから: その広間の入り口(経路上で最初に踏む広間セル)までファストトラベル。 */
+  travelToChamber: (id: number) => void;
   toggleMute: () => void;
 }
 
@@ -402,16 +406,13 @@ export const useRogue = create<RogueState>((set, get) => {
 
   /**
    * 発見済み空洞を通る任意長の最短経路(生きた敵のセルは避ける)。
+   * 目標は述語で与える(多目標 BFS — 最初に条件を満たしたセルで停止)。
    * [現在地, ..., 目的地] を返す。到達不能なら null。
    */
-  function findPath(to: Cell): Cell[] | null {
+  function findPathWhere(isGoal: (k: CellKey) => boolean): Cell[] | null {
     const { dungeon, discovered, beasts, player } = get();
-    const goal = cellKey(to);
     const start = cellKey(player.pos);
-    if (goal === start) return null;
-    if (!dungeon.open.has(goal) || !discovered.has(goal)) return null;
     const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
-    if (occupied.has(goal)) return null;
     const parent = new Map<CellKey, CellKey>();
     const seen = new Set<CellKey>([start]);
     const queue: Cell[] = [player.pos];
@@ -426,7 +427,7 @@ export const useRogue = create<RogueState>((set, get) => {
         if (!dungeon.open.has(nk) || !discovered.has(nk) || occupied.has(nk)) continue;
         seen.add(nk);
         parent.set(nk, ck);
-        if (nk === goal) {
+        if (isGoal(nk)) {
           const path: Cell[] = [n];
           let k = nk;
           while (k !== start) {
@@ -439,6 +440,16 @@ export const useRogue = create<RogueState>((set, get) => {
       }
     }
     return null;
+  }
+
+  /** 指定セルへの最短経路。 */
+  function findPath(to: Cell): Cell[] | null {
+    const { dungeon, discovered, beasts, player } = get();
+    const goal = cellKey(to);
+    if (goal === cellKey(player.pos)) return null;
+    if (!dungeon.open.has(goal) || !discovered.has(goal)) return null;
+    if (beasts.some((b) => b.alive && cellKey(b.pos) === goal)) return null;
+    return findPathWhere((k) => k === goal);
   }
 
   /** parent 木から経路を復元([現在地, ..., 目的地])。 */
@@ -923,6 +934,7 @@ export const useRogue = create<RogueState>((set, get) => {
     ...buildInitial(initialSeed),
     freeCam: false,
     mapMode: false,
+    mapFocusChamber: null,
     muted: false,
 
     restart: (seed) => {
@@ -933,6 +945,7 @@ export const useRogue = create<RogueState>((set, get) => {
         ...buildInitial(seed ?? Math.floor(Math.random() * 0x7fffffff)),
         freeCam: false,
         mapMode: false,
+        mapFocusChamber: null,
       });
       discoverInit(); // 初期位置の明かりと到達範囲
     },
@@ -1119,6 +1132,21 @@ export const useRogue = create<RogueState>((set, get) => {
       void walkPath(path);
     },
 
+    travelToChamber: (id) => {
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (s.mapMode) get().toggleMap(); // ゲーム画面へ戻ってから歩く
+      if (get().cellChamber.get(cellKey(get().player.pos)) === id) return; // もう居る
+      // その広間に属するセルへ最初に踏み込むまでの最短経路 = 入り口まで。
+      const path = findPathWhere((k) => get().cellChamber.get(k) === id);
+      if (!path) {
+        pushLog('そこへは辿り着けない');
+        return;
+      }
+      sfx.play('select');
+      void walkPath(path);
+    },
+
     cancelThrow: () => {
       if (get().uiMode !== 'throw') return;
       sfx.play('cancel');
@@ -1153,7 +1181,13 @@ export const useRogue = create<RogueState>((set, get) => {
         view.R = null; // ゲーム既定距離へ再導出
       }
       sfx.play('select');
-      set({ mapMode: on, focus: s.player.pos, hoverBeastId: null, hoverMarker: null });
+      set({
+        mapMode: on,
+        mapFocusChamber: null,
+        focus: s.player.pos,
+        hoverBeastId: null,
+        hoverMarker: null,
+      });
     },
 
     cycleTarget: () => {
@@ -1166,9 +1200,10 @@ export const useRogue = create<RogueState>((set, get) => {
         view.base = null; // パンで外していても巡回先へ再アンカー
         sfx.play('cursor');
         if (chamberCycleIdx === ids.length) {
-          set({ focus: s.player.pos });
+          set({ focus: s.player.pos, mapFocusChamber: null });
         } else {
-          set({ focus: s.dungeon.chambers[ids[chamberCycleIdx]].center });
+          const id = ids[chamberCycleIdx];
+          set({ focus: s.dungeon.chambers[id].center, mapFocusChamber: id });
         }
         return;
       }

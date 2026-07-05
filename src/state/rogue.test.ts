@@ -388,13 +388,40 @@ describe('マップモードとターゲット巡回', () => {
     expect(useRogue.getState().mapMode).toBe(false);
   });
 
-  it('マップの TAB は訪問済み広間の中央→プレイヤーを巡回する', () => {
+  it('マップの TAB は訪問済み広間の中央→プレイヤーを巡回する(フォーカス広間も更新)', () => {
     const s = useRogue.getState();
     s.toggleMap();
     useRogue.getState().cycleTarget();
     expect(cellKey(useRogue.getState().focus)).toBe(cellKey(s.dungeon.chambers[0].center));
+    expect(useRogue.getState().mapFocusChamber).toBe(0);
     useRogue.getState().cycleTarget(); // 一周してプレイヤーへ
     expect(cellKey(useRogue.getState().focus)).toBe(cellKey(s.player.pos));
+    expect(useRogue.getState().mapFocusChamber).toBeNull();
+  });
+
+  it('travelToChamber: マップを閉じて部屋の入り口(最初の広間セル)まで移動する', async () => {
+    // 発見済みの遠いセルを仮想の広間 99 に見立てる。
+    const s = useRogue.getState();
+    let far = s.player.pos;
+    let bestD = 0;
+    for (const k of s.discovered) {
+      const c = keyToCell(k);
+      const d = stepDist(s.player.pos, c);
+      if (d > bestD) {
+        bestD = d;
+        far = c;
+      }
+    }
+    expect(bestD).toBeGreaterThan(2);
+    s.cellChamber.set(cellKey(far), 99);
+    s.visitedChambers.add(99);
+    s.toggleMap();
+    useRogue.getState().travelToChamber(99);
+    expect(useRogue.getState().mapMode).toBe(false); // 先にゲーム画面へ戻る
+    await run(20000);
+    const after = useRogue.getState();
+    expect(after.cellChamber.get(cellKey(after.player.pos))).toBe(99); // 入り口=広間セルで停止
+    expect(after.busy).toBe(false);
   });
 
   it('ゲームの TAB は部屋内の敵へ視線を向け情報パネルを出す', () => {

@@ -273,6 +273,7 @@
 .hud-bubble.item { border-color: #d9a441; color: #fde68a; }
 .hud-bubble.passage { border-color: #22d3ee; color: #a5f3fc; }
 .hud-bubble.beast { border-color: #ef4444; color: #fca5a5; }
+.hud-bubble.room { border-color: #e8c35a; color: #fde68a; font-size: 12px; padding: 5px 12px; }
 
 /* --- ダメージポップアップ（Effects の Html） --- */
 .fx-popup {

@@ -25,7 +25,7 @@ function Bubble({
 }: {
   target: Cell;
   label: string;
-  kind: 'item' | 'passage' | 'beast';
+  kind: 'item' | 'passage' | 'beast' | 'room';
   lift?: number;
   onClick?: () => void;
 }) {
@@ -93,13 +93,22 @@ function liftOf(kind: 'item' | 'beast', i: number): number {
   return (kind === 'beast' ? 3.0 : 2.1) + (i % 3) * 0.55;
 }
 
-/** マップ画面のバブル(確認できた敵+未取得アイテム。引き出し線つき)。 */
+/** マップ画面のバブル(確認できた敵+未取得アイテム+フォーカス部屋への移動)。 */
 function MapBubbles() {
   const beasts = useRogue((s) => s.beasts);
   const items = useRogue((s) => s.items);
+  const mapFocusChamber = useRogue((s) => s.mapFocusChamber);
+  const travelToChamber = useRogue((s) => s.travelToChamber);
+  const playerPos = useRogue((s) => s.player.pos);
   const discoveredRev = useRogue((s) => s.discoveredRev);
   void discoveredRev;
-  const { discovered } = useRogue.getState();
+  const { discovered, dungeon, cellChamber } = useRogue.getState();
+
+  // TAB フォーカス中の部屋: 中央に「入り口へ移動」バブル(自分の部屋には出さない)。
+  const focusTarget =
+    mapFocusChamber !== null && cellChamber.get(cellKey(playerPos)) !== mapFocusChamber
+      ? dungeon.chambers[mapFocusChamber]
+      : null;
 
   const spotted = beasts.filter((b) => b.alive && discovered.has(cellKey(b.pos)));
   const loot = items.filter((i) => discovered.has(cellKey(i.pos)));
@@ -168,6 +177,16 @@ function MapBubbles() {
           onClick={() => fetchItem(it.pos)}
         />
       ))}
+      {focusTarget && (
+        <Bubble
+          key={`c${focusTarget.id}`}
+          target={focusTarget.center}
+          label="この部屋の入り口へ"
+          kind="room"
+          lift={4.2}
+          onClick={() => travelToChamber(focusTarget.id)}
+        />
+      )}
     </>
   );
 }

@@ -76,7 +76,7 @@ function SystemButtons() {
       )}
       {mapMode && (
         <div className="hud-viewhint">
-          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回 / M=ゲームへ戻る
+          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回(バブルで移動) / M=戻る
         </div>
       )}
     </>

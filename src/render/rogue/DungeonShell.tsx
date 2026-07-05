@@ -39,6 +39,8 @@ const VISITED_TINT = new THREE.Color('#7d88c9');
 const CLEARED_TINT = new THREE.Color('#cdbb96');
 /** マップモードで「いま居る広間」を示す色味。 */
 const CURRENT_TINT = new THREE.Color('#39c6e0');
+/** マップの TAB 巡回でフォーカス中の広間を示す色味(現在地より優先)。 */
+const FOCUS_TINT = new THREE.Color('#e8c35a');
 /** 切断面(岩の内部)の土色。 */
 const CUT_COLOR = '#5c422e';
 /** 背景(未発見の土の中)の色。RogueScene の背景・霧と揃える。 */
@@ -138,6 +140,7 @@ function buildShellGeometry(
   visited: ReadonlySet<number>,
   cleared: ReadonlySet<number>,
   current: number | null,
+  focused: number | null,
   S: number,
 ): THREE.BufferGeometry {
   const pos: number[] = [];
@@ -153,7 +156,9 @@ function buildShellGeometry(
       const t = Math.min(1, Math.max(0, -layer(n) / 26));
       c3.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
       c3.multiplyScalar(0.82 + 0.36 * hash01(n));
-      if (chamber !== undefined && chamber === current) {
+      if (chamber !== undefined && chamber === focused) {
+        c3.lerp(FOCUS_TINT, 0.6); // TAB 巡回のフォーカス先(マップモード)
+      } else if (chamber !== undefined && chamber === current) {
         c3.lerp(CURRENT_TINT, 0.55); // いま居る広間(マップモード)
       } else if (chamber !== undefined && cleared.has(chamber)) {
         c3.lerp(CLEARED_TINT, 0.5); // 掃討済み: 明るく安全な色へ
@@ -216,6 +221,7 @@ export function DungeonShell() {
   const currentChamber = useRogue((s) =>
     s.mapMode ? s.cellChamber.get(`${s.player.pos[0]},${s.player.pos[1]},${s.player.pos[2]}`) ?? null : null,
   );
+  const focusChamber = useRogue((s) => (s.mapMode ? s.mapFocusChamber : null));
   const geom = useMemo(() => {
     const s = useRogue.getState();
     const cleared = clearedChambers(s.visitedChambers, s.beasts);
@@ -226,11 +232,12 @@ export function DungeonShell() {
       s.visitedChambers,
       cleared,
       currentChamber,
+      focusChamber,
       ROGUE_S,
     );
-    // 変更検知キー: discoveredRev(掘削・発見)+ exploreRev(訪問・掃討)+ 現在広間。
-    // dungeon/discovered/visited は in-place 更新のため rev で追う。
-  }, [discoveredRev, exploreRev, currentChamber]);
+    // 変更検知キー: discoveredRev(掘削・発見)+ exploreRev(訪問・掃討)
+    // + 現在広間 + TAB フォーカス広間。dungeon/discovered/visited は in-place 更新のため rev で追う。
+  }, [discoveredRev, exploreRev, currentChamber, focusChamber]);
   useEffect(() => () => geom.dispose(), [geom]);
 
   // マップモードはカットしない(巣の全体像。クリップ/キャップ/計数を停止)。
