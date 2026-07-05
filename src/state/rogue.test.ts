@@ -3,7 +3,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
-import { useRogue, seedRogueRng, depthOf, playerAtk, clearedChambers, type Beast } from './rogue';
+import { useRogue, seedRogueRng, depthOf, playerAtk, clearedChambers, gazeAngles, type Beast } from './rogue';
+import { view } from './view';
 import { BEASTS } from '../model/beasts';
 
 function player() {
@@ -232,6 +233,47 @@ describe('探索支援(訪問/掃討/ファストトラベル)', () => {
     s.travelTo([99, 99, 0]);
     expect(s.busy).toBe(false);
     expect(useRogue.getState().log.at(-1)).toContain('辿り着けない');
+  });
+});
+
+describe('マップモードとターゲット巡回', () => {
+  it('toggleMap で切り替わり、focus がプレイヤー位置になる', () => {
+    const s = useRogue.getState();
+    s.toggleMap();
+    expect(useRogue.getState().mapMode).toBe(true);
+    expect(cellKey(useRogue.getState().focus)).toBe(cellKey(s.player.pos));
+    useRogue.getState().toggleMap();
+    expect(useRogue.getState().mapMode).toBe(false);
+  });
+
+  it('マップの TAB は訪問済み広間の中央→プレイヤーを巡回する', () => {
+    const s = useRogue.getState();
+    s.toggleMap();
+    useRogue.getState().cycleTarget();
+    expect(cellKey(useRogue.getState().focus)).toBe(cellKey(s.dungeon.chambers[0].center));
+    useRogue.getState().cycleTarget(); // 一周してプレイヤーへ
+    expect(cellKey(useRogue.getState().focus)).toBe(cellKey(s.player.pos));
+  });
+
+  it('ゲームの TAB は部屋内の敵へ視線を向け情報パネルを出す', () => {
+    const b = placeBeastAdjacent('bat');
+    useRogue.getState().cycleTarget();
+    expect(useRogue.getState().hoverBeastId).toBe(b.id);
+    expect(view.phiGoal).not.toBeNull();
+    expect(view.thetaGoal).toBeGreaterThanOrEqual(0.15);
+  });
+
+  it('近くに敵がいなければログだけ出す', () => {
+    useRogue.getState().cycleTarget();
+    expect(useRogue.getState().log.at(-1)).toContain('気配はない');
+    expect(view.phiGoal).toBeNull();
+  });
+
+  it('gazeAngles: theta は見やすい範囲にクランプされる', () => {
+    const g = gazeAngles([0, 0, 0], [4, 4, 0]);
+    expect(g.theta).toBeGreaterThanOrEqual(0.15);
+    expect(g.theta).toBeLessThanOrEqual(0.9);
+    expect(Number.isFinite(g.phi)).toBe(true);
   });
 });
 

@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { RogueScene } from './render/rogue/RogueScene';
 import { RogueHud } from './ui/RogueHud';
+import { useRogue } from './state/rogue';
+import { installKeys } from './input/keys';
 import { unlock } from './audio/sfx';
 
 // rogue-1 合成点。Canvas 内は <RogueScene/>(洞窟・敵・宝・マーカー・カメラ)。
@@ -13,6 +15,10 @@ export function App() {
   useEffect(() => {
     const onDown = () => unlock();
     window.addEventListener('pointerdown', onDown);
+    installKeys({
+      onCycle: () => useRogue.getState().cycleTarget(),
+      onToggleMap: () => useRogue.getState().toggleMap(),
+    });
     return () => window.removeEventListener('pointerdown', onDown);
   }, []);
 

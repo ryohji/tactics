@@ -13,6 +13,7 @@ const S = ROGUE_S;
 export function PlayerView() {
   const pos = useRogue((s) => s.player.pos);
   const alive = useRogue((s) => s.phase === 'play');
+  const mapMode = useRogue((s) => s.mapMode);
   const ref = useRef<THREE.Group>(null);
 
   useFrame(({ clock }) => {
@@ -48,6 +49,13 @@ export function PlayerView() {
         <sphereGeometry args={[0.06 * S, 8, 8]} />
         <meshStandardMaterial color="#ffcf6e" emissive="#ff9a3d" emissiveIntensity={3} />
       </mesh>
+      {/* マップモードの標識ビーコン(遠目でも現在地が分かる光柱) */}
+      {mapMode && (
+        <mesh position={[0, 3.2 * S, 0]}>
+          <cylinderGeometry args={[0.08 * S, 0.16 * S, 6 * S, 8]} />
+          <meshBasicMaterial color="#7ce7ff" transparent opacity={0.7} depthWrite={false} />
+        </mesh>
+      )}
     </group>
   );
 }

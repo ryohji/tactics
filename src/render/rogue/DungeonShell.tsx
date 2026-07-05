@@ -37,6 +37,8 @@ const ROCK_DEEP = new THREE.Color('#3a3452');
 const VISITED_TINT = new THREE.Color('#7d88c9');
 /** 掃討済み(敵全滅)の広間の壁の色味(明るい土色に寄せて「安全」を示す)。 */
 const CLEARED_TINT = new THREE.Color('#cdbb96');
+/** マップモードで「いま居る広間」を示す色味。 */
+const CURRENT_TINT = new THREE.Color('#39c6e0');
 /** 切断面(岩の内部)の土色。 */
 const CUT_COLOR = '#5c422e';
 /** 背景(未発見の土の中)の色。RogueScene の背景・霧と揃える。 */
@@ -135,6 +137,7 @@ function buildShellGeometry(
   cellChamber: ReadonlyMap<CellKey, number>,
   visited: ReadonlySet<number>,
   cleared: ReadonlySet<number>,
+  current: number | null,
   S: number,
 ): THREE.BufferGeometry {
   const pos: number[] = [];
@@ -150,7 +153,9 @@ function buildShellGeometry(
       const t = Math.min(1, Math.max(0, -layer(n) / 26));
       c3.copy(ROCK_SHALLOW).lerp(ROCK_DEEP, t);
       c3.multiplyScalar(0.82 + 0.36 * hash01(n));
-      if (chamber !== undefined && cleared.has(chamber)) {
+      if (chamber !== undefined && chamber === current) {
+        c3.lerp(CURRENT_TINT, 0.55); // いま居る広間(マップモード)
+      } else if (chamber !== undefined && cleared.has(chamber)) {
         c3.lerp(CLEARED_TINT, 0.5); // 掃討済み: 明るく安全な色へ
       } else if (chamber !== undefined && visited.has(chamber)) {
         c3.lerp(VISITED_TINT, 0.3); // 訪問済み(敵が残る): 青紫寄り
@@ -206,6 +211,11 @@ export function DungeonShell() {
   }, [hasStencil]);
 
   const exploreRev = useRogue((s) => s.exploreRev);
+  const mapMode = useRogue((s) => s.mapMode);
+  // マップモードでは「いま居る広間」をハイライト(部屋が変わったときだけ再構築)。
+  const currentChamber = useRogue((s) =>
+    s.mapMode ? s.cellChamber.get(`${s.player.pos[0]},${s.player.pos[1]},${s.player.pos[2]}`) ?? null : null,
+  );
   const geom = useMemo(() => {
     const s = useRogue.getState();
     const cleared = clearedChambers(s.visitedChambers, s.beasts);
@@ -215,12 +225,17 @@ export function DungeonShell() {
       s.cellChamber,
       s.visitedChambers,
       cleared,
+      currentChamber,
       ROGUE_S,
     );
-    // 変更検知キー: discoveredRev(掘削・発見)+ exploreRev(訪問・掃討)。
+    // 変更検知キー: discoveredRev(掘削・発見)+ exploreRev(訪問・掃討)+ 現在広間。
     // dungeon/discovered/visited は in-place 更新のため rev で追う。
-  }, [discoveredRev, exploreRev]);
+  }, [discoveredRev, exploreRev, currentChamber]);
   useEffect(() => () => geom.dispose(), [geom]);
+
+  // マップモードはカットしない(巣の全体像。クリップ/キャップ/計数を停止)。
+  const planes = mapMode ? [] : [cutPlane];
+  const showCut = hasStencil && !mapMode;
 
   // カット平面の更新。「平面よりカメラ側」(n·p + c < 0)が描画されない。
   // 視線直交のままだと、俯瞰時に平面がほぼ水平になってプレイヤー頭上すれすれに浮き、
@@ -267,26 +282,26 @@ export function DungeonShell() {
           roughness={0.95}
           metalness={0.02}
           flatShading
-          clippingPlanes={[cutPlane]}
+          clippingPlanes={planes}
         />
       </mesh>
       {/* 裏面の土色: stencil 不可環境のフォールバック。stencil 有効時はキャップが
           平面上で必ず先に遮る(内部への視線は平面を岩の中で横切る)ため描かない —
           描くと遠方の断面までキャップの放射フェードを無視して明るく見えてしまう。 */}
-      {!hasStencil && (
+      {!hasStencil && !mapMode && (
         <mesh geometry={geom} frustumCulled={false}>
-          <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={[cutPlane]} />
+          <meshBasicMaterial color={CUT_COLOR} side={THREE.BackSide} clippingPlanes={planes} />
         </mesh>
       )}
       {/* ステンシル計数: 切断立体の裏面 +1 / 表面 -1(色・深度は書かない) */}
-      {hasStencil && (
+      {showCut && (
       <mesh geometry={geom} frustumCulled={false} renderOrder={1}>
         <meshBasicMaterial
           colorWrite={false}
           depthWrite={false}
           depthTest={false}
           side={THREE.BackSide}
-          clippingPlanes={[cutPlane]}
+          clippingPlanes={planes}
           stencilWrite
           stencilFunc={THREE.AlwaysStencilFunc}
           stencilFail={THREE.IncrementWrapStencilOp}
@@ -295,14 +310,14 @@ export function DungeonShell() {
         />
       </mesh>
       )}
-      {hasStencil && (
+      {showCut && (
       <mesh geometry={geom} frustumCulled={false} renderOrder={1}>
         <meshBasicMaterial
           colorWrite={false}
           depthWrite={false}
           depthTest={false}
           side={THREE.FrontSide}
-          clippingPlanes={[cutPlane]}
+          clippingPlanes={planes}
           stencilWrite
           stencilFunc={THREE.AlwaysStencilFunc}
           stencilFail={THREE.DecrementWrapStencilOp}
@@ -314,7 +329,7 @@ export function DungeonShell() {
       {/* 土の外周球: 計数立体を「無限の土 ∖ 空洞」として閉じる。空洞に入らない視線は
           この球の裏面で +1 され、平面横断点が土の中なら stencil≠0 → 土として塗られる。
           カメラは常に球の内側なので表面は描画されない(見た目には現れない)。 */}
-      {hasStencil && (
+      {showCut && (
       <mesh ref={sphereRef} frustumCulled={false} renderOrder={1}>
         <sphereGeometry args={[EARTH_R, 24, 16]} />
         <meshBasicMaterial
@@ -322,7 +337,7 @@ export function DungeonShell() {
           depthWrite={false}
           depthTest={false}
           side={THREE.BackSide}
-          clippingPlanes={[cutPlane]}
+          clippingPlanes={planes}
           stencilWrite
           stencilFunc={THREE.AlwaysStencilFunc}
           stencilFail={THREE.IncrementWrapStencilOp}
@@ -333,7 +348,7 @@ export function DungeonShell() {
       )}
       {/* キャップ: stencil≠0 のピクセル(=切り口)だけ板が残る。色は視軸からの
           距離で 明るい断面色→背景色 にフェード(遠くの断面は「暗い土」に沈む)。 */}
-      {hasStencil && (
+      {showCut && (
       <mesh ref={capRef} frustumCulled={false} renderOrder={2}>
         <planeGeometry args={[CAP_SIZE, CAP_SIZE]} />
         <shaderMaterial

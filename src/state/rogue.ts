@@ -11,19 +11,20 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { OFFSETS, cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
+import { OFFSETS, cellKey, keyToCell, layer, worldPos, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
   distW,
   adjacent,
+  stepDist,
   type Dungeon,
   type Chamber,
 } from '../model/dungeon';
 import { BEASTS, spawnTable, type BeastKind } from '../model/beasts';
 import { ITEMS, lootTable, type ItemId } from '../model/loot';
 import { animateUnit, clearUnitAnims, STEP_MS } from './unitAnim';
-import { resetView } from './view';
+import { view, resetView, setGazeGoal, clearGazeGoal } from './view';
 import * as sfx from '../audio/sfx';
 
 // --- 定数・型 ---------------------------------------------------------------------
@@ -113,6 +114,8 @@ export interface RogueState {
   hoverBeastId: number | null;
   focus: Cell;
   freeCam: boolean;
+  /** マップモード(カット無しで巣全体を俯瞰。ゲーム画面とトグル)。 */
+  mapMode: boolean;
   muted: boolean;
   log: string[];
   fx: RogueFx[];
@@ -128,6 +131,10 @@ export interface RogueState {
   setHoverMarker: (k: CellKey | null) => void;
   hoverBeast: (id: number | null) => void;
   toggleFreeCam: () => void;
+  /** マップモードの切替(M キー / HUD ボタン)。 */
+  toggleMap: () => void;
+  /** TAB: ゲーム=部屋内の敵へ視線を巡回 / マップ=訪問済み広間の中央を巡回。 */
+  cycleTarget: () => void;
   toggleMute: () => void;
 }
 
@@ -155,6 +162,9 @@ function irnd(a: number, b: number): number {
 let fxId = 1;
 let beastSeq = 1;
 let itemSeq = 1;
+// TAB 巡回の現在位置(リアクティブである必要がないのでモジュール変数)。
+let beastCycleIdx = -1;
+let chamberCycleIdx = -1;
 // リスタート世代。await を跨ぐ非同期処理(自動歩行・攻撃演出)が、restart 後に
 // 古い経路のまま新しいダンジョンを触らないよう、世代が変わったら打ち切る。
 let runSeq = 0;
@@ -178,6 +188,23 @@ export function playerAtk(p: PlayerState): number {
 }
 export function playerDef(p: PlayerState): number {
   return p.armor ? ITEMS[p.armor].def ?? 0 : 0;
+}
+
+/**
+ * from から to を見る視線のカメラ角(球面座標)。カメラは from を挟んで to の反対側に
+ * 回り込む(=画面上で to が奥に来る)。theta は相手との高低差を反映しつつ、
+ * 見やすい俯角レンジ [0.15, 0.9] にクランプする。
+ */
+export function gazeAngles(from: Cell, to: Cell): { phi: number; theta: number } {
+  const a = worldPos(from[0], from[1], from[2], 1);
+  const b = worldPos(to[0], to[1], to[2], 1);
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  const len = Math.hypot(dx, dy, dz) || 1;
+  const phi = Math.atan2(dx, dz);
+  const theta = Math.min(0.9, Math.max(0.15, Math.asin(dy / len) + 0.35));
+  return { phi, theta };
 }
 
 /** 掃討済みの広間(訪問済みで、そこをホームとする敵が全滅)。壁色の明化に使う。 */
@@ -660,11 +687,18 @@ export const useRogue = create<RogueState>((set, get) => {
   return {
     ...buildInitial(initialSeed),
     freeCam: false,
+    mapMode: false,
     muted: false,
 
     restart: (seed) => {
       resetView();
-      set({ ...buildInitial(seed ?? Math.floor(Math.random() * 0x7fffffff)), freeCam: false });
+      beastCycleIdx = -1;
+      chamberCycleIdx = -1;
+      set({
+        ...buildInitial(seed ?? Math.floor(Math.random() * 0x7fffffff)),
+        freeCam: false,
+        mapMode: false,
+      });
       discoverInit(); // 初期位置の明かりと到達範囲
     },
 
@@ -789,6 +823,66 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     toggleFreeCam: () => set({ freeCam: !get().freeCam }),
+
+    toggleMap: () => {
+      const s = get();
+      const on = !s.mapMode;
+      if (on && s.phase !== 'play') return; // 死亡画面からは開かない
+      chamberCycleIdx = -1;
+      view.base = null;
+      clearGazeGoal();
+      if (on) {
+        // 巣全体が見える距離まで引く(既にそれ以上引いていれば維持)。
+        view.R = Math.max(view.R ?? 0, 28 * ROGUE_S);
+      } else {
+        view.R = null; // ゲーム既定距離へ再導出
+      }
+      sfx.play('select');
+      set({ mapMode: on, focus: s.player.pos, hoverBeastId: null, hoverMarker: null });
+    },
+
+    cycleTarget: () => {
+      const s = get();
+      if (s.mapMode) {
+        // 訪問済みの広間の中央を巡回(一周の最後にプレイヤー位置へ戻る)。
+        const ids = [...s.visitedChambers].sort((a, b) => a - b);
+        if (ids.length === 0) return;
+        chamberCycleIdx = (chamberCycleIdx + 1) % (ids.length + 1);
+        view.base = null; // パンで外していても巡回先へ再アンカー
+        sfx.play('cursor');
+        if (chamberCycleIdx === ids.length) {
+          set({ focus: s.player.pos });
+        } else {
+          set({ focus: s.dungeon.chambers[ids[chamberCycleIdx]].center });
+        }
+        return;
+      }
+      if (s.phase !== 'play' || s.busy) return;
+      // 部屋内(通路に居るときは近傍8歩)の敵を距離順に巡回し、視線を向けて情報を出す。
+      const ch = s.cellChamber.get(cellKey(s.player.pos));
+      const cands = s.beasts
+        .filter(
+          (b) =>
+            b.alive &&
+            s.discovered.has(cellKey(b.pos)) &&
+            (ch !== undefined
+              ? s.cellChamber.get(cellKey(b.pos)) === ch
+              : stepDist(s.player.pos, b.pos) <= 8),
+        )
+        .sort(
+          (x, y) => stepDist(s.player.pos, x.pos) - stepDist(s.player.pos, y.pos) || x.id - y.id,
+        );
+      if (cands.length === 0) {
+        pushLog('近くに敵の気配はない');
+        return;
+      }
+      beastCycleIdx = (beastCycleIdx + 1) % cands.length;
+      const b = cands[beastCycleIdx];
+      const g = gazeAngles(s.player.pos, b.pos);
+      setGazeGoal(g.phi, g.theta);
+      sfx.play('cursor');
+      set({ hoverBeastId: b.id });
+    },
 
     toggleMute: () => {
       const m = !get().muted;

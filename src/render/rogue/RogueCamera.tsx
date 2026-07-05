@@ -8,8 +8,9 @@ import * as THREE from 'three';
 import { worldPos } from '../../model/fcc';
 import { fromFrame } from '../../model/terrain';
 import { useRogue, ROGUE_S } from '../../state/rogue';
-import { view } from '../../state/view';
+import { view, clearGazeGoal } from '../../state/view';
 import { setSuppressNextClick } from '../../input/suppress';
+import { isSpaceHeld } from '../../input/keys';
 import { currentFocusGrid } from './rogueFocus';
 
 const K = 0.005;
@@ -51,10 +52,15 @@ export function RogueCamera() {
     };
 
     const onDown = (e: PointerEvent) => {
-      const free = useRogue.getState().freeCam;
-      if (e.button === 0) {
-        mode = free ? 'pan' : 'rotate';
-      } else if (e.button === 2 && free) {
+      const { freeCam, mapMode } = useRogue.getState();
+      if (mapMode) {
+        // マップ: 左ドラッグ=回転が基本。Space を押している間は移動(パン)。右=回転。
+        if (e.button === 0) mode = isSpaceHeld() ? 'pan' : 'rotate';
+        else if (e.button === 2) mode = 'rotate';
+        else return;
+      } else if (e.button === 0) {
+        mode = freeCam ? 'pan' : 'rotate';
+      } else if (e.button === 2 && freeCam) {
         mode = 'rotate';
       } else {
         return;
@@ -72,6 +78,7 @@ export function RogueCamera() {
       lastY = e.clientY;
       moved += Math.abs(dx) + Math.abs(dy);
       if (mode === 'rotate') {
+        clearGazeGoal(); // ユーザの手動旋回が TAB 視線より優先
         view.phi += dx * K;
         view.theta = Math.max(-THETA_MAX, Math.min(THETA_MAX, view.theta - dy * K));
       } else {
@@ -106,9 +113,29 @@ export function RogueCamera() {
   const tv = useRef(new THREE.Vector3());
   const dir = useRef(new THREE.Vector3());
   useFrame(() => {
-    const free = useRogue.getState().freeCam;
+    const { freeCam, mapMode } = useRogue.getState();
+
+    // TAB 視線ゴールへの短弧補間(到達で解除。ドラッグ側でも解除される)。
+    if (view.phiGoal !== null && view.thetaGoal !== null) {
+      let dPhi = view.phiGoal - view.phi;
+      dPhi = Math.atan2(Math.sin(dPhi), Math.cos(dPhi)); // 短い側の弧へ正規化
+      const dTheta = view.thetaGoal - view.theta;
+      if (Math.abs(dPhi) < 0.01 && Math.abs(dTheta) < 0.01) {
+        view.phi = view.phiGoal;
+        view.theta = view.thetaGoal;
+        clearGazeGoal();
+      } else {
+        view.phi += dPhi * 0.16;
+        view.theta += dTheta * 0.16;
+      }
+    }
+
     let g: [number, number, number];
-    if (free) {
+    if (mapMode) {
+      // マップ: パンで外していなければフォーカス(巡回先)を追従。
+      if (view.base !== null) g = view.base;
+      else g = currentFocusGrid();
+    } else if (freeCam) {
       if (view.base === null) view.base = currentFocusGrid();
       g = view.base;
     } else {

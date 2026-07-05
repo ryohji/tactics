@@ -47,21 +47,33 @@ function StatusPanel() {
 function SystemButtons() {
   const freeCam = useRogue((s) => s.freeCam);
   const toggleFreeCam = useRogue((s) => s.toggleFreeCam);
+  const mapMode = useRogue((s) => s.mapMode);
+  const toggleMap = useRogue((s) => s.toggleMap);
   const muted = useRogue((s) => s.muted);
   const toggleMute = useRogue((s) => s.toggleMute);
   const restart = useRogue((s) => s.restart);
   return (
     <>
       <div className="hud-system">
-        <button className={freeCam ? 'active' : ''} onClick={toggleFreeCam}>
-          🎥視点モード
+        <button className={mapMode ? 'active' : ''} onClick={toggleMap}>
+          🗺マップ(M)
         </button>
+        {!mapMode && (
+          <button className={freeCam ? 'active' : ''} onClick={toggleFreeCam}>
+            🎥視点モード
+          </button>
+        )}
         <button onClick={() => resetView()}>⌖視点リセット</button>
         <button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button>
         <button onClick={() => restart()}>↺最初から</button>
       </div>
-      {freeCam && (
+      {freeCam && !mapMode && (
         <div className="hud-viewhint">左ドラッグ=移動 / 右ドラッグ=旋回 / ホイール=寄り引き</div>
+      )}
+      {mapMode && (
+        <div className="hud-viewhint">
+          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回 / M=ゲームへ戻る
+        </div>
       )}
     </>
   );
@@ -73,6 +85,8 @@ function PackPanel() {
   const uiMode = useRogue((s) => s.uiMode);
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
+  const mapMode = useRogue((s) => s.mapMode);
+  if (mapMode) return null;
 
   // 同種をまとめて表示(クリックは最初の1個に対して)。
   const groups: { item: ItemId; count: number; index: number }[] = [];
@@ -138,9 +152,10 @@ function ActionBar() {
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const uiMode = useRogue((s) => s.uiMode);
+  const mapMode = useRogue((s) => s.mapMode);
   const wait = useRogue((s) => s.wait);
   const cancelThrow = useRogue((s) => s.cancelThrow);
-  if (phase !== 'play') return null;
+  if (phase !== 'play' || mapMode) return null;
   return (
     <div className="hud-actions">
       {uiMode === 'throw' ? (
@@ -150,7 +165,7 @@ function ActionBar() {
         </>
       ) : (
         <>
-          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃</span>
+          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃 / TAB=敵に視線</span>
           <button disabled={busy} onClick={wait}>
             待機
           </button>

@@ -12,6 +12,9 @@ export interface ViewState {
   R: number | null;
   /** 視点モードの旋回中心（格子座標）。null なら現フォーカスから再取得。 */
   base: [number, number, number] | null;
+  /** 視線の目標角(TAB ターゲット巡回)。カメラが短弧で補間し、到達かドラッグで解除。 */
+  phiGoal: number | null;
+  thetaGoal: number | null;
 }
 
 const DEFAULT_PHI = 0.6;
@@ -22,7 +25,21 @@ export const view: ViewState = {
   theta: DEFAULT_THETA,
   R: null,
   base: null,
+  phiGoal: null,
+  thetaGoal: null,
 };
+
+/** 視線の目標角を設定する(カメラ側が滑らかに向ける)。 */
+export function setGazeGoal(phi: number, theta: number): void {
+  view.phiGoal = phi;
+  view.thetaGoal = theta;
+}
+
+/** 視線の目標角を解除する(ユーザのドラッグ操作が優先)。 */
+export function clearGazeGoal(): void {
+  view.phiGoal = null;
+  view.thetaGoal = null;
+}
 
 /** 視点リセット: 角度・距離を既定へ戻し、旋回中心をユニットフォーカスへ再アンカー。 */
 export function resetView(): void {
@@ -30,4 +47,6 @@ export function resetView(): void {
   view.theta = DEFAULT_THETA;
   view.R = null;
   view.base = null;
+  view.phiGoal = null;
+  view.thetaGoal = null;
 }
