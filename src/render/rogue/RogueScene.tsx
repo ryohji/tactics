@@ -41,7 +41,7 @@ export function RogueScene() {
       {!mapMode && <BeastsView />}
       <PlayerView />
       {!mapMode && <MoveMarkers />}
-      {!mapMode && <Bubbles />}
+      <Bubbles />{/* モードで内容が変わる(ゲーム=アイテム/通路、マップ=敵/アイテム+引き出し線) */}
       <RogueEffects />
       <RogueCamera />
     </>

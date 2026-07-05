@@ -1,12 +1,17 @@
-// 探索バブル(rogue-2)。一度視界に入った(=発見済みセルにある)アイテムと、
-// いま居る広間の通路入り口へ、名前+歩数距離の DOM バブルを浮かべる。
-// クリックでファストトラベル(travelTo — 1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。
-// 歩数は障害物なしの FCC 格子距離(stepDist)= マンハッタン距離の類似。
+// 探索バブル(rogue-2/3)。
+// ゲーム画面: 発見済みアイテアと、いま居る広間の通路入り口へ「名前+歩数」のバブル。
+// マップ画面: 確認できた敵(生存・位置が発見済み)と未取得アイテムを、
+//             対象から立ち上がる引き出し線つきのバブルで示す。
+// どちらもクリックでファストトラベル(マップ側はゲーム画面へ戻ってから移動開始。
+// 敵バブルは敵の隣の空きセルが目的地)。歩数は障害物なしの FCC 格子距離(stepDist)。
 
+import { useEffect, useMemo } from 'react';
 import { Html } from '@react-three/drei';
-import { cellKey, worldPos, type Cell } from '../../model/fcc';
+import * as THREE from 'three';
+import { cellKey, neighbors, worldPos, type Cell } from '../../model/fcc';
 import { stepDist } from '../../model/dungeon';
 import { ITEMS } from '../../model/loot';
+import { BEASTS } from '../../model/beasts';
 import { useRogue, ROGUE_S } from '../../state/rogue';
 
 const S = ROGUE_S;
@@ -15,22 +20,27 @@ function Bubble({
   target,
   label,
   kind,
+  lift = 0.9,
+  onClick,
 }: {
   target: Cell;
   label: string;
-  kind: 'item' | 'passage';
+  kind: 'item' | 'passage' | 'beast';
+  lift?: number;
+  onClick?: () => void;
 }) {
   const travelTo = useRogue((s) => s.travelTo);
   const playerPos = useRogue((s) => s.player.pos);
   const w = worldPos(target[0], target[1], target[2], S);
   const d = stepDist(playerPos, target);
   return (
-    <Html position={[w.x, w.y + 0.9 * S, w.z]} center zIndexRange={[50, 0]}>
+    <Html position={[w.x, w.y + lift * S, w.z]} center zIndexRange={[50, 0]}>
       <div
         className={`hud-bubble ${kind}`}
         onClick={(e) => {
           e.stopPropagation();
-          travelTo(target);
+          if (onClick) onClick();
+          else travelTo(target);
         }}
       >
         {label} <b>{d}歩</b>
@@ -39,15 +49,13 @@ function Bubble({
   );
 }
 
-export function Bubbles() {
-  const phase = useRogue((s) => s.phase);
+/** ゲーム画面のバブル(アイテム+いま居る広間の通路入り口)。 */
+function GameBubbles() {
   const items = useRogue((s) => s.items);
   const playerPos = useRogue((s) => s.player.pos);
   const discoveredRev = useRogue((s) => s.discoveredRev);
   void discoveredRev; // discovered/dungeon.stubs は in-place 更新なので rev で再評価させる
   const { discovered, dungeon, cellChamber } = useRogue.getState();
-
-  if (phase !== 'play') return null;
 
   const pk = cellKey(playerPos);
   const itemBubbles = items.filter(
@@ -78,4 +86,95 @@ export function Bubbles() {
       ))}
     </>
   );
+}
+
+/** 引き出し線の高さ(重なりにくいよう種別と並びで少しずらす)。 */
+function liftOf(kind: 'item' | 'beast', i: number): number {
+  return (kind === 'beast' ? 3.0 : 2.1) + (i % 3) * 0.55;
+}
+
+/** マップ画面のバブル(確認できた敵+未取得アイテム。引き出し線つき)。 */
+function MapBubbles() {
+  const beasts = useRogue((s) => s.beasts);
+  const items = useRogue((s) => s.items);
+  const discoveredRev = useRogue((s) => s.discoveredRev);
+  void discoveredRev;
+  const { discovered } = useRogue.getState();
+
+  const spotted = beasts.filter((b) => b.alive && discovered.has(cellKey(b.pos)));
+  const loot = items.filter((i) => discovered.has(cellKey(i.pos)));
+
+  // 引き出し線(対象のすぐ上 → バブルの足元)をひとつの LineSegments にまとめる。
+  const lines = useMemo(() => {
+    const pos: number[] = [];
+    const add = (c: Cell, lift: number) => {
+      const w = worldPos(c[0], c[1], c[2], S);
+      pos.push(w.x, w.y + 0.3 * S, w.z, w.x, w.y + (lift - 0.25) * S, w.z);
+    };
+    spotted.forEach((b, i) => add(b.pos, liftOf('beast', i)));
+    loot.forEach((it, i) => add(it.pos, liftOf('item', i)));
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    return g;
+    // beasts/items は更新のたび配列が差し替わる。discovered は rev で追う。
+  }, [beasts, items, discoveredRev]);
+  useEffect(() => () => lines.dispose(), [lines]);
+
+  // 敵バブル: 目的地は敵の隣の空きセル(プレイヤーに最も近いもの)。
+  const approach = (target: Cell) => {
+    const s = useRogue.getState();
+    const occupied = new Set(s.beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
+    const cand = neighbors(target)
+      .filter(
+        (n) =>
+          s.dungeon.open.has(cellKey(n)) &&
+          s.discovered.has(cellKey(n)) &&
+          !occupied.has(cellKey(n)),
+      )
+      .sort((a, b) => stepDist(s.player.pos, a) - stepDist(s.player.pos, b))[0];
+    s.toggleMap(); // ゲーム画面へ戻ってから移動開始
+    if (cand) s.travelTo(cand);
+  };
+
+  const fetchItem = (target: Cell) => {
+    const s = useRogue.getState();
+    s.toggleMap();
+    s.travelTo(target);
+  };
+
+  return (
+    <>
+      <lineSegments frustumCulled={false}>
+        <primitive object={lines} attach="geometry" />
+        <lineBasicMaterial color="#8ea0b8" transparent opacity={0.7} />
+      </lineSegments>
+      {spotted.map((b, i) => (
+        <Bubble
+          key={`b${b.id}`}
+          target={b.pos}
+          label={BEASTS[b.kind].name}
+          kind="beast"
+          lift={liftOf('beast', i)}
+          onClick={() => approach(b.pos)}
+        />
+      ))}
+      {loot.map((it, i) => (
+        <Bubble
+          key={`i${it.id}`}
+          target={it.pos}
+          label={ITEMS[it.item].name}
+          kind="item"
+          lift={liftOf('item', i)}
+          onClick={() => fetchItem(it.pos)}
+        />
+      ))}
+    </>
+  );
+}
+
+export function Bubbles() {
+  const phase = useRogue((s) => s.phase);
+  const mapMode = useRogue((s) => s.mapMode);
+  if (phase !== 'play') return null;
+  return mapMode ? <MapBubbles /> : <GameBubbles />;
 }
