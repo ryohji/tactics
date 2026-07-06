@@ -29,6 +29,7 @@ import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '..
 import { useRogue, clearedChambers, ROGUE_S } from '../../state/rogue';
 import { RD_FACES, RD_VERTICES } from '../rd';
 import { currentFocusGrid } from './rogueFocus';
+import { rockTexture } from './rockTexture';
 
 const ROCK_SHALLOW = new THREE.Color('#7a6a55');
 const ROCK_DEEP = new THREE.Color('#3a3452');
@@ -92,6 +93,22 @@ function hash01(c: Cell): number {
   let h = (c[0] * 73856093) ^ (c[1] * 19349663) ^ (c[2] * 83492791);
   h = (h ^ (h >>> 13)) * 1274126177;
   return ((h ^ (h >>> 16)) >>> 0) / 0x100000000;
+}
+
+/** 頂点変位の振幅(格子単位)。面の一辺 ≈1.2 に対し小さく、ブロック感だけ崩す。 */
+const JITTER = 0.09;
+
+/**
+ * 頂点位置(格子座標×2 の整数)から決定的な微小変位ベクトル(格子単位)。
+ * 隣接面が共有する頂点は同じ量だけ動くので、水密性(=ステンシル断面の前提)が保たれる。
+ */
+function vertexJitter(gx: number, gy: number, gz: number): [number, number, number] {
+  const h = (salt: number) => {
+    let x = (Math.imul(gx, 73856093) ^ Math.imul(gy, 19349663) ^ Math.imul(gz, 83492791) ^ salt) | 0;
+    x = Math.imul(x ^ (x >>> 13), 1274126177);
+    return (((x ^ (x >>> 16)) >>> 0) / 0x100000000 - 0.5) * 2 * JITTER;
+  };
+  return [h(0x9e37), h(0x85eb), h(0xc2b2)];
 }
 
 /**
@@ -166,7 +183,15 @@ function buildShellGeometry(
       }
       // 巻き反転 [0,3,2,1] で法線を -off(空洞側)へ。
       const q = [verts[0], verts[3], verts[2], verts[1]];
-      const w = q.map((v) => worldPos(c[0] + v[0], c[1] + v[1], c[2] + v[2], S));
+      const w = q.map((v) => {
+        // 頂点変位: 位置ハッシュで格子座標を微小に揺らしてから世界座標へ
+        // (RD 頂点は 0.5 刻みなので ×2 して整数キーにする)。
+        const vx = c[0] + v[0];
+        const vy = c[1] + v[1];
+        const vz = c[2] + v[2];
+        const j = vertexJitter(Math.round(vx * 2), Math.round(vy * 2), Math.round(vz * 2));
+        return worldPos(vx + j[0], vy + j[1], vz + j[2], S);
+      });
       for (const i of [0, 1, 2, 0, 2, 3]) {
         pos.push(w[i].x, w[i].y, w[i].z);
         col.push(c3.r, c3.g, c3.b);
@@ -178,6 +203,84 @@ function buildShellGeometry(
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.computeVertexNormals(); // 非インデックスなので面フラット法線になる
   return g;
+}
+
+/**
+ * 岩肌マテリアル(rogue-13)。標準材質に onBeforeCompile でトライプレーナーの
+ * ノイズを注入する: UV の無い結合メッシュでも、世界座標の3軸投影を面法線で
+ * ブレンドしてサンプリングできる。頂点カラー(深度・訪問ティント)には乗算で
+ * 重なる。ノイズ1枚を 色ムラ(2スケール)/擬似バンプ/粗さ変調 に共用。
+ */
+function makeRockMaterial(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.95,
+    metalness: 0.02,
+    flatShading: true,
+  });
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.rockMap = { value: rockTexture() };
+    shader.uniforms.rockScale = { value: 0.21 / ROGUE_S }; // 世界座標 → UV
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRockPos;')
+      .replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\nvRockPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        /* glsl */ `#include <common>
+uniform sampler2D rockMap;
+uniform float rockScale;
+varying vec3 vRockPos;
+float rockTri(vec3 p, vec3 n) {
+  vec3 w = pow(abs(n), vec3(3.0));
+  w /= (w.x + w.y + w.z);
+  return texture2D(rockMap, p.zy * rockScale).r * w.x
+       + texture2D(rockMap, p.xz * rockScale).r * w.y
+       + texture2D(rockMap, p.xy * rockScale).r * w.z;
+}`,
+      )
+      // 色ムラ: 粗いスケール(岩の縞)+細かいスケール(粒)を乗算。
+      .replace(
+        '#include <color_fragment>',
+        /* glsl */ `#include <color_fragment>
+{
+  vec3 fn = normalize(cross(dFdx(vRockPos), dFdy(vRockPos)));
+  float h1 = rockTri(vRockPos, fn);
+  float h2 = rockTri(vRockPos * 3.1 + 17.3, fn);
+  diffuseColor.rgb *= mix(0.72, 1.24, h1) * mix(0.88, 1.09, h2);
+}`,
+      )
+      // 粗さ変調: 明るい斑をわずかに滑らかに(濡れた鉱物面の気配)。
+      .replace(
+        '#include <roughnessmap_fragment>',
+        /* glsl */ `#include <roughnessmap_fragment>
+{
+  vec3 fnR = normalize(cross(dFdx(vRockPos), dFdy(vRockPos)));
+  roughnessFactor = clamp(roughnessFactor * mix(1.05, 0.78, rockTri(vRockPos * 1.3 + 7.7, fnR)), 0.1, 1.0);
+}`,
+      )
+      // 擬似バンプ: 高さのスクリーン微分で法線を曲げる(three の bumpmap と同じ手法)。
+      .replace(
+        '#include <normal_fragment_maps>',
+        /* glsl */ `#include <normal_fragment_maps>
+{
+  float hb = rockTri(vRockPos * 1.9 + 31.7, normal);
+  vec2 dH = vec2(dFdx(hb), dFdy(hb)) * 0.85;
+  vec3 sX = dFdx(-vViewPosition);
+  vec3 sY = dFdy(-vViewPosition);
+  vec3 r1 = cross(sY, normal);
+  vec3 r2 = cross(normal, sX);
+  float det = dot(sX, r1);
+  det *= float(gl_FrontFacing) * 2.0 - 1.0;
+  vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
+  normal = normalize(abs(det) * normal - grad);
+}`,
+      );
+  };
+  return m;
 }
 
 export function DungeonShell() {
@@ -243,6 +346,11 @@ export function DungeonShell() {
   const planes = mapMode ? [] : [cutPlane];
   const showCut = hasStencil && !mapMode;
 
+  // 岩肌マテリアル(トライプレーナー)。クリップ平面はレンダーごとに差し替える。
+  const rockMat = useMemo(() => makeRockMaterial(), []);
+  useEffect(() => () => rockMat.dispose(), [rockMat]);
+  rockMat.clippingPlanes = planes;
+
   // カット平面の更新。「平面よりカメラ側」(n·p + c < 0)が描画されない。
   // 視線直交のままだと、俯瞰時に平面がほぼ水平になってプレイヤー頭上すれすれに浮き、
   // 周囲の床セルの上端を薄切りにした小さな菱形断面が散らばって「不定形の穴」に見える
@@ -280,16 +388,8 @@ export function DungeonShell() {
       {/* 同一ジオメトリを複数パスで共有するため geometry プロップで渡す(単純な代入)。
           <primitive attach> 共有は差し替え時の付け外し帳簿が絡み、発見のたびの再構築で
           一部メッシュが空ジオメトリへ戻る(壁が消える)ことがあった(第10回)。 */}
-      {/* 表面: 通常の岩肌(カメラ側はクリップ) */}
-      <mesh geometry={geom} frustumCulled={false}>
-        <meshStandardMaterial
-          vertexColors
-          roughness={0.95}
-          metalness={0.02}
-          flatShading
-          clippingPlanes={planes}
-        />
-      </mesh>
+      {/* 表面: 岩肌(トライプレーナーの色ムラ+擬似バンプ。カメラ側はクリップ) */}
+      <mesh geometry={geom} material={rockMat} frustumCulled={false} />
       {/* 裏面の土色: stencil 不可環境のフォールバック。stencil 有効時はキャップが
           平面上で必ず先に遮る(内部への視線は平面を岩の中で横切る)ため描かない —
           描くと遠方の断面までキャップの放射フェードを無視して明るく見えてしまう。 */}
