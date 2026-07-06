@@ -17,6 +17,7 @@ import { RogueEffects } from './RogueEffects';
 import { RogueCamera } from './RogueCamera';
 import { Motes } from './Motes';
 import { Crystals } from './Crystals';
+import { Decor } from './Decor';
 import { RoguePostFx } from './RoguePostFx';
 
 const S = ROGUE_S;
@@ -41,6 +42,7 @@ export function RogueScene() {
 
       <DungeonShell />
       <Crystals />
+      <Decor />
       {!mapMode && <Motes />}
       {!mapMode && <LevelFloor />}
       {!mapMode && <DevicesView />}
