@@ -275,6 +275,103 @@
 .hud-bubble.beast { border-color: #ef4444; color: #fca5a5; }
 .hud-bubble.room { border-color: #e8c35a; color: #fde68a; font-size: 12px; padding: 5px 12px; }
 
+/* --- rogue-5: パネルの質感(すりガラス+影+柔らかい枠) --- */
+.hud-rogue-status,
+.hud-unit,
+.hud-pack,
+.hud-log,
+.hud-actions,
+.hud-viewhint,
+.hud-banner,
+.hud-forecast {
+  background: linear-gradient(160deg, rgba(26, 21, 56, 0.68), rgba(10, 8, 30, 0.78));
+  backdrop-filter: blur(10px) saturate(1.25);
+  -webkit-backdrop-filter: blur(10px) saturate(1.25);
+  border-color: rgba(128, 118, 210, 0.45);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.hud button {
+  background: linear-gradient(180deg, #3b3778, #292656);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  transition: background 0.15s, transform 0.12s, box-shadow 0.12s;
+}
+.hud button:hover {
+  background: linear-gradient(180deg, #4a45a0, #35316e);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.hud button:disabled { transform: none; }
+.hud-hpbar {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.hud-hpbar > div { transition: width 0.25s ease-out; }
+.hud-bubble {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* --- rogue-5: タイトル画面(初回のみ。クリックが音の解禁も兼ねる) --- */
+.hud-title {
+  position: fixed;
+  inset: 0;
+  z-index: 60; /* HUD(10)とバブル(drei Html, 最大50)より上 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', system-ui, sans-serif;
+  color: #e2e8f0;
+  user-select: none;
+  background:
+    radial-gradient(ellipse 60% 45% at 50% 44%, rgba(96, 58, 26, 0.5), rgba(6, 4, 14, 0) 70%),
+    rgba(8, 6, 20, 0.9);
+  animation: title-in 0.9s ease-out;
+}
+.hud-title-sub {
+  font-size: 15px;
+  letter-spacing: 0.55em;
+  text-indent: 0.55em; /* letter-spacing の右余りを打ち消して中央に */
+  color: #a58ee0;
+}
+.hud-title h1 {
+  margin: 10px 0 20px;
+  font-size: clamp(44px, 9vw, 84px);
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: #f3d9a4;
+  text-shadow: 0 0 28px rgba(255, 170, 60, 0.5), 0 0 90px rgba(255, 140, 40, 0.3);
+  animation: title-glow 3.4s ease-in-out infinite;
+}
+.hud-title p { margin: 0 0 30px; font-size: 14px; line-height: 2; color: #b8c2d6; }
+.hud-title button {
+  font: inherit;
+  font-size: 19px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #ffe9c4;
+  padding: 13px 58px;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid #f59e0b;
+  background: linear-gradient(180deg, #a2500f, #7c3a08);
+  box-shadow: 0 0 24px rgba(245, 158, 11, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: transform 0.12s, box-shadow 0.2s;
+}
+.hud-title button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 40px rgba(245, 158, 11, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.hud-title-hint { margin-top: 30px; font-size: 12px; color: #7d8aa5; letter-spacing: 0.08em; }
+@keyframes title-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes title-glow {
+  0%, 100% { text-shadow: 0 0 28px rgba(255, 170, 60, 0.5), 0 0 90px rgba(255, 140, 40, 0.3); }
+  50% { text-shadow: 0 0 40px rgba(255, 180, 70, 0.75), 0 0 120px rgba(255, 150, 50, 0.45); }
+}
+
 /* --- ダメージポップアップ（Effects の Html） --- */
 .fx-popup {
   font-family: 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;

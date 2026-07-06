@@ -46,6 +46,7 @@ import {
 import { animateUnit, clearUnitAnims, STEP_MS } from './unitAnim';
 import { view, resetView, setGazeGoal, clearGazeGoal } from './view';
 import * as sfx from '../audio/sfx';
+import * as bgm from '../audio/bgm';
 
 // --- 定数・型 ---------------------------------------------------------------------
 
@@ -183,6 +184,8 @@ export interface RogueState {
   /** マップの TAB 巡回でフォーカス中の広間 id(プレイヤー位置のときは null)。 */
   mapFocusChamber: number | null;
   muted: boolean;
+  /** ポストエフェクト(ブルーム等)。重い/表示が崩れる環境向けに切れるようにする。 */
+  postFx: boolean;
   log: string[];
   fx: RogueFx[];
 
@@ -208,6 +211,7 @@ export interface RogueState {
   /** マップから: その広間の入り口(経路上で最初に踏む広間セル)までファストトラベル。 */
   travelToChamber: (id: number) => void;
   toggleMute: () => void;
+  togglePostFx: () => void;
 }
 
 // --- RNG(戦闘分散用。ダンジョン生成は dungeon.rng) --------------------------------
@@ -471,6 +475,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const { player } = get();
     if (player.hp > 0) return false;
     set({ phase: 'dead', busy: false, reach: { cells: [], parent: new Map() } });
+    bgm.setBgmScene('dead');
     sfx.play('defeat');
     pushLog('力尽きた…');
     return true;
@@ -936,11 +941,13 @@ export const useRogue = create<RogueState>((set, get) => {
     mapMode: false,
     mapFocusChamber: null,
     muted: false,
+    postFx: true,
 
     restart: (seed) => {
       resetView();
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
+      bgm.setBgmScene('game');
       set({
         ...buildInitial(seed ?? Math.floor(Math.random() * 0x7fffffff)),
         freeCam: false,
@@ -1180,6 +1187,7 @@ export const useRogue = create<RogueState>((set, get) => {
       } else {
         view.R = null; // ゲーム既定距離へ再導出
       }
+      bgm.setBgmScene(on ? 'map' : 'game');
       sfx.play('select');
       set({
         mapMode: on,
@@ -1237,8 +1245,11 @@ export const useRogue = create<RogueState>((set, get) => {
     toggleMute: () => {
       const m = !get().muted;
       sfx.setMuted(m);
+      bgm.setBgmMuted(m);
       set({ muted: m });
     },
+
+    togglePostFx: () => set({ postFx: !get().postFx }),
   };
 
   /** restart 直後の明かり+到達範囲(クロージャ内関数を初期化からも使うため)。 */

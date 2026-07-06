@@ -15,6 +15,9 @@ import { MoveMarkers } from './MoveMarkers';
 import { Bubbles } from './Bubbles';
 import { RogueEffects } from './RogueEffects';
 import { RogueCamera } from './RogueCamera';
+import { Motes } from './Motes';
+import { Crystals } from './Crystals';
+import { RoguePostFx } from './RoguePostFx';
 
 const S = ROGUE_S;
 
@@ -37,6 +40,8 @@ export function RogueScene() {
       {mapMode && <directionalLight position={[-14, -10, -8]} intensity={0.3} color="#c9b896" />}
 
       <DungeonShell />
+      <Crystals />
+      {!mapMode && <Motes />}
       {!mapMode && <LevelFloor />}
       {!mapMode && <DevicesView />}
       {!mapMode && <LootView />}
@@ -46,6 +51,7 @@ export function RogueScene() {
       <Bubbles />{/* モードで内容が変わる(ゲーム=アイテム/通路、マップ=敵/アイテム+引き出し線) */}
       <RogueEffects />
       <RogueCamera />
+      <RoguePostFx />
     </>
   );
 }

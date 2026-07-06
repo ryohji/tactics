@@ -50,6 +50,11 @@ export function unlock(): void {
   ensureCtx();
 }
 
+/** BGM など他モジュールが同じ AudioContext を共有するための取得口。 */
+export function audioContext(): AudioContext | null {
+  return ensureCtx();
+}
+
 export function setMuted(v: boolean): void {
   muted = v;
   if (master) master.gain.value = v ? 0 : MASTER_GAIN;

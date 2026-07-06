@@ -55,6 +55,8 @@ function SystemButtons() {
   const toggleMap = useRogue((s) => s.toggleMap);
   const muted = useRogue((s) => s.muted);
   const toggleMute = useRogue((s) => s.toggleMute);
+  const postFx = useRogue((s) => s.postFx);
+  const togglePostFx = useRogue((s) => s.togglePostFx);
   const restart = useRogue((s) => s.restart);
   return (
     <>
@@ -68,6 +70,13 @@ function SystemButtons() {
           </button>
         )}
         <button onClick={() => resetView()}>⌖視点リセット</button>
+        <button
+          className={postFx ? 'active' : ''}
+          onClick={togglePostFx}
+          title="光の演出(表示が重い・崩れるときはオフに)"
+        >
+          ✨
+        </button>
         <button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button>
         <button onClick={() => restart()}>↺最初から</button>
       </div>
