@@ -5,6 +5,7 @@ import { RogueHud } from './ui/RogueHud';
 import { useRogue, parseSeed } from './state/rogue';
 import { hasSave, clearSave } from './state/persist';
 import { installKeys } from './input/keys';
+import { installTouchFlag } from './input/touch';
 import { unlock } from './audio/sfx';
 import { startBgm } from './audio/bgm';
 
@@ -21,6 +22,7 @@ export function App() {
       startBgm();
     };
     window.addEventListener('pointerdown', onDown);
+    installTouchFlag();
     installKeys({
       onCycle: (dir) => useRogue.getState().cycleTarget(dir),
       onToggleMap: () => useRogue.getState().toggleMap(),

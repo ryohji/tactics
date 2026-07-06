@@ -13,16 +13,20 @@ import { stepDist } from '../../model/dungeon';
 import { itemLabel } from '../../model/loot';
 import { BEASTS } from '../../model/beasts';
 import { useRogue, ROGUE_S } from '../../state/rogue';
+import { tapAction } from '../../input/touch';
 
 const S = ROGUE_S;
 
 function Bubble({
+  id,
   target,
   label,
   kind,
   lift = 0.9,
   onClick,
 }: {
+  /** 2段階タップの識別キー(一覧の React key と同じ値)。 */
+  id: string;
   target: Cell;
   label: string;
   kind: 'item' | 'passage' | 'beast' | 'room';
@@ -31,14 +35,23 @@ function Bubble({
 }) {
   const travelTo = useRogue((s) => s.travelTo);
   const playerPos = useRogue((s) => s.player.pos);
+  const armedKey = useRogue((s) => s.armedKey);
   const w = worldPos(target[0], target[1], target[2], S);
   const d = stepDist(playerPos, target);
+  const key = `bubble:${id}`;
   return (
     <Html position={[w.x, w.y + lift * S, w.z]} center zIndexRange={[50, 0]}>
       <div
-        className={`hud-bubble ${kind}`}
+        className={`hud-bubble ${kind}${armedKey === key ? ' armed' : ''}`}
         onClick={(e) => {
           e.stopPropagation();
+          // タッチは2段階: 1度目=選択(強調表示)、2度目=移動。
+          const s = useRogue.getState();
+          if (tapAction(s.armedKey, key) === 'arm') {
+            s.setArmed(key);
+            return;
+          }
+          s.setArmed(null);
           if (onClick) onClick();
           else travelTo(target);
         }}
@@ -74,11 +87,12 @@ function GameBubbles() {
   return (
     <>
       {itemBubbles.map((i) => (
-        <Bubble key={`i${i.id}`} target={i.pos} label={itemLabel(i.stack)} kind="item" />
+        <Bubble key={`i${i.id}`} id={`i${i.id}`} target={i.pos} label={itemLabel(i.stack)} kind="item" />
       ))}
       {passages.map((st) => (
         <Bubble
           key={`p${st.id}`}
+          id={`p${st.id}`}
           target={st.mouth}
           label={st.used ? '通路' : '未踏の通路'}
           kind="passage"
@@ -160,6 +174,7 @@ function MapBubbles() {
       {spotted.map((b, i) => (
         <Bubble
           key={`b${b.id}`}
+          id={`b${b.id}`}
           target={b.pos}
           label={BEASTS[b.kind].name}
           kind="beast"
@@ -170,6 +185,7 @@ function MapBubbles() {
       {loot.map((it, i) => (
         <Bubble
           key={`i${it.id}`}
+          id={`i${it.id}`}
           target={it.pos}
           label={itemLabel(it.stack)}
           kind="item"
@@ -180,6 +196,7 @@ function MapBubbles() {
       {focusTarget && (
         <Bubble
           key={`c${focusTarget.id}`}
+          id={`c${focusTarget.id}`}
           target={focusTarget.center}
           label="この部屋の入り口へ"
           kind="room"

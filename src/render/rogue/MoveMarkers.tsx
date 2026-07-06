@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { cellKey, keyToCell, layer, worldPos, type Cell } from '../../model/fcc';
 import { useRogue, placeableCells, ROGUE_S } from '../../state/rogue';
 import { consumeSuppressedClick } from '../../input/suppress';
+import { tapAction } from '../../input/touch';
 import { buildHexTile, buildHexEdges } from '../hex';
 
 const S = ROGUE_S;
@@ -155,7 +156,17 @@ export function MoveMarkers() {
           e.stopPropagation();
           if (consumeSuppressedClick()) return;
           const c = e.instanceId !== undefined ? cells[e.instanceId] : undefined;
-          if (c) clickCell(c);
+          if (!c) return;
+          // タッチは2段階: 1度目=選択(同層ヘックス等の情報表示)、2度目=実行。
+          const s = useRogue.getState();
+          const key = `cell:${cellKey(c)}`;
+          if (tapAction(s.armedKey, key) === 'arm') {
+            s.setArmed(key);
+            setHoverMarker(cellKey(c));
+            return;
+          }
+          s.setArmed(null);
+          clickCell(c);
         }}
         onPointerMove={(e) => {
           e.stopPropagation();

@@ -216,6 +216,9 @@ export interface RogueState {
   /** 発見済みセルへのファストトラベル(1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。 */
   travelTo: (c: Cell) => void;
   setHoverMarker: (k: CellKey | null) => void;
+  /** タッチの2段階操作: 1度目のタップで選択された対象のキー("cell:…"/"beast:…"/"bubble:…")。 */
+  armedKey: string | null;
+  setArmed: (key: string | null) => void;
   hoverBeast: (id: number | null) => void;
   toggleFreeCam: () => void;
   /** マップモードの切替(M キー / HUD ボタン)。 */
@@ -492,7 +495,8 @@ export const useRogue = create<RogueState>((set, get) => {
   }
 
   function refreshReach(): void {
-    set({ reach: computeReach() });
+    // 到達範囲が変わる=状況が動いた。タッチの2段階選択(armedKey)も解除する。
+    set({ reach: computeReach(), armedKey: null });
   }
 
   /**
@@ -1039,7 +1043,7 @@ export const useRogue = create<RogueState>((set, get) => {
     | 'seed' | 'dungeon' | 'discovered' | 'discoveredRev' | 'player' | 'beasts' | 'items'
     | 'traps' | 'turrets' | 'decoys' | 'lightLevel'
     | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'placeIndex' | 'reach'
-    | 'hoverMarker' | 'hoverBeastId' | 'focus' | 'log' | 'fx'
+    | 'hoverMarker' | 'hoverBeastId' | 'armedKey' | 'focus' | 'log' | 'fx'
     | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
   > {
     clearUnitAnims();
@@ -1094,6 +1098,7 @@ export const useRogue = create<RogueState>((set, get) => {
       reach: { cells: [], parent: new Map() },
       hoverMarker: null,
       hoverBeastId: null,
+      armedKey: null,
       focus: [0, 0, 0],
       log: ['蟻巣迷宮に踏み込んだ。青いマーカーで移動、隣接した敵はクリックで攻撃。'],
       fx: [],
@@ -1174,6 +1179,7 @@ export const useRogue = create<RogueState>((set, get) => {
         reach: { cells: [], parent: new Map() },
         hoverMarker: null,
         hoverBeastId: null,
+        armedKey: null,
         focus: d.player.pos,
         freeCam: false,
         mapMode: false,
@@ -1415,6 +1421,12 @@ export const useRogue = create<RogueState>((set, get) => {
       set({ uiMode: 'walk', placeIndex: null });
     },
 
+    setArmed: (key) => {
+      if (get().armedKey === key) return;
+      if (key !== null) sfx.play('cursor');
+      set({ armedKey: key });
+    },
+
     setHoverMarker: (k) => {
       if (get().hoverMarker === k) return;
       if (k !== null) sfx.play('cursor');
@@ -1450,6 +1462,7 @@ export const useRogue = create<RogueState>((set, get) => {
         focus: s.player.pos,
         hoverBeastId: null,
         hoverMarker: null,
+        armedKey: null,
       });
     },
 

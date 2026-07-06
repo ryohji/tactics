@@ -64,7 +64,7 @@ function StatusPanel() {
   );
 }
 
-function SystemButtons() {
+function SystemButtons({ onHelp }: { onHelp: () => void }) {
   const freeCam = useRogue((s) => s.freeCam);
   const toggleFreeCam = useRogue((s) => s.toggleFreeCam);
   const mapMode = useRogue((s) => s.mapMode);
@@ -77,15 +77,17 @@ function SystemButtons() {
   return (
     <>
       <div className="hud-system">
-        <button className={mapMode ? 'active' : ''} onClick={toggleMap}>
-          🗺マップ(M)
+        <button className={mapMode ? 'active' : ''} onClick={toggleMap} title="マップ(M)">
+          🗺<span className="lbl">マップ(M)</span>
         </button>
         {!mapMode && (
-          <button className={freeCam ? 'active' : ''} onClick={toggleFreeCam}>
-            🎥視点モード
+          <button className={freeCam ? 'active' : ''} onClick={toggleFreeCam} title="視点モード">
+            🎥<span className="lbl">視点モード</span>
           </button>
         )}
-        <button onClick={() => resetView()}>⌖視点リセット</button>
+        <button onClick={() => resetView()} title="視点リセット">
+          ⌖<span className="lbl">視点リセット</span>
+        </button>
         <button
           className={postFx ? 'active' : ''}
           onClick={togglePostFx}
@@ -94,7 +96,12 @@ function SystemButtons() {
           ✨
         </button>
         <button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button>
-        <button onClick={() => restart()}>↺最初から</button>
+        <button onClick={() => restart()} title="最初から">
+          ↺<span className="lbl">最初から</span>
+        </button>
+        <button onClick={onHelp} title="操作説明">
+          ❓
+        </button>
       </div>
       {freeCam && !mapMode && (
         <div className="hud-viewhint">左ドラッグ=移動 / 右ドラッグ=旋回 / ホイール=寄り引き</div>
@@ -105,6 +112,20 @@ function SystemButtons() {
         </div>
       )}
     </>
+  );
+}
+
+/** マップモードの下部バー(部屋巡回。TAB / Shift+TAB のボタン代替 — タッチでも使える)。 */
+function MapActions() {
+  const mapMode = useRogue((s) => s.mapMode);
+  const cycleTarget = useRogue((s) => s.cycleTarget);
+  if (!mapMode) return null;
+  return (
+    <div className="hud-actions">
+      <button onClick={() => cycleTarget(-1)}>◀</button>
+      <span className="mini">部屋を巡回</span>
+      <button onClick={() => cycleTarget(1)}>▶</button>
+    </div>
   );
 }
 
@@ -206,6 +227,7 @@ function ActionBar() {
   const mapMode = useRogue((s) => s.mapMode);
   const wait = useRogue((s) => s.wait);
   const cancelThrow = useRogue((s) => s.cancelThrow);
+  const cycleTarget = useRogue((s) => s.cycleTarget);
   if (phase !== 'play' || mapMode) return null;
   return (
     <div className="hud-actions">
@@ -221,7 +243,14 @@ function ActionBar() {
         </>
       ) : (
         <>
-          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃 / TAB=敵に視線(Shift で逆順)</span>
+          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃</span>
+          {/* 敵への視線巡回(TAB / Shift+TAB のボタン代替 — タッチでも使える) */}
+          <button disabled={busy} title="前の敵へ視線(Shift+TAB)" onClick={() => cycleTarget(-1)}>
+            ◀
+          </button>
+          <button disabled={busy} title="次の敵へ視線(TAB)" onClick={() => cycleTarget(1)}>
+            敵▶
+          </button>
           <LightButton busy={busy} />
           <button disabled={busy} onClick={wait}>
             待機
@@ -316,16 +345,62 @@ function DeadOverlay() {
   );
 }
 
+/** 操作説明(❓)。PC とタッチの両方をここに集約し、HUD 上の説明文は最小限にする。 */
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="hud-help" onClick={onClose}>
+      <div className="hud-help-panel" onClick={(e) => e.stopPropagation()}>
+        <h2>操作説明</h2>
+        <h3>マウス / キーボード</h3>
+        <table>
+          <tbody>
+            <tr><td>左ドラッグ / ホイール</td><td>視点の回転 / 寄り引き</td></tr>
+            <tr><td>青マーカーをクリック</td><td>移動(1歩=1ターン)。ホバーで同じ高さの範囲表示</td></tr>
+            <tr><td>敵をクリック</td><td>武器リーチ内なら攻撃(ホバーで情報)</td></tr>
+            <tr><td>バブルをクリック</td><td>ファストトラベル(敵に気づかれると中断)</td></tr>
+            <tr><td>TAB / Shift+TAB</td><td>敵・部屋へ視線やフォーカスを巡回 / 逆順</td></tr>
+            <tr><td>M</td><td>マップモード切替(ドラッグ=回転 / Space+ドラッグ=移動)</td></tr>
+          </tbody>
+        </table>
+        <h3>タッチ(スマートフォン)</h3>
+        <table>
+          <tbody>
+            <tr><td>1本指ドラッグ / ピンチ</td><td>視点の回転 / 寄り引き</td></tr>
+            <tr><td>2本指ドラッグ</td><td>視点の移動(パン)</td></tr>
+            <tr><td>マーカー・敵・バブル</td><td><b>1度目のタップ=選択</b>(情報表示)、<b>2度目=実行</b></td></tr>
+            <tr><td>◀ ▶ ボタン</td><td>敵・部屋の巡回(TAB の代わり)</td></tr>
+          </tbody>
+        </table>
+        <h3>しくみ</h3>
+        <table>
+          <tbody>
+            <tr><td>🔥明かり</td><td>広げるほど視界と回復が増すが、敵に気づかれやすい</td></tr>
+            <tr><td>合成</td><td>同じアイテム・同じ品質の2つ → 品質+1(1ターン)</td></tr>
+            <tr><td>罠</td><td>足元か隣接セルに設置。敵が踏むと発動</td></tr>
+            <tr><td>セーブ</td><td>毎ターン自動保存。死ぬと消える(再挑戦のみ)</td></tr>
+          </tbody>
+        </table>
+        <button className="primary" onClick={onClose}>
+          閉じる
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function RogueHud() {
+  const [help, setHelp] = useState(false);
   return (
     <div className="hud">
       <StatusPanel />
-      <SystemButtons />
+      <SystemButtons onHelp={() => setHelp(true)} />
       <PackPanel />
       <BeastPanel />
       <ActionBar />
+      <MapActions />
       <LogPanel />
       <DeadOverlay />
+      {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </div>
   );
 }

@@ -433,6 +433,126 @@
   50% { text-shadow: 0 0 40px rgba(255, 180, 70, 0.75), 0 0 120px rgba(255, 150, 50, 0.45); }
 }
 
+/* --- rogue-10: タッチの2段階選択(1度目のタップで選択中の対象を強調) --- */
+.hud-bubble.armed {
+  outline: 2px solid #fbbf24;
+  outline-offset: 1px;
+  transform: scale(1.15);
+  background: rgba(80, 62, 20, 0.9);
+}
+.hud-actions .mini { font-size: 12px; color: #a5b4fc; }
+
+/* --- rogue-10: ヘルプ画面(❓。説明文はここへ集約) --- */
+.hud-help {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 4, 16, 0.75);
+  pointer-events: auto;
+}
+.hud-help-panel {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  background: linear-gradient(160deg, rgba(26, 21, 56, 0.95), rgba(10, 8, 30, 0.97));
+  border: 1px solid rgba(128, 118, 210, 0.5);
+  border-radius: 14px;
+  padding: 18px 22px;
+  font-size: 13px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+.hud-help-panel h2 { margin: 0 0 10px; font-size: 18px; color: #e8c35a; letter-spacing: 0.12em; }
+.hud-help-panel h3 { margin: 14px 0 6px; font-size: 13px; color: #a5b4fc; }
+.hud-help-panel table { width: 100%; border-collapse: collapse; }
+.hud-help-panel td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(120, 110, 200, 0.18);
+  vertical-align: top;
+}
+.hud-help-panel td:first-child { white-space: nowrap; color: #cbd5e1; width: 38%; }
+.hud-help-panel td:last-child { color: #94a3b8; }
+.hud-help-panel > button { margin-top: 16px; width: 100%; }
+
+/* --- rogue-10: スマートフォン向け縮小・再配置 ---
+   説明文(hint/viewhint/ボタンのラベル)を隠し、パネルを小さく・タップしやすく。 */
+@media (max-width: 760px), (max-height: 500px) {
+  .hud { font-size: 12px; }
+  .hud-system { top: 8px; right: 8px; gap: 5px; }
+  .hud-system button { padding: 7px 9px; font-size: 14px; }
+  .hud-system button .lbl { display: none; } /* アイコンのみ */
+  .hud-viewhint { display: none; }
+  .hud-actions .hint { display: none; }
+
+  .hud-rogue-status {
+    top: 8px;
+    left: 8px;
+    width: min(46vw, 190px);
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+  .hud-rogue-status h3 { font-size: 12px; }
+  .hud-rogue-status .tag { font-size: 10px; }
+  .hud-stats { grid-template-columns: repeat(3, 1fr); font-size: 10px; }
+  .hud-equip { font-size: 10px; }
+  .hud-equip .unequip { padding: 1px 6px; font-size: 10px; }
+
+  .hud-pack {
+    top: auto;
+    bottom: 66px;
+    right: 8px;
+    width: min(46vw, 180px);
+    max-height: 38dvh;
+    overflow-y: auto;
+    padding: 7px 8px;
+    font-size: 11px;
+  }
+  .hud-pack button { padding: 6px 8px; font-size: 11px; }
+  .hud-pack button .use { font-size: 9px; }
+
+  .hud-unit {
+    left: 8px;
+    bottom: 66px;
+    width: min(46vw, 190px);
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+  .hud-unit h3 { font-size: 12px; }
+
+  .hud-log {
+    left: 8px;
+    right: auto;
+    bottom: 8px;
+    width: min(56vw, 260px);
+    max-height: 48px;
+    font-size: 10px;
+    line-height: 1.45;
+    padding: 5px 8px;
+  }
+  .hud-log div:nth-last-child(n + 4) { display: none; } /* 直近3行だけ */
+
+  .hud-actions {
+    bottom: 8px;
+    left: auto;
+    right: 8px;
+    transform: none;
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  .hud-actions button { padding: 8px 10px; font-size: 12px; }
+
+  .hud-title h1 { letter-spacing: 0.14em; text-indent: 0.14em; }
+  .hud-title p { font-size: 12px; }
+  .hud-title-seed input { width: min(240px, 70vw); }
+  .hud-title-hint { display: none; }
+  .hud-over h1 { font-size: 38px; }
+  .hud-score { font-size: 15px; }
+  .hud-score-sub { font-size: 11px; padding: 0 16px; text-align: center; }
+  .hud-bubble { font-size: 10px; padding: 4px 9px; }
+}
+
 /* --- ダメージポップアップ（Effects の Html） --- */
 .fx-popup {
   font-family: 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;

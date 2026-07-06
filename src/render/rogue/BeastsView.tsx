@@ -14,6 +14,7 @@ import { ITEMS } from '../../model/loot';
 import { useRogue, ROGUE_S, type Beast } from '../../state/rogue';
 import { currentUnitGrid } from '../../state/unitAnim';
 import { consumeSuppressedClick } from '../../input/suppress';
+import { tapAction } from '../../input/touch';
 
 const S = ROGUE_S;
 
@@ -157,6 +158,15 @@ function BeastItem({ b }: { b: Beast }) {
       onClick={(e) => {
         e.stopPropagation();
         if (consumeSuppressedClick()) return;
+        // タッチは2段階: 1度目=選択(情報パネル)、2度目=攻撃/投擲。
+        const s = useRogue.getState();
+        const key = `beast:${b.id}`;
+        if (tapAction(s.armedKey, key) === 'arm') {
+          s.setArmed(key);
+          hoverBeast(b.id);
+          return;
+        }
+        s.setArmed(null);
         clickBeast(b.id);
       }}
       onPointerOver={(e) => {

@@ -29,10 +29,16 @@ export function RogueCamera() {
 
   useEffect(() => {
     const el = domElement;
-    let mode: 'rotate' | 'pan' | null = null;
+    let mode: 'rotate' | 'pan' | 'pinch' | null = null;
     let moved = 0;
     let lastX = 0;
     let lastY = 0;
+    // タッチ: アクティブポインタを追跡。1本指=旋回 / 2本指=パン+ピンチでズーム。
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinchDist = 0;
+    let pinchCX = 0;
+    let pinchCY = 0;
+    el.style.touchAction = 'none'; // ブラウザのスクロール/ダブルタップズームを抑止
 
     const right = new THREE.Vector3();
     const up = new THREE.Vector3();
@@ -51,7 +57,37 @@ export function RogueCamera() {
       view.base = [view.base[0] + g[0], view.base[1] + g[1], view.base[2] + g[2]];
     };
 
+    /** 2本指の距離と中点を更新し、前回値との差でズーム・パンする。 */
+    const pinchUpdate = (init: boolean) => {
+      const [a, b] = [...touches.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      if (!init) {
+        if (d > 1) view.R = (view.R ?? R_DEFAULT) * (pinchDist / d);
+        pan(cx - pinchCX, cy - pinchCY);
+      }
+      pinchDist = d;
+      pinchCX = cx;
+      pinchCY = cy;
+    };
+
     const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 1) {
+          mode = 'rotate'; // タッチは常に 1本指=旋回(パンは2本指)
+          moved = 0;
+          lastX = e.clientX;
+          lastY = e.clientY;
+          setSuppressNextClick(false);
+        } else if (touches.size === 2) {
+          mode = 'pinch';
+          pinchUpdate(true);
+          setSuppressNextClick(true); // ジェスチャ後の誤タップを抑止
+        }
+        return;
+      }
       const { freeCam, mapMode } = useRogue.getState();
       if (mapMode) {
         // マップ: 左ドラッグ=回転が基本。Space を押している間は移動(パン)。右=回転。
@@ -72,6 +108,16 @@ export function RogueCamera() {
     };
     const onMove = (e: PointerEvent) => {
       if (mode === null) return;
+      if (e.pointerType === 'touch') {
+        const p = touches.get(e.pointerId);
+        if (!p) return;
+        p.x = e.clientX;
+        p.y = e.clientY;
+        if (mode === 'pinch') {
+          if (touches.size >= 2) pinchUpdate(false);
+          return;
+        }
+      }
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
       lastX = e.clientX;
@@ -85,7 +131,15 @@ export function RogueCamera() {
         pan(dx, dy);
       }
     };
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        touches.delete(e.pointerId);
+        if (mode === 'pinch') {
+          // 指が1本残ってもジェスチャは終了(残り指での旋回は新たなタッチから)。
+          if (touches.size < 2) mode = null;
+          return;
+        }
+      }
       if (mode === null) return;
       mode = null;
       if (moved > DRAG_THRESHOLD) setSuppressNextClick(true);
@@ -99,12 +153,14 @@ export function RogueCamera() {
     el.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('contextmenu', onContextMenu);
     return () => {
       el.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('contextmenu', onContextMenu);
     };
