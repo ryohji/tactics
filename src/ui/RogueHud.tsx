@@ -1,10 +1,10 @@
 // rogue の DOM オーバーレイ HUD。
-//   左上: プレイヤー状態(HP・深度・ターン・討伐・装備)
-//   右上: システム(視点モード/視点リセット/ミュート/最初から)
-//   右中: 所持品(クリックで 使う/構える/投擲モード)
+//   左上: HP バー(数字重ね)
+//   右上: システム(明かり/視点リセット/演出/音/最初から/ヘルプ)
+//   右中: 所持品(開閉式。最上段に装備枠 — 攻/防はここに表示)
 //   左下: ホバー中の敵情報
-//   右下: ログ / 下中央: 待機・投擲キャンセル
-//   死亡: スコアオーバーレイ
+//   下中央: よく使う操作(マップ・フォーカス巡回・待機)+ 深度/討伐/ターン
+//   右下: ログ / 死亡: スコアオーバーレイ
 
 import { useState } from 'react';
 import { useRogue, playerAtk, playerDef, depthOf, parseSeed, LIGHT } from '../state/rogue';
@@ -15,49 +15,17 @@ import { resetView } from '../state/view';
 import { shareUrl } from '../state/share';
 import './hud.css';
 
-function StatusPanel() {
+/** 左上: HP バーのみ(数字はバーに重ねる)。 */
+function HpPanel() {
   const player = useRogue((s) => s.player);
-  const turn = useRogue((s) => s.turn);
-  const kills = useRogue((s) => s.kills);
-  const maxDepth = useRogue((s) => s.maxDepth);
-  const unequip = useRogue((s) => s.unequip);
-  const phase = useRogue((s) => s.phase);
-  const busy = useRogue((s) => s.busy);
-  const locked = phase !== 'play' || busy;
   const hpPct = (player.hp / player.maxHp) * 100;
   const hpColor = hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#facc15' : '#ef4444';
   return (
-    <div className="hud-rogue-status">
-      <h3>
-        探索者
-        <span className="tag">深度 {depthOf(player.pos)}(最深 {maxDepth})</span>
-      </h3>
-      <div className="hud-hpbar">
+    <div className="hud-hp">
+      <div className="hud-hpbar big">
         <div style={{ width: `${hpPct}%`, background: hpColor }} />
-      </div>
-      <div className="hud-stats">
-        <span>HP<b>{player.hp}/{player.maxHp}</b></span>
-        <span>攻<b>{playerAtk(player)}</b></span>
-        <span>防<b>{playerDef(player)}</b></span>
-        <span>ターン<b>{turn}</b></span>
-        <span>討伐<b>{kills}</b></span>
-      </div>
-      <div className="hud-equip">
-        <span>
-          武器: {player.weapon ? `${itemLabel(player.weapon)}(${statLabel(player.weapon)})` : 'なし'}
-          {player.weapon && (
-            <button className="unequip" disabled={locked} onClick={() => unequip('weapon')}>
-              外す
-            </button>
-          )}
-        </span>
-        <span>
-          防具: {player.armor ? `${itemLabel(player.armor)}(${statLabel(player.armor)})` : 'なし'}
-          {player.armor && (
-            <button className="unequip" disabled={locked} onClick={() => unequip('armor')}>
-              外す
-            </button>
-          )}
+        <span className="num">
+          {player.hp}/{player.maxHp}
         </span>
       </div>
     </div>
@@ -65,10 +33,8 @@ function StatusPanel() {
 }
 
 function SystemButtons({ onHelp }: { onHelp: () => void }) {
-  const freeCam = useRogue((s) => s.freeCam);
-  const toggleFreeCam = useRogue((s) => s.toggleFreeCam);
   const mapMode = useRogue((s) => s.mapMode);
-  const toggleMap = useRogue((s) => s.toggleMap);
+  const busy = useRogue((s) => s.busy);
   const muted = useRogue((s) => s.muted);
   const toggleMute = useRogue((s) => s.toggleMute);
   const postFx = useRogue((s) => s.postFx);
@@ -77,14 +43,7 @@ function SystemButtons({ onHelp }: { onHelp: () => void }) {
   return (
     <>
       <div className="hud-system">
-        <button className={mapMode ? 'active' : ''} onClick={toggleMap} title="マップ(M)">
-          🗺<span className="lbl">マップ(M)</span>
-        </button>
-        {!mapMode && (
-          <button className={freeCam ? 'active' : ''} onClick={toggleFreeCam} title="視点モード">
-            🎥<span className="lbl">視点モード</span>
-          </button>
-        )}
+        {!mapMode && <LightButton busy={busy} />}
         <button onClick={() => resetView()} title="視点リセット">
           ⌖<span className="lbl">視点リセット</span>
         </button>
@@ -103,9 +62,6 @@ function SystemButtons({ onHelp }: { onHelp: () => void }) {
           ❓
         </button>
       </div>
-      {freeCam && !mapMode && (
-        <div className="hud-viewhint">左ドラッグ=移動 / 右ドラッグ=旋回 / ホイール=寄り引き</div>
-      )}
       {mapMode && (
         <div className="hud-viewhint">
           ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回(Shift で逆順・バブルで移動) / M=戻る
@@ -115,22 +71,37 @@ function SystemButtons({ onHelp }: { onHelp: () => void }) {
   );
 }
 
-/** マップモードの下部バー(部屋巡回。TAB / Shift+TAB のボタン代替 — タッチでも使える)。 */
-function MapActions() {
-  const mapMode = useRogue((s) => s.mapMode);
-  const cycleTarget = useRogue((s) => s.cycleTarget);
-  if (!mapMode) return null;
+/** 装備枠1段(所持品パネル最上段)。総攻撃力/防御力をここに表示する。 */
+function EquipSlot({
+  slot,
+  stack,
+  stat,
+  locked,
+}: {
+  slot: 'weapon' | 'armor';
+  stack: ItemStack | null;
+  stat: string;
+  locked: boolean;
+}) {
+  const unequip = useRogue((s) => s.unequip);
   return (
-    <div className="hud-actions">
-      <button onClick={() => cycleTarget(-1)}>◀</button>
-      <span className="mini">部屋を巡回</span>
-      <button onClick={() => cycleTarget(1)}>▶</button>
+    <div className="equip-slot">
+      <span className="slot-name">{slot === 'weapon' ? '武器' : '防具'}</span>
+      <span className={`slot-item${stack ? '' : ' empty'}`} title={stack ? statLabel(stack) : ''}>
+        {stack ? itemLabel(stack) : '(なし)'}
+      </span>
+      <span className="slot-stat">{stat}</span>
+      {stack && (
+        <button className="unequip" disabled={locked} onClick={() => unequip(slot)}>
+          外す
+        </button>
+      )}
     </div>
   );
 }
 
 function PackPanel() {
-  const pack = useRogue((s) => s.player.pack);
+  const player = useRogue((s) => s.player);
   const useItem = useRogue((s) => s.useItem);
   const mergeItem = useRogue((s) => s.mergeItem);
   const uiMode = useRogue((s) => s.uiMode);
@@ -138,7 +109,18 @@ function PackPanel() {
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const mapMode = useRogue((s) => s.mapMode);
+  const [open, setOpen] = useState(true);
   if (mapMode) return null;
+  const pack = player.pack;
+
+  // 閉じているときは小さなボタンだけ(画面を奪わない)。
+  if (!open) {
+    return (
+      <button className="hud-pack-fab" onClick={() => setOpen(true)} title="所持品を開く">
+        🎒{pack.length > 0 && <span className="cnt">{pack.length}</span>}
+      </button>
+    );
+  }
 
   // 同種・同品質をまとめて表示(クリックは最初の1個に対して)。
   const groups: { stack: ItemStack; count: number; index: number }[] = [];
@@ -151,7 +133,11 @@ function PackPanel() {
 
   return (
     <div className="hud-pack">
-      <h4>所持品</h4>
+      <h4 onClick={() => setOpen(false)} title="たたむ">
+        🎒所持品<span className="fold">▾</span>
+      </h4>
+      <EquipSlot slot="weapon" stack={player.weapon} stat={`攻${playerAtk(player)}`} locked={locked} />
+      <EquipSlot slot="armor" stack={player.armor} stat={`防${playerDef(player)}`} locked={locked} />
       {groups.length === 0 && <div className="empty">(なし)</div>}
       {groups.map((g) => {
         const def = ITEMS[g.stack.item];
@@ -220,7 +206,8 @@ function BeastPanel() {
   );
 }
 
-function ActionBar() {
+/** 下中央バー: よく使う操作(マップ・フォーカス巡回・待機)+ 深度/討伐/ターン。 */
+function BottomBar() {
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const uiMode = useRogue((s) => s.uiMode);
@@ -228,10 +215,36 @@ function ActionBar() {
   const wait = useRogue((s) => s.wait);
   const cancelThrow = useRogue((s) => s.cancelThrow);
   const cycleTarget = useRogue((s) => s.cycleTarget);
-  if (phase !== 'play' || mapMode) return null;
+  const toggleMap = useRogue((s) => s.toggleMap);
+  const playerPos = useRogue((s) => s.player.pos);
+  const turn = useRogue((s) => s.turn);
+  const kills = useRogue((s) => s.kills);
+  const maxDepth = useRogue((s) => s.maxDepth);
+  if (phase !== 'play') return null;
+  const stats = (
+    <span className="run-stats">
+      深度<b>{depthOf(playerPos)}</b>
+      <i>最深{maxDepth}</i> 討伐<b>{kills}</b> <b>{turn}</b>T
+    </span>
+  );
   return (
-    <div className="hud-actions">
-      {uiMode === 'throw' ? (
+    <div className="hud-actions hud-bottom">
+      {stats}
+      {mapMode ? (
+        <>
+          {/* 部屋のフォーカス巡回(TAB / Shift+TAB のボタン代替) */}
+          <button onClick={() => cycleTarget(-1)} title="前の部屋(Shift+TAB)">
+            ◀
+          </button>
+          <span className="mini">部屋</span>
+          <button onClick={() => cycleTarget(1)} title="次の部屋(TAB)">
+            ▶
+          </button>
+          <button className="active" onClick={toggleMap} title="ゲームへ戻る(M)">
+            🗺戻る
+          </button>
+        </>
+      ) : uiMode === 'throw' ? (
         <>
           <span className="hint">投げナイフ: 射程内の敵をクリック</span>
           <button onClick={cancelThrow}>やめる</button>
@@ -243,17 +256,19 @@ function ActionBar() {
         </>
       ) : (
         <>
-          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃</span>
-          {/* 敵への視線巡回(TAB / Shift+TAB のボタン代替 — タッチでも使える) */}
+          {/* 敵への視線巡回(TAB / Shift+TAB のボタン代替) */}
           <button disabled={busy} title="前の敵へ視線(Shift+TAB)" onClick={() => cycleTarget(-1)}>
             ◀
           </button>
+          <span className="mini">敵</span>
           <button disabled={busy} title="次の敵へ視線(TAB)" onClick={() => cycleTarget(1)}>
-            敵▶
+            ▶
           </button>
-          <LightButton busy={busy} />
           <button disabled={busy} onClick={wait}>
             待機
+          </button>
+          <button onClick={toggleMap} title="マップ(M)">
+            🗺
           </button>
         </>
       )}
@@ -366,7 +381,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
         <table>
           <tbody>
             <tr><td>1本指ドラッグ / ピンチ</td><td>視点の回転 / 寄り引き</td></tr>
-            <tr><td>2本指ドラッグ</td><td>視点の移動(パン)</td></tr>
+            <tr><td>2本指ドラッグ</td><td>視点の移動(マップ中)</td></tr>
             <tr><td>マーカー・敵・バブル</td><td><b>1度目のタップ=選択</b>(情報表示)、<b>2度目=実行</b></td></tr>
             <tr><td>◀ ▶ ボタン</td><td>敵・部屋の巡回(TAB の代わり)</td></tr>
           </tbody>
@@ -392,12 +407,11 @@ export function RogueHud() {
   const [help, setHelp] = useState(false);
   return (
     <div className="hud">
-      <StatusPanel />
+      <HpPanel />
       <SystemButtons onHelp={() => setHelp(true)} />
       <PackPanel />
       <BeastPanel />
-      <ActionBar />
-      <MapActions />
+      <BottomBar />
       <LogPanel />
       <DeadOverlay />
       {help && <HelpOverlay onClose={() => setHelp(false)} />}

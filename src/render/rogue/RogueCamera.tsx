@@ -88,15 +88,13 @@ export function RogueCamera() {
         }
         return;
       }
-      const { freeCam, mapMode } = useRogue.getState();
+      const { mapMode } = useRogue.getState();
       if (mapMode) {
         // マップ: 左ドラッグ=回転が基本。Space を押している間は移動(パン)。右=回転。
         if (e.button === 0) mode = isSpaceHeld() ? 'pan' : 'rotate';
         else if (e.button === 2) mode = 'rotate';
         else return;
       } else if (e.button === 0) {
-        mode = freeCam ? 'pan' : 'rotate';
-      } else if (e.button === 2 && freeCam) {
         mode = 'rotate';
       } else {
         return;
@@ -169,7 +167,7 @@ export function RogueCamera() {
   const tv = useRef(new THREE.Vector3());
   const dir = useRef(new THREE.Vector3());
   useFrame(() => {
-    const { freeCam, mapMode } = useRogue.getState();
+    const { mapMode } = useRogue.getState();
 
     // TAB 視線ゴールへの短弧補間(到達で解除。ドラッグ側でも解除される)。
     if (view.phiGoal !== null && view.thetaGoal !== null) {
@@ -191,10 +189,8 @@ export function RogueCamera() {
       // マップ: パンで外していなければフォーカス(巡回先)を追従。
       if (view.base !== null) g = view.base;
       else g = currentFocusGrid();
-    } else if (freeCam) {
-      if (view.base === null) view.base = currentFocusGrid();
-      g = view.base;
     } else {
+      // ゲーム画面は常にフォーカス(プレイヤー)追従。パンはマップ専用。
       view.base = null;
       g = currentFocusGrid();
     }

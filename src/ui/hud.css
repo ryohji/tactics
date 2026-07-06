@@ -129,6 +129,17 @@
 }
 .hud-actions .hint { font-size: 13px; color: #a5b4fc; margin-right: 4px; }
 
+/* 下中央バーの走行ステータス(深度・討伐・ターン) */
+.run-stats {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-right: 8px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.run-stats b { color: #f1f5f9; margin: 0 1px; }
+.run-stats i { font-style: normal; font-size: 10px; color: #64748b; margin-right: 6px; }
+
 /* --- 右下: 戦闘予測 / ログ --- */
 .hud-forecast {
   position: absolute;
@@ -183,37 +194,33 @@
 .hud-over .win { color: #fbbf24; }
 .hud-over .lose { color: #94a3b8; }
 
-/* --- rogue: 左上プレイヤー状態 --- */
-.hud-rogue-status {
+/* --- rogue: 左上 HP(バーに数字を重ねる) --- */
+.hud-hp {
   position: absolute;
   top: 14px;
   left: 14px;
-  width: 230px;
-  background: rgba(15, 12, 40, 0.85);
-  border: 1px solid #4c467e;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 13px;
-  pointer-events: auto;
+  width: 190px;
+  pointer-events: none;
 }
-.hud-rogue-status h3 {
-  margin: 0 0 6px;
-  font-size: 15px;
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  color: #7dd3fc;
+.hud-hpbar.big {
+  position: relative;
+  height: 18px;
+  margin: 0;
+  border: 1px solid rgba(128, 118, 210, 0.45);
+  background: rgba(15, 20, 34, 0.85);
 }
-.hud-rogue-status .tag { font-size: 11px; color: #c4b5fd; }
-.hud-equip {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: #cbd5e1;
+.hud-hpbar.big .num {
+  position: absolute;
+  inset: 0;
+  text-align: center;
   font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+  color: #f1f5f9;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  letter-spacing: 0.06em;
 }
-.hud-equip .unequip {
+.unequip {
   margin-left: 6px;
   padding: 1px 8px;
   font-size: 11px;
@@ -236,8 +243,51 @@
   gap: 6px;
   pointer-events: auto;
 }
-.hud-pack h4 { margin: 0 0 2px; font-size: 13px; color: #a5b4fc; }
+.hud-pack h4 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  color: #a5b4fc;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  user-select: none;
+}
+.hud-pack h4 .fold { color: #64748b; }
+.hud-pack h4:hover .fold { color: #e2e8f0; }
 .hud-pack .empty { color: #64748b; font-size: 12px; }
+
+/* 閉じた所持品(小さなボタンだけ残す) */
+.hud-pack-fab {
+  position: absolute;
+  right: 14px;
+  top: 64px;
+  font-size: 17px;
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+.hud-pack-fab .cnt {
+  font-size: 10px;
+  color: #fde68a;
+  margin-left: 3px;
+  vertical-align: top;
+}
+
+/* 装備枠(所持品の最上段。総攻/防をここに表示) */
+.equip-slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid rgba(217, 164, 65, 0.4);
+  border-radius: 7px;
+  background: rgba(60, 46, 18, 0.3);
+  font-size: 12px;
+}
+.equip-slot .slot-name { color: #d9a441; font-size: 10px; flex-shrink: 0; }
+.equip-slot .slot-item { flex: 1; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.equip-slot .slot-item.empty { color: #64748b; }
+.equip-slot .slot-stat { color: #fde68a; font-weight: 600; flex-shrink: 0; }
+.equip-slot .unequip { margin-left: 0; flex-shrink: 0; }
 .hud-pack button {
   display: flex;
   justify-content: space-between;
@@ -486,35 +536,29 @@
   .hud-viewhint { display: none; }
   .hud-actions .hint { display: none; }
 
-  .hud-rogue-status {
-    top: 8px;
-    left: 8px;
-    width: min(46vw, 190px);
-    padding: 7px 10px;
-    font-size: 11px;
-  }
-  .hud-rogue-status h3 { font-size: 12px; }
-  .hud-rogue-status .tag { font-size: 10px; }
+  .hud-hp { top: 8px; left: 8px; width: min(44vw, 170px); }
+  .hud-hpbar.big { height: 16px; }
+  .hud-hpbar.big .num { font-size: 11px; line-height: 16px; }
   .hud-stats { grid-template-columns: repeat(3, 1fr); font-size: 10px; }
-  .hud-equip { font-size: 10px; }
-  .hud-equip .unequip { padding: 1px 6px; font-size: 10px; }
 
   .hud-pack {
-    top: auto;
-    bottom: 66px;
+    top: 52px;
+    bottom: auto;
     right: 8px;
-    width: min(46vw, 180px);
-    max-height: 38dvh;
+    width: min(50vw, 185px);
+    max-height: 44dvh;
     overflow-y: auto;
     padding: 7px 8px;
     font-size: 11px;
   }
   .hud-pack button { padding: 6px 8px; font-size: 11px; }
   .hud-pack button .use { font-size: 9px; }
+  .hud-pack-fab { top: 52px; right: 8px; }
+  .equip-slot { font-size: 10px; padding: 3px 5px; }
 
   .hud-unit {
     left: 8px;
-    bottom: 66px;
+    bottom: 120px;
     width: min(46vw, 190px);
     padding: 7px 10px;
     font-size: 11px;
@@ -524,8 +568,8 @@
   .hud-log {
     left: 8px;
     right: auto;
-    bottom: 8px;
-    width: min(56vw, 260px);
+    bottom: 62px;
+    width: min(60vw, 260px);
     max-height: 48px;
     font-size: 10px;
     line-height: 1.45;
@@ -535,13 +579,16 @@
 
   .hud-actions {
     bottom: 8px;
-    left: auto;
-    right: 8px;
-    transform: none;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100vw - 16px);
+    flex-wrap: wrap;
+    justify-content: center;
     padding: 6px 8px;
     gap: 6px;
   }
   .hud-actions button { padding: 8px 10px; font-size: 12px; }
+  .run-stats { font-size: 10px; margin-right: 4px; }
 
   .hud-title h1 { letter-spacing: 0.14em; text-indent: 0.14em; }
   .hud-title p { font-size: 12px; }

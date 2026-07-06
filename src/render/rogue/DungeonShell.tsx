@@ -27,7 +27,6 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../../model/fcc';
 import { useRogue, clearedChambers, ROGUE_S } from '../../state/rogue';
-import { view } from '../../state/view';
 import { RD_FACES, RD_VERTICES } from '../rd';
 import { currentFocusGrid } from './rogueFocus';
 
@@ -257,8 +256,7 @@ export function DungeonShell() {
   const tmpP = useRef(new THREE.Vector3());
   const tmpN = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
-    const free = useRogue.getState().freeCam;
-    const g = free && view.base ? view.base : currentFocusGrid();
+    const g = currentFocusGrid();
     const w = worldPos(g[0], g[1], g[2], ROGUE_S);
     const p = tmpP.current.set(w.x, w.y, w.z);
     if (sphereRef.current) sphereRef.current.position.copy(p); // 外周球は注視点に追従

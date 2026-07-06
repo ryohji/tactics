@@ -185,7 +185,6 @@ export interface RogueState {
   /** HUD に情報を出す敵 id(ホバー)。 */
   hoverBeastId: number | null;
   focus: Cell;
-  freeCam: boolean;
   /** マップモード(カット無しで巣全体を俯瞰。ゲーム画面とトグル)。 */
   mapMode: boolean;
   /** マップの TAB 巡回でフォーカス中の広間 id(プレイヤー位置のときは null)。 */
@@ -220,7 +219,6 @@ export interface RogueState {
   armedKey: string | null;
   setArmed: (key: string | null) => void;
   hoverBeast: (id: number | null) => void;
-  toggleFreeCam: () => void;
   /** マップモードの切替(M キー / HUD ボタン)。 */
   toggleMap: () => void;
   /** TAB: ゲーム=部屋内の敵へ視線を巡回 / マップ=訪問済み広間の中央を巡回。
@@ -1109,7 +1107,6 @@ export const useRogue = create<RogueState>((set, get) => {
 
   return {
     ...buildInitial(initialSeed),
-    freeCam: false,
     mapMode: false,
     mapFocusChamber: null,
     muted: false,
@@ -1126,7 +1123,6 @@ export const useRogue = create<RogueState>((set, get) => {
       seedRogueRng((s ^ 0x6d2b79f5) >>> 0);
       set({
         ...buildInitial(s),
-        freeCam: false,
         mapMode: false,
         mapFocusChamber: null,
       });
@@ -1181,7 +1177,6 @@ export const useRogue = create<RogueState>((set, get) => {
         hoverBeastId: null,
         armedKey: null,
         focus: d.player.pos,
-        freeCam: false,
         mapMode: false,
         mapFocusChamber: null,
         deathCause: null,
@@ -1438,8 +1433,6 @@ export const useRogue = create<RogueState>((set, get) => {
       if (id !== null) sfx.play('cursor');
       set({ hoverBeastId: id });
     },
-
-    toggleFreeCam: () => set({ freeCam: !get().freeCam }),
 
     toggleMap: () => {
       const s = get();
