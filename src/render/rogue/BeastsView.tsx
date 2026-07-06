@@ -64,6 +64,43 @@ function Body({ b }: { b: Beast }) {
           />
         </mesh>
       );
+    case 'soldier':
+      // 兵隊蟻: 二節の胴体+大顎。
+      return (
+        <>
+          <mesh position={[0, 0.16 * S, -0.12 * S]} scale={[1, 0.8, 1.3]}>
+            <sphereGeometry args={[0.16 * S, 10, 10]} />
+            <meshStandardMaterial color={def.color} roughness={0.75} />
+          </mesh>
+          <mesh position={[0, 0.2 * S, 0.16 * S]}>
+            <sphereGeometry args={[0.12 * S, 10, 10]} />
+            <meshStandardMaterial color={def.color} roughness={0.7} />
+          </mesh>
+          <mesh position={[0.07 * S, 0.18 * S, 0.28 * S]} rotation={[0.4, 0, 0]}>
+            <coneGeometry args={[0.03 * S, 0.14 * S, 4]} />
+            <meshStandardMaterial color="#3a2418" roughness={0.6} />
+          </mesh>
+          <mesh position={[-0.07 * S, 0.18 * S, 0.28 * S]} rotation={[0.4, 0, 0]}>
+            <coneGeometry args={[0.03 * S, 0.14 * S, 4]} />
+            <meshStandardMaterial color="#3a2418" roughness={0.6} />
+          </mesh>
+        </>
+      );
+    case 'shade':
+      // 深淵の影: 揺らめく半透明の錐体(発光は控えめ)。
+      return (
+        <mesh position={[0, 0.28 * S, 0]}>
+          <coneGeometry args={[0.2 * S, 0.55 * S, 8]} />
+          <meshStandardMaterial
+            color={def.color}
+            emissive={def.color}
+            emissiveIntensity={0.9}
+            transparent
+            opacity={0.7}
+            depthWrite={false}
+          />
+        </mesh>
+      );
     case 'drake':
       return (
         <>
@@ -74,6 +111,20 @@ function Body({ b }: { b: Beast }) {
           <mesh position={[0, 0.42 * S, 0.28 * S]}>
             <coneGeometry args={[0.1 * S, 0.24 * S, 6]} />
             <meshStandardMaterial color={def.color} roughness={0.7} />
+          </mesh>
+        </>
+      );
+    case 'colossus':
+      // 岩窟の巨人: 大きな胴体+頭石。ずんぐりと威圧感を出す。
+      return (
+        <>
+          <mesh position={[0, 0.28 * S, 0]} scale={[1.2, 1, 1]}>
+            <dodecahedronGeometry args={[0.3 * S, 0]} />
+            <meshStandardMaterial color={def.color} roughness={0.95} flatShading />
+          </mesh>
+          <mesh position={[0, 0.62 * S, 0]}>
+            <dodecahedronGeometry args={[0.15 * S, 0]} />
+            <meshStandardMaterial color={def.color} roughness={0.95} flatShading />
           </mesh>
         </>
       );

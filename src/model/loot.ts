@@ -3,7 +3,7 @@
 // 品質は実効値(攻/防/回復量/威力/持続)に効く — stackXxx 系のヘルパを通して読むこと。
 
 export type ItemId =
-  | 'dagger' | 'sword' | 'waraxe'
+  | 'dagger' | 'sword' | 'waraxe' | 'spear' | 'maul'
   | 'leather' | 'chain' | 'plate'
   | 'potion' | 'knife'
   | 'trapSpike' | 'trapFire' | 'trapConfuse' | 'trapFear' | 'trapSleep'
@@ -24,6 +24,10 @@ export interface ItemDef {
   dmg?: number;
   /** 投擲/砲塔の射程(格子ワールド単位)。 */
   range?: number;
+  /** 武器の攻撃リーチ(FCC 歩数。省略時 1=隣接のみ)。 */
+  reach?: number;
+  /** 武器の薙ぎ払い(リーチ内の敵全員に当たる)。 */
+  sweep?: boolean;
   trap?: TrapKind;
 }
 
@@ -37,6 +41,8 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   dagger: { name: '短剣', kind: 'weapon', atk: 2 },
   sword: { name: '鉄の剣', kind: 'weapon', atk: 4 },
   waraxe: { name: '戦斧', kind: 'weapon', atk: 6 },
+  spear: { name: '長槍', kind: 'weapon', atk: 3, reach: 2 },
+  maul: { name: '大鎚', kind: 'weapon', atk: 5, sweep: true },
   leather: { name: '革鎧', kind: 'armor', def: 1 },
   chain: { name: '鎖帷子', kind: 'armor', def: 2 },
   plate: { name: '板金鎧', kind: 'armor', def: 4 },
@@ -91,7 +97,7 @@ export function statLabel(s: ItemStack): string {
   const def = ITEMS[s.item];
   switch (def.kind) {
     case 'weapon':
-      return `攻${stackAtk(s)}`;
+      return `攻${stackAtk(s)}${def.reach ? `·射程${def.reach}` : ''}${def.sweep ? '·薙ぎ' : ''}`;
     case 'armor':
       return `防${stackDef(s)}`;
     case 'potion':
@@ -119,20 +125,44 @@ export function statLabel(s: ItemStack): string {
 }
 
 // --- 出土テーブル ------------------------------------------------------------------
+// 深度でレア度が上がる2軸: ①解禁プール(深いほど上位の武具が混ざる)
+// ②品質ロール(深いほど +1/+2/+3 が出やすい)。広間の初期トレジャーも
+// 敵のドロップも lootTable を通るので、両方が同じ規則でスケールする。
 
-function weaponFor(depth: number): ItemId {
-  return depth < 4 ? 'dagger' : depth < 9 ? 'sword' : 'waraxe';
+/** 深度で解禁される武器プール(浅い側から。深いほど上位に寄せて引く)。 */
+function weaponFor(depth: number, rng: () => number): ItemId {
+  const pool: ItemId[] = ['dagger'];
+  if (depth >= 3) pool.push('sword');
+  if (depth >= 5) pool.push('spear');
+  if (depth >= 8) pool.push('waraxe');
+  if (depth >= 10) pool.push('maul');
+  // 2回引いて深い方を採用(深層ほど上位が出やすいバイアス)。
+  const i = Math.floor(rng() * pool.length);
+  const j = depth >= 6 ? Math.floor(rng() * pool.length) : 0;
+  return pool[Math.max(i, j)];
 }
 
-function armorFor(depth: number): ItemId {
-  return depth < 4 ? 'leather' : depth < 9 ? 'chain' : 'plate';
+function armorFor(depth: number, rng: () => number): ItemId {
+  const pool: ItemId[] = ['leather'];
+  if (depth >= 3) pool.push('chain');
+  if (depth >= 9) pool.push('plate');
+  const i = Math.floor(rng() * pool.length);
+  const j = depth >= 6 ? Math.floor(rng() * pool.length) : 0;
+  return pool[Math.max(i, j)];
+}
+
+/** 品質ロール。+1 は深度5前後から、+2 は10前後、+3 は15前後から出はじめる。 */
+function qualityFor(depth: number, rng: () => number): number {
+  let q = 0;
+  while (q < 3 && rng() < Math.min(0.55, (depth - 4 - 5 * q) * 0.08)) q++;
+  return q;
 }
 
 const GADGETS: ItemId[] = [
   'trapSpike', 'trapFire', 'trapConfuse', 'trapFear', 'trapSleep', 'turret', 'decoy',
 ];
 
-/** 深度 D の広間に落ちるアイテム列(0〜2個・品質0)。深度2+ でガジェットが混ざる。 */
+/** 深度 D の広間に落ちるアイテム列(0〜2個)。深度2+ でガジェットが混ざる。 */
 export function lootTable(depth: number, rng: () => number): ItemStack[] {
   const out: ItemStack[] = [];
   const rolls = 1 + (rng() < 0.5 ? 1 : 0);
@@ -142,11 +172,11 @@ export function lootTable(depth: number, rng: () => number): ItemStack[] {
     let item: ItemId;
     if (r < 0.3) item = 'potion';
     else if (r < 0.5) item = 'knife';
-    else if (r < 0.65) item = weaponFor(depth);
-    else if (r < 0.8) item = armorFor(depth);
+    else if (r < 0.65) item = weaponFor(depth, rng);
+    else if (r < 0.8) item = armorFor(depth, rng);
     else if (depth >= 2) item = GADGETS[Math.floor(rng() * GADGETS.length)];
     else item = rng() < 0.5 ? 'potion' : 'knife';
-    out.push({ item, q: 0 });
+    out.push({ item, q: qualityFor(depth, rng) });
   }
   return out;
 }

@@ -17,7 +17,7 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { OFFSETS, cellKey, keyToCell, layer, worldPos, type Cell, type CellKey } from '../model/fcc';
+import { OFFSETS, cellKey, keyToCell, layer, neighbors, worldPos, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
@@ -174,7 +174,10 @@ export interface RogueState {
   maxDepth: number;
   phase: 'play' | 'dead';
   busy: boolean;
-  uiMode: 'walk' | 'throw';
+  /** walk=移動 / throw=投擲対象選択 / place=罠の設置先選択(足元+隣接)。 */
+  uiMode: 'walk' | 'throw' | 'place';
+  /** place モードで設置しようとしている所持品 index。 */
+  placeIndex: number | null;
   /** クリック可能な移動先(BFS≤REACH_STEPS)。 */
   reach: { cells: Cell[]; parent: Map<CellKey, CellKey> };
   /** ホバー中の移動マーカーのセル(同レベルのヘックスオーバーレイ表示に使う)。 */
@@ -321,6 +324,31 @@ export function playerAtk(p: PlayerState): number {
 }
 export function playerDef(p: PlayerState): number {
   return p.armor ? stackDef(p.armor) : 0;
+}
+
+/** 武器の攻撃リーチ(FCC 歩数)。素手・通常武器は 1(隣接)。長槍などは 2。 */
+export function weaponReach(p: PlayerState): number {
+  return p.weapon ? (ITEMS[p.weapon.item].reach ?? 1) : 1;
+}
+/** 薙ぎ払い武器か(リーチ内の敵全員に当たる)。 */
+export function weaponSweep(p: PlayerState): boolean {
+  return p.weapon ? (ITEMS[p.weapon.item].sweep ?? false) : false;
+}
+
+/** 罠を置けるセル(足元+12近傍のうち、空洞・発見済み・設置物/敵なし)。 */
+export function placeableCells(
+  s: Pick<RogueState, 'player' | 'dungeon' | 'discovered' | 'traps' | 'turrets' | 'decoys' | 'beasts'>,
+): Cell[] {
+  const occupied = new Set<CellKey>([
+    ...s.traps.map((t) => cellKey(t.pos)),
+    ...s.turrets.map((t) => cellKey(t.pos)),
+    ...s.decoys.map((d) => cellKey(d.pos)),
+    ...s.beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)),
+  ]);
+  return [s.player.pos, ...neighbors(s.player.pos)].filter((c) => {
+    const k = cellKey(c);
+    return s.dungeon.open.has(k) && s.discovered.has(k) && !occupied.has(k);
+  });
 }
 
 /**
@@ -791,6 +819,35 @@ export const useRogue = create<RogueState>((set, get) => {
     autoSave();
   }
 
+  /** place モード: 選んだセル(足元+隣接)へ罠を設置する(1ターン)。 */
+  function placeTrapAt(c: Cell): void {
+    const s = get();
+    if (s.placeIndex === null) return;
+    const stack = s.player.pack[s.placeIndex];
+    if (!stack || ITEMS[stack.item].kind !== 'trap') {
+      set({ uiMode: 'walk', placeIndex: null }); // pack が変わって指し先が壊れた
+      return;
+    }
+    const k = cellKey(c);
+    if (!placeableCells(s).some((x) => cellKey(x) === k)) return;
+    const player = s.player;
+    player.pack.splice(s.placeIndex, 1);
+    set({
+      traps: [
+        ...s.traps,
+        { id: deviceSeq++, item: stack.item, kind: ITEMS[stack.item].trap!, q: stack.q, pos: c },
+      ],
+      player: { ...player, pack: [...player.pack] },
+      uiMode: 'walk',
+      placeIndex: null,
+    });
+    sfx.play('place');
+    pushLog(`${itemLabel(stack)} を設置した`);
+    beastsTurn();
+    endTurn();
+    refreshReach();
+  }
+
   /** 毎ターン終わりの自動保存(死んでいたら保存しない。死亡時は checkDead が破棄済み)。 */
   function autoSave(): void {
     const s = get();
@@ -892,18 +949,31 @@ export const useRogue = create<RogueState>((set, get) => {
   }
 
   /** プレイヤー→敵の近接攻撃。 */
-  async function meleeAttack(b: Beast): Promise<void> {
+  /** 近接攻撃。薙ぎ払い武器はリーチ内の敵全員に、通常はクリックした1体に当たる。 */
+  async function meleeAttack(clicked: Beast): Promise<void> {
     const run = runSeq;
     set({ busy: true, reach: { cells: [], parent: new Map() } });
-    const def = BEASTS[b.kind];
-    const dmg = Math.max(1, playerAtk(get().player) - def.def + irnd(-1, 1));
+    const player = get().player;
+    const targets = weaponSweep(player)
+      ? get().beasts.filter(
+          (x) =>
+            x.alive &&
+            stepDist(player.pos, x.pos) <= weaponReach(player) &&
+            get().discovered.has(cellKey(x.pos)),
+        )
+      : [clicked];
+    if (targets.length > 1) pushLog('薙ぎ払い!');
     sfx.play('melee');
     await sleep(140);
     if (runSeq !== run) return;
-    b.awake = true;
+    for (const b of targets) {
+      const def = BEASTS[b.kind];
+      const dmg = Math.max(1, playerAtk(player) - def.def + irnd(-1, 1));
+      b.awake = true;
+      pushLog(`${def.name} に ${dmg}ダメージ`);
+      damageBeast(b, dmg);
+    }
     sfx.play('hit');
-    pushLog(`${def.name} に ${dmg}ダメージ`);
-    damageBeast(b, dmg);
     set({ beasts: [...get().beasts] });
     await sleep(240);
     if (runSeq !== run) return;
@@ -967,7 +1037,7 @@ export const useRogue = create<RogueState>((set, get) => {
     RogueState,
     | 'seed' | 'dungeon' | 'discovered' | 'discoveredRev' | 'player' | 'beasts' | 'items'
     | 'traps' | 'turrets' | 'decoys' | 'lightLevel'
-    | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'reach'
+    | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'placeIndex' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'focus' | 'log' | 'fx'
     | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
   > {
@@ -1019,6 +1089,7 @@ export const useRogue = create<RogueState>((set, get) => {
       phase: 'play',
       busy: false,
       uiMode: 'walk',
+      placeIndex: null,
       reach: { cells: [], parent: new Map() },
       hoverMarker: null,
       hoverBeastId: null,
@@ -1098,6 +1169,7 @@ export const useRogue = create<RogueState>((set, get) => {
         phase: 'play',
         busy: false,
         uiMode: 'walk',
+        placeIndex: null,
         reach: { cells: [], parent: new Map() },
         hoverMarker: null,
         hoverBeastId: null,
@@ -1117,6 +1189,10 @@ export const useRogue = create<RogueState>((set, get) => {
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       if (s.uiMode === 'throw') return;
+      if (s.uiMode === 'place') {
+        placeTrapAt(c);
+        return;
+      }
       const k = cellKey(c);
       if (!s.reach.cells.some((r) => cellKey(r) === k)) return;
       const path = pathTo(c);
@@ -1136,7 +1212,9 @@ export const useRogue = create<RogueState>((set, get) => {
         void throwKnife(b);
         return;
       }
-      if (!adjacent(s.player.pos, b.pos)) return;
+      // 武器リーチ内(素手・通常1歩、長槍2歩)なら近接攻撃できる。
+      if (stepDist(s.player.pos, b.pos) > weaponReach(s.player)) return;
+      if (!s.discovered.has(cellKey(b.pos))) return;
       void meleeAttack(b);
     },
 
@@ -1147,6 +1225,8 @@ export const useRogue = create<RogueState>((set, get) => {
       if (!stack) return;
       const def = ITEMS[stack.item];
       const player = s.player;
+      // 設置先選択中に別のアイテムを使ったら選択を解く(pack の index がずれるため)。
+      if (s.uiMode === 'place' && def.kind !== 'trap') set({ uiMode: 'walk', placeIndex: null });
 
       if (def.kind === 'potion') {
         const healed = Math.min(stackHeal(stack), player.maxHp - player.hp);
@@ -1183,8 +1263,20 @@ export const useRogue = create<RogueState>((set, get) => {
         return;
       }
 
-      // 設置系: 罠・砲塔・囮を足元へ(1ターン消費)。
-      if (def.kind === 'trap' || def.kind === 'turret' || def.kind === 'decoy') {
+      // 罠: 設置先の選択モードへ(足元+隣接の橙マーカーから選ぶ。もう一度クリックで解除)。
+      if (def.kind === 'trap') {
+        if (s.uiMode === 'place' && s.placeIndex === index) {
+          get().cancelThrow();
+          return;
+        }
+        sfx.play('select');
+        pushLog('罠の設置: 足元か隣の橙マーカーをクリック(所持品クリックで解除)');
+        set({ uiMode: 'place', placeIndex: index });
+        return;
+      }
+
+      // 設置系: 砲塔・囮を足元へ(1ターン消費)。
+      if (def.kind === 'turret' || def.kind === 'decoy') {
         const k = cellKey(player.pos);
         const s2 = get();
         const occupied =
@@ -1196,14 +1288,7 @@ export const useRogue = create<RogueState>((set, get) => {
           return;
         }
         player.pack.splice(index, 1);
-        if (def.kind === 'trap') {
-          set({
-            traps: [
-              ...s2.traps,
-              { id: deviceSeq++, item: stack.item, kind: def.trap!, q: stack.q, pos: player.pos },
-            ],
-          });
-        } else if (def.kind === 'turret') {
+        if (def.kind === 'turret') {
           set({
             turrets: [
               ...s2.turrets,
@@ -1324,9 +1409,9 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     cancelThrow: () => {
-      if (get().uiMode !== 'throw') return;
+      if (get().uiMode === 'walk') return;
       sfx.play('cancel');
-      set({ uiMode: 'walk' });
+      set({ uiMode: 'walk', placeIndex: null });
     },
 
     setHoverMarker: (k) => {

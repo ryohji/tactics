@@ -113,6 +113,7 @@ function PackPanel() {
   const useItem = useRogue((s) => s.useItem);
   const mergeItem = useRogue((s) => s.mergeItem);
   const uiMode = useRogue((s) => s.uiMode);
+  const placeIndex = useRogue((s) => s.placeIndex);
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const mapMode = useRogue((s) => s.mapMode);
@@ -134,6 +135,7 @@ function PackPanel() {
       {groups.map((g) => {
         const def = ITEMS[g.stack.item];
         const throwing = def.kind === 'thrown' && uiMode === 'throw';
+        const placing = def.kind === 'trap' && uiMode === 'place' && placeIndex === g.index;
         const verb =
           def.kind === 'potion'
             ? '飲む'
@@ -143,11 +145,13 @@ function PackPanel() {
                 : '投げる'
               : def.kind === 'weapon' || def.kind === 'armor'
                 ? '装備'
-                : '設置';
+                : placing
+                  ? '解除'
+                  : '設置';
         return (
           <div className="pack-row" key={`${g.stack.item}:${g.stack.q}`}>
             <button
-              className={throwing ? 'active' : ''}
+              className={throwing || placing ? 'active' : ''}
               disabled={locked}
               onClick={() => useItem(g.index)}
             >
@@ -208,6 +212,11 @@ function ActionBar() {
       {uiMode === 'throw' ? (
         <>
           <span className="hint">投げナイフ: 射程内の敵をクリック</span>
+          <button onClick={cancelThrow}>やめる</button>
+        </>
+      ) : uiMode === 'place' ? (
+        <>
+          <span className="hint">罠の設置: 足元か隣の橙マーカーをクリック</span>
           <button onClick={cancelThrow}>やめる</button>
         </>
       ) : (

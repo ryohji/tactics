@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { cellKey, keyToCell, layer, worldPos, type Cell } from '../../model/fcc';
-import { useRogue, ROGUE_S } from '../../state/rogue';
+import { useRogue, placeableCells, ROGUE_S } from '../../state/rogue';
 import { consumeSuppressedClick } from '../../input/suppress';
 import { buildHexTile, buildHexEdges } from '../hex';
 
@@ -15,6 +15,7 @@ const S = ROGUE_S;
 const R_MARKER = 0.14;
 const C_NEAR = new THREE.Color('#38bdf8');
 const C_FAR = new THREE.Color('#1d6a96');
+const C_PLACE = new THREE.Color('#f59e0b'); // 罠の設置候補(橙)
 
 /** ホバー中マーカーと同じ層の移動可能セルにヘックスタイルを重ねる。 */
 function HoverLevelHexes({ cells }: { cells: Cell[] }) {
@@ -79,10 +80,17 @@ function HoverLevelHexes({ cells }: { cells: Cell[] }) {
 export function MoveMarkers() {
   const reach = useRogue((s) => s.reach);
   const uiMode = useRogue((s) => s.uiMode);
+  const player = useRogue((s) => s.player);
   const clickCell = useRogue((s) => s.clickCell);
   const setHoverMarker = useRogue((s) => s.setHoverMarker);
 
-  const cells: Cell[] = uiMode === 'walk' ? reach.cells : [];
+  // place モードでは移動先の代わりに罠の設置候補(足元+隣接)を出す。
+  const placeCells = useMemo(
+    () => (uiMode === 'place' ? placeableCells(useRogue.getState()) : []),
+    [uiMode, player],
+  );
+  const cells: Cell[] = uiMode === 'walk' ? reach.cells : placeCells;
+  const placing = uiMode === 'place';
 
   // 歩数(親を辿った深さ)で色を変える。
   const depths = useMemo(() => {
@@ -116,14 +124,18 @@ export function MoveMarkers() {
       scl.setScalar(R_MARKER * S);
       mat.compose(pos, quat, scl);
       m.setMatrixAt(i, mat);
-      const t = ((depths.get(cellKey(c)) ?? 1) - 1) / 2;
-      m.setColorAt(i, col.copy(C_NEAR).lerp(C_FAR, t));
+      if (placing) {
+        m.setColorAt(i, col.copy(C_PLACE));
+      } else {
+        const t = ((depths.get(cellKey(c)) ?? 1) - 1) / 2;
+        m.setColorAt(i, col.copy(C_NEAR).lerp(C_FAR, t));
+      }
     });
     m.count = cells.length;
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
     m.computeBoundingSphere();
-  }, [cells, depths]);
+  }, [cells, depths, placing]);
 
   useFrame(({ clock }) => {
     if (matRef.current) {
@@ -155,7 +167,7 @@ export function MoveMarkers() {
         <sphereGeometry args={[1, 10, 10]} />
         <meshStandardMaterial ref={matRef} roughness={0.4} emissive="#ffffff" emissiveIntensity={0.5} />
       </instancedMesh>
-      <HoverLevelHexes cells={cells} />
+      {!placing && <HoverLevelHexes cells={cells} />}
     </>
   );
 }

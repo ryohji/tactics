@@ -335,6 +335,10 @@ describe('設置物(rogue-4)', () => {
     useRogue.setState({ player: { ...player(), pack: [...player().pack, item] } });
     const idx = player().pack.findIndex((x) => x.item === item.item && x.q === item.q);
     useRogue.getState().useItem(idx);
+    // 罠は設置先の選択モードに入る(rogue-9)ので、足元を選んで確定する。
+    if (useRogue.getState().uiMode === 'place') {
+      useRogue.getState().clickCell(useRogue.getState().player.pos);
+    }
   }
 
   it('棘の罠: 敵が踏むと大ダメージ(弱敵は即死)して罠は消える', () => {
@@ -422,6 +426,74 @@ describe('設置物(rogue-4)', () => {
     const s = useRogue.getState();
     expect(player().hp).toBe(hpP); // プレイヤーは無傷
     if (s.decoys.length > 0) expect(s.decoys[0].hp).toBeLessThan(hp0);
+  });
+});
+
+describe('深層拡張(rogue-9)', () => {
+  /** id 指定で任意セルに敵を置く。 */
+  function putBeast(id: number, kind: keyof typeof BEASTS, pos: [number, number, number]): Beast {
+    const b: Beast = {
+      id,
+      kind,
+      pos,
+      hp: BEASTS[kind].hp,
+      home: pos,
+      homeChamber: 0,
+      layerFloor: -999,
+      layerCeil: 999,
+      awake: true,
+      alive: true,
+      status: null,
+    };
+    useRogue.setState({ beasts: [...useRogue.getState().beasts, b] });
+    return b;
+  }
+
+  it('長槍は2歩先の敵に届く(短剣では届かない)', async () => {
+    const s = useRogue.getState();
+    const far = s.reach.cells.find((c) => stepDist(s.player.pos, c) === 2)!;
+    putBeast(960, 'ghoul', far);
+    // 短剣(初期装備・リーチ1)では攻撃にならない。
+    useRogue.getState().clickBeast(960);
+    expect(useRogue.getState().turn).toBe(0);
+    // 長槍(リーチ2)に持ち替えると攻撃できる。
+    useRogue.setState({ player: { ...player(), weapon: { item: 'spear', q: 0 } } });
+    useRogue.getState().clickBeast(960);
+    await run();
+    expect(useRogue.getState().turn).toBe(1);
+    expect(useRogue.getState().beasts.find((x) => x.id === 960)!.hp).toBeLessThan(BEASTS.ghoul.hp);
+  });
+
+  it('大鎚はリーチ内の敵全員に当たる(薙ぎ払い)', async () => {
+    placeBeastAdjacent('ghoul'); // id 900
+    const pos2 = freeNeighbor(); // 900 を避けた別の隣接セル
+    putBeast(901, 'ghoul', pos2);
+    useRogue.setState({ player: { ...player(), weapon: { item: 'maul', q: 0 } } });
+    useRogue.getState().clickBeast(900);
+    await run();
+    const after = useRogue.getState().beasts;
+    expect(after.find((x) => x.id === 900)!.hp).toBeLessThan(BEASTS.ghoul.hp);
+    expect(after.find((x) => x.id === 901)!.hp).toBeLessThan(BEASTS.ghoul.hp);
+  });
+
+  it('罠は隣接セルにも設置できる(1ターン)が、2歩先には置けない', () => {
+    const idx = player().pack.findIndex((x) => x.item === 'trapSpike');
+    useRogue.getState().useItem(idx);
+    expect(useRogue.getState().uiMode).toBe('place');
+    // 2歩先は設置候補外(クリックしても何も起きない)。
+    const s0 = useRogue.getState();
+    const far = s0.reach.cells.find((c) => stepDist(s0.player.pos, c) === 2)!;
+    useRogue.getState().clickCell(far);
+    expect(useRogue.getState().uiMode).toBe('place');
+    expect(useRogue.getState().traps).toHaveLength(0);
+    // 隣接セルには置ける。
+    const target = freeNeighbor();
+    useRogue.getState().clickCell(target);
+    const s = useRogue.getState();
+    expect(s.uiMode).toBe('walk');
+    expect(s.traps).toHaveLength(1);
+    expect(cellKey(s.traps[0].pos)).toBe(cellKey(target));
+    expect(s.turn).toBe(1);
   });
 });
 
