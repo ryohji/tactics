@@ -195,6 +195,8 @@ export interface RogueState {
   useItem: (index: number) => void;
   /** 同一アイテム・同一品質の2つを合成して品質 +1(1ターン)。 */
   mergeItem: (index: number) => void;
+  /** 装備を外して所持品へ戻す(装備と同じくターン消費なし。合成の材料にできる)。 */
+  unequip: (slot: 'weapon' | 'armor') => void;
   /** 明かりの段階を巡回(絞る→普通→広げる)。ターンを消費しない。 */
   cycleLight: () => void;
   wait: () => void;
@@ -1079,6 +1081,19 @@ export const useRogue = create<RogueState>((set, get) => {
         pushLog('投げナイフ: 射程内の敵をクリック(所持品クリックで解除)');
         set({ uiMode: 'throw' });
       }
+    },
+
+    unequip: (slot) => {
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      const player = s.player;
+      const stack = player[slot];
+      if (!stack) return;
+      player[slot] = null;
+      player.pack.push(stack);
+      sfx.play('cancel');
+      pushLog(`${itemLabel(stack)} を外した`);
+      set({ player: { ...player, pack: [...player.pack] } });
     },
 
     mergeItem: (index) => {

@@ -192,6 +192,26 @@ describe('アイテム', () => {
     expect(player().pack.filter((x) => x.item === 'knife' && x.q === 1)).toHaveLength(1);
     expect(useRogue.getState().log.at(-1)).toContain('同じ品質');
   });
+
+  it('装備を外すと所持品に戻り(ターン消費なし)、合成の材料にできる', () => {
+    // 初期武器 dagger(q0)+ 所持品に dagger(q0)を足して、外してから合成する。
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'dagger', q: 0 }] },
+    });
+    const atk0 = playerAtk(player());
+    useRogue.getState().unequip('weapon');
+    expect(player().weapon).toBeNull();
+    expect(playerAtk(player())).toBeLessThan(atk0); // 素手に戻る
+    expect(useRogue.getState().turn).toBe(0); // 外すのはターン消費なし
+    const idx = player().pack.findIndex((x) => x.item === 'dagger');
+    useRogue.getState().mergeItem(idx);
+    const merged = player().pack.filter((x) => x.item === 'dagger');
+    expect(merged).toHaveLength(1);
+    expect(merged[0].q).toBe(1);
+    // 何も装備していないときは何も起きない。
+    useRogue.getState().unequip('armor');
+    expect(player().armor).toBeNull();
+  });
 });
 
 describe('明かり(rogue-4)', () => {

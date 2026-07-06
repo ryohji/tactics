@@ -18,6 +18,10 @@ function StatusPanel() {
   const turn = useRogue((s) => s.turn);
   const kills = useRogue((s) => s.kills);
   const maxDepth = useRogue((s) => s.maxDepth);
+  const unequip = useRogue((s) => s.unequip);
+  const phase = useRogue((s) => s.phase);
+  const busy = useRogue((s) => s.busy);
+  const locked = phase !== 'play' || busy;
   const hpPct = (player.hp / player.maxHp) * 100;
   const hpColor = hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#facc15' : '#ef4444';
   return (
@@ -39,9 +43,19 @@ function StatusPanel() {
       <div className="hud-equip">
         <span>
           武器: {player.weapon ? `${itemLabel(player.weapon)}(${statLabel(player.weapon)})` : 'なし'}
+          {player.weapon && (
+            <button className="unequip" disabled={locked} onClick={() => unequip('weapon')}>
+              外す
+            </button>
+          )}
         </span>
         <span>
           防具: {player.armor ? `${itemLabel(player.armor)}(${statLabel(player.armor)})` : 'なし'}
+          {player.armor && (
+            <button className="unequip" disabled={locked} onClick={() => unequip('armor')}>
+              外す
+            </button>
+          )}
         </span>
       </div>
     </div>

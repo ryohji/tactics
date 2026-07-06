@@ -213,6 +213,12 @@
   color: #cbd5e1;
   font-size: 12px;
 }
+.hud-equip .unequip {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+}
 
 /* --- rogue: 所持品 --- */
 .hud-pack {
