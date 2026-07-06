@@ -21,6 +21,7 @@ import { OFFSETS, cellKey, keyToCell, layer, worldPos, type Cell, type CellKey }
 import {
   createDungeon,
   maybeExpand,
+  cellRng,
   distW,
   adjacent,
   stepDist,
@@ -222,9 +223,25 @@ export interface RogueState {
 
 let rngState = (Date.now() ^ 0x2f6e2b1) >>> 0;
 
-/** テスト用に戦闘乱数列を固定する。 */
+/** 戦闘乱数列を固定する(restart がシードから呼ぶ。テストは restart 後に上書き)。 */
 export function seedRogueRng(seed: number): void {
   rngState = seed >>> 0;
+}
+
+/**
+ * シード入力の解釈: 数字列はそのまま(2^31 で丸め)、その他の文字列は FNV-1a で
+ * ハッシュ(言葉でもシードにできる)、空文字は undefined(=ランダム)。
+ */
+export function parseSeed(text: string): number | undefined {
+  const t = text.trim();
+  if (t === '') return undefined;
+  if (/^\d+$/.test(t)) return Number(t) % 0x80000000;
+  let h = 0x811c9dc5;
+  for (const ch of t) {
+    h = (h ^ ch.codePointAt(0)!) >>> 0;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h % 0x80000000;
 }
 
 function rand(): number {
@@ -346,14 +363,16 @@ export const useRogue = create<RogueState>((set, get) => {
     const { dungeon, beasts, items, cellChamber } = get();
     for (const k of ch.cells) cellChamber.set(k, ch.id);
     const depth = Math.max(0, depthOf(ch.center));
+    // 広間の中心から導出した rng(生成順・戦闘に依らずシードだけで決まる)。
+    const rng = cellRng(dungeon.seed, ch.center, 2);
     const spots = ch.cells.filter((k) => k !== cellKey(ch.center));
     const takeSpot = (): Cell | null => {
       if (spots.length === 0) return null;
-      const i = Math.floor(dungeon.rng() * spots.length);
+      const i = Math.floor(rng() * spots.length);
       return keyToCell(spots.splice(i, 1)[0]);
     };
     const homeL = layer(ch.center);
-    for (const kind of spawnTable(depth, dungeon.rng)) {
+    for (const kind of spawnTable(depth, rng)) {
       const pos = takeSpot();
       if (!pos) break;
       const def = BEASTS[kind];
@@ -371,7 +390,7 @@ export const useRogue = create<RogueState>((set, get) => {
         status: null,
       });
     }
-    for (const stack of lootTable(depth, dungeon.rng)) {
+    for (const stack of lootTable(depth, rng)) {
       const pos = takeSpot();
       if (!pos) break;
       items.push({ id: itemSeq++, stack, pos });
@@ -950,12 +969,15 @@ export const useRogue = create<RogueState>((set, get) => {
     postFx: true,
 
     restart: (seed) => {
+      const s = seed ?? Math.floor(Math.random() * 0x7fffffff);
       resetView();
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
       bgm.setBgmScene('game');
+      // 戦闘乱数もシードから初期化(迷宮生成の cellRng と合わせてプレイを再現可能に)。
+      seedRogueRng((s ^ 0x6d2b79f5) >>> 0);
       set({
-        ...buildInitial(seed ?? Math.floor(Math.random() * 0x7fffffff)),
+        ...buildInitial(s),
         freeCam: false,
         mapMode: false,
         mapFocusChamber: null,

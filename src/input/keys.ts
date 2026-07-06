@@ -24,6 +24,9 @@ export function installKeys(h: Handlers): void {
   if (installed || typeof window === 'undefined') return;
   installed = true;
   window.addEventListener('keydown', (e) => {
+    // テキスト入力中(シード欄など)はゲームキーを無効化する。
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     if (e.key === 'Tab') {
       e.preventDefault();
       handlers?.onCycle();

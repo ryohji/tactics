@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { RogueScene } from './render/rogue/RogueScene';
 import { RogueHud } from './ui/RogueHud';
-import { useRogue } from './state/rogue';
+import { useRogue, parseSeed } from './state/rogue';
 import { installKeys } from './input/keys';
 import { unlock } from './audio/sfx';
 import { startBgm } from './audio/bgm';
@@ -45,7 +45,16 @@ export function App() {
 /** 初回だけのタイトル画面。「潜る」クリックが音の自動再生制限の解除も兼ねる。 */
 function TitleOverlay() {
   const [entered, setEntered] = useState(false);
+  const [seedInput, setSeedInput] = useState('');
   if (entered) return null;
+  const enter = () => {
+    unlock();
+    startBgm();
+    // シードが入力されていればその迷宮で開始(空欄=起動時のランダム迷宮のまま)。
+    const seed = parseSeed(seedInput);
+    if (seed !== undefined) useRogue.getState().restart(seed);
+    setEntered(true);
+  };
   return (
     <div className="hud-title">
       <div className="hud-title-inner">
@@ -56,14 +65,16 @@ function TitleOverlay() {
           <br />
           明かりを広げれば癒えるが、目立つ。どこまで深く行けるか。
         </p>
-        <button
-          className="primary"
-          onClick={() => {
-            unlock();
-            startBgm();
-            setEntered(true);
-          }}
-        >
+        <div className="hud-title-seed">
+          <input
+            value={seedInput}
+            onChange={(e) => setSeedInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && enter()}
+            placeholder="シード(任意。同じシード=同じ迷宮)"
+            spellCheck={false}
+          />
+        </div>
+        <button className="primary" onClick={enter}>
           潜る
         </button>
         <div className="hud-title-hint">ドラッグ=視点 / 青マーカー=移動 / M=マップ / TAB=敵に視線</div>

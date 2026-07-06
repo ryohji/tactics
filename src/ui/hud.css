@@ -260,6 +260,30 @@
 .hud-score { font-size: 18px; color: #e2e8f0; letter-spacing: 0.08em; }
 .hud-score-sub { font-size: 13px; color: #94a3b8; letter-spacing: 0.06em; }
 .hud-over-buttons { display: flex; gap: 12px; }
+
+/* --- rogue: シード入力(タイトル/死亡画面。プレイ再現用) --- */
+.hud-seed-row,
+.hud-title-seed { display: flex; gap: 8px; justify-content: center; margin: 2px 0 4px; }
+.hud-title-seed { margin-bottom: 22px; }
+.hud-seed-row input,
+.hud-title-seed input {
+  font: inherit;
+  font-size: 13px;
+  color: #e2e8f0;
+  background: rgba(10, 8, 30, 0.7);
+  border: 1px solid #4c467e;
+  border-radius: 8px;
+  padding: 7px 12px;
+  width: 240px;
+  text-align: center;
+  pointer-events: auto;
+  outline: none;
+}
+.hud-seed-row input:focus,
+.hud-title-seed input:focus { border-color: #22d3ee; }
+.hud-seed-row input::placeholder,
+.hud-title-seed input::placeholder { color: #64748b; }
+.hud-seed-row button { font-size: 12px; padding: 6px 10px; }
 .hud button.share-x {
   background: linear-gradient(180deg, #1d2430, #0b0f16);
   border-color: #3f4c5e;

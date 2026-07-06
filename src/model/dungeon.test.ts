@@ -39,6 +39,22 @@ describe('createDungeon', () => {
 });
 
 describe('expandAt / maybeExpand', () => {
+  it('掘る順序に依らず同じ迷宮になる(スタブ位置から rng を導出)', () => {
+    // 同じ seed のふたつの巣で、最初の2本のスタブを逆順に展開しても空洞集合が一致する。
+    const a = createDungeon(11);
+    const b = createDungeon(11);
+    expandAt(a, a.stubs[0]);
+    expandAt(a, a.stubs[1]);
+    expandAt(b, b.stubs[1]);
+    expandAt(b, b.stubs[0]);
+    expect([...a.open].sort()).toEqual([...b.open].sort());
+    // 同じ位置に生えた広間は同じ半径・同じセル集合。
+    const chA = a.chambers.find((c) => cellKey(c.center) === cellKey(a.stubs[0].exit))!;
+    const chB = b.chambers.find((c) => cellKey(c.center) === cellKey(b.stubs[0].exit))!;
+    expect(chA.r).toBe(chB.r);
+    expect([...chA.cells].sort()).toEqual([...chB.cells].sort());
+  });
+
   it('スタブ位置に広間が生成され、連結が保たれ、新スタブが伸びる', () => {
     const dg = createDungeon(5);
     const stubsBefore = dg.stubs.length;

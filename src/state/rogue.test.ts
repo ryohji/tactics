@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
 import type { ItemStack } from '../model/loot';
-import { useRogue, seedRogueRng, depthOf, playerAtk, clearedChambers, gazeAngles, type Beast } from './rogue';
+import { useRogue, seedRogueRng, parseSeed, depthOf, playerAtk, clearedChambers, gazeAngles, type Beast } from './rogue';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
 
@@ -51,8 +51,21 @@ async function run(ms = 3000) {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  seedRogueRng(42);
+  // restart はシードから戦闘乱数も初期化するので、テスト用の固定はその後に。
   useRogue.getState().restart(7);
+  seedRogueRng(42);
+});
+
+describe('parseSeed(シード入力の解釈)', () => {
+  it('数字列はそのまま、空欄は undefined、言葉は決定的にハッシュ', () => {
+    expect(parseSeed('12345')).toBe(12345);
+    expect(parseSeed(' 7 ')).toBe(7);
+    expect(parseSeed('')).toBeUndefined();
+    expect(parseSeed('   ')).toBeUndefined();
+    expect(parseSeed('ありのす')).toBe(parseSeed('ありのす'));
+    expect(parseSeed('ありのす')).not.toBe(parseSeed('ありんこ'));
+    expect(parseSeed('ありのす')! >= 0 && parseSeed('ありのす')! < 0x80000000).toBe(true);
+  });
 });
 
 describe('初期状態', () => {

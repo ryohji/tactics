@@ -29,6 +29,8 @@ export interface Dungeon {
   open: Set<CellKey>;
   chambers: Chamber[];
   stubs: Stub[];
+  /** 生成シード(スタブごとの導出 rng と、プレイ再現の表示に使う)。 */
+  seed: number;
   rng: () => number;
   /** 掘削のたびに増える(描画・テストの変更検知用)。 */
   rev: number;
@@ -68,6 +70,21 @@ export function lcg(seed: number): () => number {
     s = (s * 1664525 + 1013904223) >>> 0;
     return s / 0x100000000;
   };
+}
+
+/**
+ * セル位置から導出する rng(シード+セル座標+用途 salt のハッシュ)。
+ * 迷宮生成をこの導出 rng で行うことで、同じシードなら**探索の順序に依らず**
+ * 同じ迷宮になる(共有ストリームだと先に掘った順で結果が変わる)。プレイ再現の要。
+ */
+export function cellRng(seed: number, c: Cell, salt: number): () => number {
+  let h = (seed ^ Math.imul(salt, 0x9e3779b9)) >>> 0;
+  for (const v of c) {
+    h = (h ^ (v + 0x7f4a7c15)) >>> 0;
+    h = Math.imul(h, 0x85ebca6b) >>> 0;
+    h = (h ^ (h >>> 13)) >>> 0;
+  }
+  return lcg(h);
 }
 
 /**
@@ -171,6 +188,8 @@ function spawnStubs(dg: Dungeon, ch: Chamber): void {
 /** スタブ位置に新しい広間を生成し、そこからさらにスタブを伸ばす。 */
 export function expandAt(dg: Dungeon, stub: Stub): Chamber {
   stub.used = true;
+  // 掘削 rng をスタブ位置から導出し直す(探索順に依らない決定性)。
+  dg.rng = cellRng(dg.seed, stub.exit, 1);
   const r = 2 + Math.floor(dg.rng() * 3); // 2..4
   const cells = carveChamber(dg, stub.exit, r);
   const ch: Chamber = { id: dg.chambers.length, center: stub.exit, r, cells };
@@ -190,7 +209,7 @@ export function maybeExpand(dg: Dungeon, pos: Cell, radius = 5): Chamber[] {
 
 /** 入口広間(原点・r=3)とスタブ2本以上を持つ初期ダンジョン。 */
 export function createDungeon(seed: number): Dungeon {
-  const dg: Dungeon = { open: new Set(), chambers: [], stubs: [], rng: lcg(seed), rev: 0 };
+  const dg: Dungeon = { open: new Set(), chambers: [], stubs: [], seed, rng: lcg(seed), rev: 0 };
   const cells = carveChamber(dg, [0, 0, 0], 3);
   const entrance: Chamber = { id: 0, center: [0, 0, 0], r: 3, cells };
   dg.chambers.push(entrance);

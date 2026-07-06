@@ -6,7 +6,8 @@
 //   右下: ログ / 下中央: 待機・投擲キャンセル
 //   死亡: スコアオーバーレイ
 
-import { useRogue, playerAtk, playerDef, depthOf, LIGHT } from '../state/rogue';
+import { useState } from 'react';
+import { useRogue, playerAtk, playerDef, depthOf, parseSeed, LIGHT } from '../state/rogue';
 import { stepDist } from '../model/dungeon';
 import { BEASTS } from '../model/beasts';
 import { ITEMS, itemLabel, statLabel, type ItemStack } from '../model/loot';
@@ -255,9 +256,19 @@ function DeadOverlay() {
   const turn = useRogue((s) => s.turn);
   const deathCause = useRogue((s) => s.deathCause);
   const player = useRogue((s) => s.player);
+  const seed = useRogue((s) => s.seed);
   const restart = useRogue((s) => s.restart);
+  const [seedInput, setSeedInput] = useState('');
   if (phase !== 'dead') return null;
-  const result = { maxDepth, kills, turn, deathCause, weapon: player.weapon, armor: player.armor };
+  const result = {
+    maxDepth,
+    kills,
+    turn,
+    deathCause,
+    weapon: player.weapon,
+    armor: player.armor,
+    seed,
+  };
   const equip = (s: ItemStack | null) => (s ? `${itemLabel(s)}(${statLabel(s)})` : 'なし');
   return (
     <div className="hud-over">
@@ -268,8 +279,20 @@ function DeadOverlay() {
       <div className="hud-score-sub">
         死因: {deathCause ?? '不明'} ／ 武器: {equip(player.weapon)} ／ 防具: {equip(player.armor)}
       </div>
+      <div className="hud-score-sub">この迷宮のシード: {seed}</div>
+      <div className="hud-seed-row">
+        <input
+          value={seedInput}
+          onChange={(e) => setSeedInput(e.target.value)}
+          placeholder="シード(空欄=新しい迷宮)"
+          spellCheck={false}
+        />
+        <button onClick={() => setSeedInput(String(seed))} title="今回のシードを入力欄へ">
+          同じ迷宮
+        </button>
+      </div>
       <div className="hud-over-buttons">
-        <button className="primary" onClick={() => restart()}>
+        <button className="primary" onClick={() => restart(parseSeed(seedInput))}>
           再挑戦
         </button>
         <button
