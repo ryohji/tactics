@@ -11,6 +11,7 @@ import { stepDist } from '../model/dungeon';
 import { BEASTS } from '../model/beasts';
 import { ITEMS, itemLabel, statLabel, type ItemStack } from '../model/loot';
 import { resetView } from '../state/view';
+import { shareUrl } from '../state/share';
 import './hud.css';
 
 function StatusPanel() {
@@ -252,17 +253,33 @@ function DeadOverlay() {
   const maxDepth = useRogue((s) => s.maxDepth);
   const kills = useRogue((s) => s.kills);
   const turn = useRogue((s) => s.turn);
+  const deathCause = useRogue((s) => s.deathCause);
+  const player = useRogue((s) => s.player);
   const restart = useRogue((s) => s.restart);
   if (phase !== 'dead') return null;
+  const result = { maxDepth, kills, turn, deathCause, weapon: player.weapon, armor: player.armor };
+  const equip = (s: ItemStack | null) => (s ? `${itemLabel(s)}(${statLabel(s)})` : 'なし');
   return (
     <div className="hud-over">
       <h1 className="lose">力尽きた…</h1>
       <div className="hud-score">
         最深到達 深度{maxDepth} ／ 討伐 {kills} ／ {turn}ターン
       </div>
-      <button className="primary" onClick={() => restart()}>
-        再挑戦
-      </button>
+      <div className="hud-score-sub">
+        死因: {deathCause ?? '不明'} ／ 武器: {equip(player.weapon)} ／ 防具: {equip(player.armor)}
+      </div>
+      <div className="hud-over-buttons">
+        <button className="primary" onClick={() => restart()}>
+          再挑戦
+        </button>
+        <button
+          className="share-x"
+          title="この結果を X の投稿画面に載せる(送信は X 側で確認できる)"
+          onClick={() => window.open(shareUrl(result), '_blank', 'noopener,noreferrer')}
+        >
+          𝕏 結果をポスト
+        </button>
+      </div>
     </div>
   );
 }

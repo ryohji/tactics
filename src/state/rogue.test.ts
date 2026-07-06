@@ -130,12 +130,16 @@ describe('戦闘', () => {
     expect(player().hp).toBeLessThan(hp0);
   });
 
-  it('HP が尽きると死亡フェーズになる', () => {
+  it('HP が尽きると死亡フェーズになり、死因が記録される', () => {
     placeBeastAdjacent('drake');
     useRogue.setState({ player: { ...player(), hp: 1 } });
     useRogue.getState().wait();
     expect(useRogue.getState().phase).toBe('dead');
     expect(useRogue.getState().reach.cells).toHaveLength(0);
+    expect(useRogue.getState().deathCause).toBe(BEASTS.drake.name);
+    // 再挑戦で死因はクリアされる。
+    useRogue.getState().restart(1);
+    expect(useRogue.getState().deathCause).toBeNull();
   });
 
   it('投げナイフ: モードに入り射程内の敵へ当てて消費する', async () => {

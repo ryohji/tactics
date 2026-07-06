@@ -186,6 +186,8 @@ export interface RogueState {
   muted: boolean;
   /** ポストエフェクト(ブルーム等)。重い/表示が崩れる環境向けに切れるようにする。 */
   postFx: boolean;
+  /** 死因(とどめを刺した敵の名前)。X へのポストに載せる。 */
+  deathCause: string | null;
   log: string[];
   fx: RogueFx[];
 
@@ -494,6 +496,7 @@ export const useRogue = create<RogueState>((set, get) => {
     sfx.play('hit');
     pushLog(`${def.name} の攻撃! ${dmg}ダメージ`);
     set({ player: { ...player } });
+    if (player.hp <= 0) set({ deathCause: def.name }); // checkDead が使う死因
     checkDead();
   }
 
@@ -877,7 +880,7 @@ export const useRogue = create<RogueState>((set, get) => {
     | 'traps' | 'turrets' | 'decoys' | 'lightLevel'
     | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'focus' | 'log' | 'fx'
-    | 'cellChamber' | 'visitedChambers' | 'exploreRev'
+    | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
   > {
     clearUnitAnims();
     runSeq++;
@@ -901,6 +904,7 @@ export const useRogue = create<RogueState>((set, get) => {
       cellChamber,
       visitedChambers: new Set<number>([entrance.id]),
       exploreRev: 0,
+      deathCause: null,
       player: {
         pos: [0, 0, 0],
         hp: 24,

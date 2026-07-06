@@ -258,6 +258,14 @@
 
 /* --- rogue: スコア表示(死亡オーバーレイ) --- */
 .hud-score { font-size: 18px; color: #e2e8f0; letter-spacing: 0.08em; }
+.hud-score-sub { font-size: 13px; color: #94a3b8; letter-spacing: 0.06em; }
+.hud-over-buttons { display: flex; gap: 12px; }
+.hud button.share-x {
+  background: linear-gradient(180deg, #1d2430, #0b0f16);
+  border-color: #3f4c5e;
+  color: #e7edf4;
+}
+.hud button.share-x:hover { background: linear-gradient(180deg, #2a3442, #131a24); }
 
 /* --- rogue: 探索バブル(アイテム/通路入り口。クリックでファストトラベル) --- */
 .hud-bubble {
