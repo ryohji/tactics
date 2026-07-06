@@ -819,6 +819,7 @@ export const useRogue = create<RogueState>((set, get) => {
       set({ player: { ...player } });
     }
     set({ turn });
+    bgm.setBgmDepth(depthOf(player.pos)); // BGM は深度で曲調が変わる
     autoSave();
   }
 
@@ -1119,6 +1120,7 @@ export const useRogue = create<RogueState>((set, get) => {
       chamberCycleIdx = -1;
       if (!opts?.keepSave) persist.clearSave(); // 新しい冒険を始めたら前の保存は破棄
       bgm.setBgmScene('game');
+      bgm.setBgmDepth(0);
       // 戦闘乱数もシードから初期化(迷宮生成の cellRng と合わせてプレイを再現可能に)。
       seedRogueRng((s ^ 0x6d2b79f5) >>> 0);
       set({
@@ -1142,6 +1144,7 @@ export const useRogue = create<RogueState>((set, get) => {
       deviceSeq = d.seqs.device;
       seedRogueRng(d.rng); // 戦闘乱数列も保存時点から続ける(プレイ再現性)
       bgm.setBgmScene('game');
+      bgm.setBgmDepth(depthOf(d.player.pos));
       const dungeon: Dungeon = {
         open: new Set(d.dungeon.open),
         chambers: d.dungeon.chambers,
