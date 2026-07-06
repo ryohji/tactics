@@ -103,8 +103,8 @@ function GameBubbles() {
 }
 
 /** 引き出し線の高さ(重なりにくいよう種別と並びで少しずらす)。 */
-function liftOf(kind: 'item' | 'beast', i: number): number {
-  return (kind === 'beast' ? 3.0 : 2.1) + (i % 3) * 0.55;
+function liftOf(kind: 'item' | 'beast' | 'passage', i: number): number {
+  return (kind === 'beast' ? 3.0 : kind === 'item' ? 2.1 : 1.4) + (i % 3) * 0.55;
 }
 
 /** マップ画面のバブル(確認できた敵+未取得アイテム+フォーカス部屋への移動)。 */
@@ -127,6 +127,15 @@ function MapBubbles() {
   const spotted = beasts.filter((b) => b.alive && discovered.has(cellKey(b.pos)));
   const loot = items.filter((i) => discovered.has(cellKey(i.pos)));
 
+  // 注目中の部屋(TAB フォーカス。無ければ現在の部屋)の通路入り口(発見済みのみ)。
+  const chamberId = mapFocusChamber ?? cellChamber.get(cellKey(playerPos));
+  const passages =
+    chamberId === undefined
+      ? []
+      : dungeon.stubs.filter(
+          (st) => st.from === chamberId && discovered.has(cellKey(st.mouth)),
+        );
+
   // 引き出し線(対象のすぐ上 → バブルの足元)をひとつの LineSegments にまとめる。
   const lines = useMemo(() => {
     const pos: number[] = [];
@@ -136,11 +145,12 @@ function MapBubbles() {
     };
     spotted.forEach((b, i) => add(b.pos, liftOf('beast', i)));
     loot.forEach((it, i) => add(it.pos, liftOf('item', i)));
+    passages.forEach((st, i) => add(st.mouth, liftOf('passage', i)));
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     return g;
-    // beasts/items は更新のたび配列が差し替わる。discovered は rev で追う。
-  }, [beasts, items, discoveredRev]);
+    // beasts/items は更新のたび配列が差し替わる。discovered/stubs は rev、部屋は focus で追う。
+  }, [beasts, items, discoveredRev, mapFocusChamber, playerPos]);
   useEffect(() => () => lines.dispose(), [lines]);
 
   // 敵バブル: 目的地は敵の隣の空きセル(プレイヤーに最も近いもの)。
@@ -159,7 +169,8 @@ function MapBubbles() {
     if (cand) s.travelTo(cand);
   };
 
-  const fetchItem = (target: Cell) => {
+  /** マップを閉じてそのセルへファストトラベル(アイテム・通路入り口)。 */
+  const goTo = (target: Cell) => {
     const s = useRogue.getState();
     s.toggleMap();
     s.travelTo(target);
@@ -190,7 +201,18 @@ function MapBubbles() {
           label={itemLabel(it.stack)}
           kind="item"
           lift={liftOf('item', i)}
-          onClick={() => fetchItem(it.pos)}
+          onClick={() => goTo(it.pos)}
+        />
+      ))}
+      {passages.map((st, i) => (
+        <Bubble
+          key={`p${st.id}`}
+          id={`mp${st.id}`}
+          target={st.mouth}
+          label={st.used ? '通路' : '未踏の通路'}
+          kind="passage"
+          lift={liftOf('passage', i)}
+          onClick={() => goTo(st.mouth)}
         />
       ))}
       {focusTarget && (
