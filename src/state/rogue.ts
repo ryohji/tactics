@@ -220,8 +220,9 @@ export interface RogueState {
   toggleFreeCam: () => void;
   /** マップモードの切替(M キー / HUD ボタン)。 */
   toggleMap: () => void;
-  /** TAB: ゲーム=部屋内の敵へ視線を巡回 / マップ=訪問済み広間の中央を巡回。 */
-  cycleTarget: () => void;
+  /** TAB: ゲーム=部屋内の敵へ視線を巡回 / マップ=訪問済み広間の中央を巡回。
+      dir=-1(Shift+TAB)で逆順。 */
+  cycleTarget: (dir?: 1 | -1) => void;
   /** マップから: その広間の入り口(経路上で最初に踏む広間セル)までファストトラベル。 */
   travelToChamber: (id: number) => void;
   toggleMute: () => void;
@@ -1452,13 +1453,16 @@ export const useRogue = create<RogueState>((set, get) => {
       });
     },
 
-    cycleTarget: () => {
+    cycleTarget: (dir = 1) => {
       const s = get();
       if (s.mapMode) {
-        // 訪問済みの広間の中央を巡回(一周の最後にプレイヤー位置へ戻る)。
+        // 訪問済みの広間の中央を巡回(一周の最後にプレイヤー位置へ戻る)。Shift で逆順。
         const ids = [...s.visitedChambers].sort((a, b) => a - b);
         if (ids.length === 0) return;
-        chamberCycleIdx = (chamberCycleIdx + 1) % (ids.length + 1);
+        const n = ids.length + 1; // 末尾はプレイヤー位置
+        // 初期状態(-1)は「プレイヤー位置」相当: 逆順の最初は最後の広間へ。
+        chamberCycleIdx =
+          chamberCycleIdx === -1 && dir === -1 ? n - 2 : (chamberCycleIdx + dir + n) % n;
         view.base = null; // パンで外していても巡回先へ再アンカー
         sfx.play('cursor');
         if (chamberCycleIdx === ids.length) {
@@ -1488,7 +1492,10 @@ export const useRogue = create<RogueState>((set, get) => {
         pushLog('近くに敵の気配はない');
         return;
       }
-      beastCycleIdx = (beastCycleIdx + 1) % cands.length;
+      beastCycleIdx =
+        beastCycleIdx === -1 && dir === -1
+          ? cands.length - 1
+          : (beastCycleIdx + dir + cands.length) % cands.length;
       const b = cands[beastCycleIdx];
       const g = gazeAngles(s.player.pos, b.pos);
       setGazeGoal(g.phi, g.theta);

@@ -22,7 +22,7 @@ export function App() {
     };
     window.addEventListener('pointerdown', onDown);
     installKeys({
-      onCycle: () => useRogue.getState().cycleTarget(),
+      onCycle: (dir) => useRogue.getState().cycleTarget(dir),
       onToggleMap: () => useRogue.getState().toggleMap(),
     });
     return () => window.removeEventListener('pointerdown', onDown);

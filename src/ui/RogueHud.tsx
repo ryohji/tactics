@@ -101,7 +101,7 @@ function SystemButtons() {
       )}
       {mapMode && (
         <div className="hud-viewhint">
-          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回(バブルで移動) / M=戻る
+          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回(Shift で逆順・バブルで移動) / M=戻る
         </div>
       )}
     </>
@@ -221,7 +221,7 @@ function ActionBar() {
         </>
       ) : (
         <>
-          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃 / TAB=敵に視線</span>
+          <span className="hint">青マーカー=移動 / 隣の敵クリック=攻撃 / TAB=敵に視線(Shift で逆順)</span>
           <LightButton busy={busy} />
           <button disabled={busy} onClick={wait}>
             待機

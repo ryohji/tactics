@@ -1,5 +1,6 @@
 // キーボード入力(rogue)。ストア非依存のグローバルリスナー。
-//   TAB   : ターゲット巡回(ゲーム=部屋内の敵へ視線 / マップ=訪問済み広間を巡回)
+//   TAB   : ターゲット巡回(ゲーム=部屋内の敵へ視線 / マップ=訪問済み広間を巡回)。
+//           Shift+TAB で逆順。
 //   M     : マップモード切替
 //   Space : 押している間、マップのドラッグを回転→移動(パン)に変える
 // ブラウザ既定(TAB のフォーカス移動・Space のスクロール)は抑止する。
@@ -8,7 +9,7 @@ let spaceHeld = false;
 let installed = false;
 
 type Handlers = {
-  onCycle: () => void;
+  onCycle: (dir: 1 | -1) => void;
   onToggleMap: () => void;
 };
 
@@ -29,7 +30,7 @@ export function installKeys(h: Handlers): void {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     if (e.key === 'Tab') {
       e.preventDefault();
-      handlers?.onCycle();
+      handlers?.onCycle(e.shiftKey ? -1 : 1);
     } else if (e.key === 'm' || e.key === 'M') {
       handlers?.onToggleMap();
     } else if (e.code === 'Space') {

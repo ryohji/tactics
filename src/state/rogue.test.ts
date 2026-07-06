@@ -581,6 +581,53 @@ describe('マップモードとターゲット巡回', () => {
     expect(useRogue.getState().mapFocusChamber).toBeNull();
   });
 
+  it('Shift+TAB(dir=-1)は逆順に巡回する', () => {
+    const s = useRogue.getState();
+    // 仮想の広間 99 を訪問済みに足して2部屋にする(center も用意)。
+    s.cellChamber.set(cellKey(freeNeighbor()), 99);
+    s.visitedChambers.add(99);
+    s.dungeon.chambers[99] = { id: 99, center: freeNeighbor(), r: 1, cells: [] };
+    s.toggleMap();
+    // 初期状態からの逆順は「最後の広間」へ。
+    useRogue.getState().cycleTarget(-1);
+    expect(useRogue.getState().mapFocusChamber).toBe(99);
+    useRogue.getState().cycleTarget(-1);
+    expect(useRogue.getState().mapFocusChamber).toBe(0);
+    // 正順に戻すと 99 へ(往復が対称)。
+    useRogue.getState().cycleTarget(1);
+    expect(useRogue.getState().mapFocusChamber).toBe(99);
+    useRogue.getState().cycleTarget(1); // プレイヤー位置
+    expect(useRogue.getState().mapFocusChamber).toBeNull();
+  });
+
+  it('ゲームの Shift+TAB は敵を逆順に巡回する', () => {
+    const b1 = placeBeastAdjacent('bat'); // id 900(最近接)
+    const s = useRogue.getState();
+    const occupied = new Set(s.beasts.filter((x) => x.alive).map((x) => cellKey(x.pos)));
+    const far = s.reach.cells.find(
+      (c) => stepDist(s.player.pos, c) === 2 && !occupied.has(cellKey(c)),
+    )!;
+    const b2: Beast = {
+      id: 901,
+      kind: 'bat',
+      pos: far,
+      hp: 5,
+      home: far,
+      homeChamber: 0,
+      layerFloor: -999,
+      layerCeil: 999,
+      awake: true,
+      alive: true,
+      status: null,
+    };
+    useRogue.setState({ beasts: [...s.beasts, b2] });
+    // 逆順の最初は「距離順の最後」= 遠い方(901)。
+    useRogue.getState().cycleTarget(-1);
+    expect(useRogue.getState().hoverBeastId).toBe(901);
+    useRogue.getState().cycleTarget(-1);
+    expect(useRogue.getState().hoverBeastId).toBe(b1.id);
+  });
+
   it('travelToChamber: マップを閉じて部屋の入り口(最初の広間セル)まで移動する', async () => {
     // 発見済みの遠いセルを仮想の広間 99 に見立てる。
     const s = useRogue.getState();
