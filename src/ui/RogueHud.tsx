@@ -411,8 +411,12 @@ export function RogueHud() {
       <SystemButtons onHelp={() => setHelp(true)} />
       <PackPanel />
       <BeastPanel />
-      <BottomBar />
-      <LogPanel />
+      {/* 下部領域: デスクトップでは別配置(display:contents)、狭い画面では
+          ログ → ステータス/ボタン の縦積みにして重なりを防ぐ。 */}
+      <div className="hud-bottomarea">
+        <LogPanel />
+        <BottomBar />
+      </div>
       <DeadOverlay />
       {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </div>
