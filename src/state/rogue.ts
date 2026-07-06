@@ -22,12 +22,15 @@ import {
   createDungeon,
   maybeExpand,
   cellRng,
+  lcg,
   distW,
   adjacent,
   stepDist,
   type Dungeon,
   type Chamber,
+  type Stub,
 } from '../model/dungeon';
+import * as persist from './persist';
 import { BEASTS, spawnTable, type BeastKind } from '../model/beasts';
 import {
   ITEMS,
@@ -192,7 +195,10 @@ export interface RogueState {
   log: string[];
   fx: RogueFx[];
 
-  restart: (seed?: number) => void;
+  /** keepSave はモジュール初期化用(起動時の仮ゲームで保存を消さない)。 */
+  restart: (seed?: number, opts?: { keepSave?: boolean }) => void;
+  /** 保存された冒険(persist.ts の自動保存)を再開する。成功で true。 */
+  resume: () => boolean;
   clickCell: (c: Cell) => void;
   clickBeast: (id: number) => void;
   useItem: (index: number) => void;
@@ -217,6 +223,35 @@ export interface RogueState {
   travelToChamber: (id: number) => void;
   toggleMute: () => void;
   togglePostFx: () => void;
+}
+
+// --- セーブデータ -----------------------------------------------------------------
+
+/**
+ * localStorage(persist.ts)に置くスナップショット。Set/Map は配列化する。
+ * ダンジョンの rng 関数は保存しない(展開時にスタブ位置から導出し直すため不要)。
+ */
+export interface SaveData {
+  v: 1;
+  seed: number;
+  /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
+  rng: number;
+  seqs: { beast: number; item: number; device: number };
+  dungeon: { open: CellKey[]; chambers: Chamber[]; stubs: Stub[]; rev: number };
+  discovered: CellKey[];
+  cellChamber: [CellKey, number][];
+  visitedChambers: number[];
+  player: PlayerState;
+  lightLevel: LightLevel;
+  beasts: Beast[];
+  items: GroundItem[];
+  traps: PlacedTrap[];
+  turrets: Turret[];
+  decoys: Decoy[];
+  turn: number;
+  kills: number;
+  maxDepth: number;
+  log: string[];
 }
 
 // --- RNG(戦闘分散用。ダンジョン生成は dungeon.rng) --------------------------------
@@ -498,6 +533,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const { player } = get();
     if (player.hp > 0) return false;
     set({ phase: 'dead', busy: false, reach: { cells: [], parent: new Map() } });
+    persist.clearSave(); // ローグライクの掟: 死んだ冒険は再開できない
     bgm.setBgmScene('dead');
     sfx.play('defeat');
     pushLog('力尽きた…');
@@ -752,6 +788,40 @@ export const useRogue = create<RogueState>((set, get) => {
       set({ player: { ...player } });
     }
     set({ turn });
+    autoSave();
+  }
+
+  /** 毎ターン終わりの自動保存(死んでいたら保存しない。死亡時は checkDead が破棄済み)。 */
+  function autoSave(): void {
+    const s = get();
+    if (s.phase !== 'play') return;
+    const data: SaveData = {
+      v: 1,
+      seed: s.seed,
+      rng: rngState,
+      seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
+      dungeon: {
+        open: [...s.dungeon.open],
+        chambers: s.dungeon.chambers,
+        stubs: s.dungeon.stubs,
+        rev: s.dungeon.rev,
+      },
+      discovered: [...s.discovered],
+      cellChamber: [...s.cellChamber],
+      visitedChambers: [...s.visitedChambers],
+      player: s.player,
+      lightLevel: s.lightLevel,
+      beasts: s.beasts,
+      items: s.items,
+      traps: s.traps,
+      turrets: s.turrets,
+      decoys: s.decoys,
+      turn: s.turn,
+      kills: s.kills,
+      maxDepth: s.maxDepth,
+      log: s.log.slice(-8),
+    };
+    persist.writeSave(data);
   }
 
   /** プレイヤーを隣へ1歩(発見・拡張・拾得・訪問記録込み)。 */
@@ -968,11 +1038,12 @@ export const useRogue = create<RogueState>((set, get) => {
     muted: false,
     postFx: true,
 
-    restart: (seed) => {
+    restart: (seed, opts) => {
       const s = seed ?? Math.floor(Math.random() * 0x7fffffff);
       resetView();
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
+      if (!opts?.keepSave) persist.clearSave(); // 新しい冒険を始めたら前の保存は破棄
       bgm.setBgmScene('game');
       // 戦闘乱数もシードから初期化(迷宮生成の cellRng と合わせてプレイを再現可能に)。
       seedRogueRng((s ^ 0x6d2b79f5) >>> 0);
@@ -983,6 +1054,63 @@ export const useRogue = create<RogueState>((set, get) => {
         mapFocusChamber: null,
       });
       discoverInit(); // 初期位置の明かりと到達範囲
+    },
+
+    resume: () => {
+      const d = persist.readSave<SaveData>();
+      if (!d || d.v !== 1) return false;
+      resetView();
+      clearUnitAnims();
+      runSeq++; // 進行中の自動歩行などを打ち切る
+      beastCycleIdx = -1;
+      chamberCycleIdx = -1;
+      beastSeq = d.seqs.beast;
+      itemSeq = d.seqs.item;
+      deviceSeq = d.seqs.device;
+      seedRogueRng(d.rng); // 戦闘乱数列も保存時点から続ける(プレイ再現性)
+      bgm.setBgmScene('game');
+      const dungeon: Dungeon = {
+        open: new Set(d.dungeon.open),
+        chambers: d.dungeon.chambers,
+        stubs: d.dungeon.stubs,
+        seed: d.seed,
+        rng: lcg(d.seed), // 展開時に cellRng で導出し直すので初期値は使われない
+        rev: d.dungeon.rev,
+      };
+      set({
+        seed: d.seed,
+        dungeon,
+        discovered: new Set(d.discovered),
+        discoveredRev: 1,
+        cellChamber: new Map(d.cellChamber),
+        visitedChambers: new Set(d.visitedChambers),
+        exploreRev: 1,
+        player: d.player,
+        lightLevel: d.lightLevel,
+        beasts: d.beasts,
+        items: d.items,
+        traps: d.traps,
+        turrets: d.turrets,
+        decoys: d.decoys,
+        turn: d.turn,
+        kills: d.kills,
+        maxDepth: d.maxDepth,
+        phase: 'play',
+        busy: false,
+        uiMode: 'walk',
+        reach: { cells: [], parent: new Map() },
+        hoverMarker: null,
+        hoverBeastId: null,
+        focus: d.player.pos,
+        freeCam: false,
+        mapMode: false,
+        mapFocusChamber: null,
+        deathCause: null,
+        log: [...d.log, '—— 冒険を再開した'],
+        fx: [],
+      });
+      refreshReach();
+      return true;
     },
 
     clickCell: (c) => {
@@ -1301,7 +1429,8 @@ export const useRogue = create<RogueState>((set, get) => {
 });
 
 // 初期状態にも明かりと到達範囲を入れる(モジュール読み込み時に1度)。
+// keepSave: タイトル画面で「続きから」を選べるよう、起動時の仮ゲームでは保存を消さない。
 {
   const s = useRogue.getState();
-  s.restart(s.seed);
+  s.restart(s.seed, { keepSave: true });
 }

@@ -5,6 +5,7 @@ import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
 import type { ItemStack } from '../model/loot';
 import { useRogue, seedRogueRng, parseSeed, depthOf, playerAtk, clearedChambers, gazeAngles, type Beast } from './rogue';
+import * as persist from './persist';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
 
@@ -54,6 +55,78 @@ beforeEach(() => {
   // restart はシードから戦闘乱数も初期化するので、テスト用の固定はその後に。
   useRogue.getState().restart(7);
   seedRogueRng(42);
+});
+
+/** localStorage 互換のインメモリ実装(persist の差し替え用)。 */
+class MemStorage {
+  private m = new Map<string, string>();
+  get length() {
+    return this.m.size;
+  }
+  clear() {
+    this.m.clear();
+  }
+  getItem(k: string) {
+    return this.m.get(k) ?? null;
+  }
+  key(i: number) {
+    return [...this.m.keys()][i] ?? null;
+  }
+  removeItem(k: string) {
+    this.m.delete(k);
+  }
+  setItem(k: string, v: string) {
+    this.m.set(k, v);
+  }
+}
+
+describe('セーブと再開(persist)', () => {
+  it('毎ターン自動保存され、resume で状態が復元される', () => {
+    persist.setStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      useRogue.getState().restart(7);
+      useRogue.getState().wait(); // 1ターン → 自動保存
+      expect(persist.hasSave()).toBe(true);
+      const before = useRogue.getState();
+      const { turn, seed } = before;
+      const pos = before.player.pos;
+      const openSize = before.dungeon.open.size;
+      const packLen = before.player.pack.length;
+      // 別の冒険を始めると保存は破棄される。保存を書き戻して「リロード後の再開」を再現。
+      const raw = persist.readSave<object>();
+      useRogue.getState().restart(99);
+      expect(persist.hasSave()).toBe(false);
+      persist.writeSave(raw);
+      expect(useRogue.getState().resume()).toBe(true);
+      const s = useRogue.getState();
+      expect(s.seed).toBe(seed);
+      expect(s.turn).toBe(turn);
+      expect(s.player.pos).toEqual(pos);
+      expect(s.player.pack).toHaveLength(packLen);
+      expect(s.dungeon.open.size).toBe(openSize);
+      expect(s.phase).toBe('play');
+      expect(s.reach.cells.length).toBeGreaterThan(0); // 到達範囲も再計算済み
+    } finally {
+      persist.setStorageForTest(null);
+    }
+  });
+
+  it('死亡すると保存が破棄され、resume できない', () => {
+    persist.setStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      useRogue.getState().restart(7);
+      useRogue.getState().wait();
+      expect(persist.hasSave()).toBe(true);
+      placeBeastAdjacent('drake');
+      useRogue.setState({ player: { ...player(), hp: 1 } });
+      useRogue.getState().wait();
+      expect(useRogue.getState().phase).toBe('dead');
+      expect(persist.hasSave()).toBe(false);
+      expect(useRogue.getState().resume()).toBe(false);
+    } finally {
+      persist.setStorageForTest(null);
+    }
+  });
 });
 
 describe('parseSeed(シード入力の解釈)', () => {

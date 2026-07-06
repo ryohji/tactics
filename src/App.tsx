@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { RogueScene } from './render/rogue/RogueScene';
 import { RogueHud } from './ui/RogueHud';
 import { useRogue, parseSeed } from './state/rogue';
+import { hasSave, clearSave } from './state/persist';
 import { installKeys } from './input/keys';
 import { unlock } from './audio/sfx';
 import { startBgm } from './audio/bgm';
@@ -42,18 +43,28 @@ export function App() {
   );
 }
 
-/** 初回だけのタイトル画面。「潜る」クリックが音の自動再生制限の解除も兼ねる。 */
+/** 初回だけのタイトル画面。開始クリックが音の自動再生制限の解除も兼ねる。 */
 function TitleOverlay() {
   const [entered, setEntered] = useState(false);
   const [seedInput, setSeedInput] = useState('');
+  const [saved, setSaved] = useState(() => hasSave());
   if (entered) return null;
+
+  // 新しく潜る: シード入力があればその迷宮、無ければ起動時のランダム迷宮。
+  // どちらも前の保存は破棄される(restart が消す。起動時の仮ゲームは keepSave で温存済み)。
   const enter = () => {
     unlock();
     startBgm();
-    // シードが入力されていればその迷宮で開始(空欄=起動時のランダム迷宮のまま)。
     const seed = parseSeed(seedInput);
     if (seed !== undefined) useRogue.getState().restart(seed);
+    else if (saved) useRogue.getState().restart();
     setEntered(true);
+  };
+  const resume = () => {
+    unlock();
+    startBgm();
+    if (useRogue.getState().resume()) setEntered(true);
+    else setSaved(false); // 壊れた保存などで再開できなければボタンを引っ込める
   };
   return (
     <div className="hud-title">
@@ -74,9 +85,28 @@ function TitleOverlay() {
             spellCheck={false}
           />
         </div>
-        <button className="primary" onClick={enter}>
-          潜る
-        </button>
+        <div className="hud-title-buttons">
+          {saved && (
+            <button className="primary" onClick={resume}>
+              続きから
+            </button>
+          )}
+          <button className={saved ? 'secondary' : 'primary'} onClick={enter}>
+            {saved ? '新しく潜る' : '潜る'}
+          </button>
+        </div>
+        {saved && (
+          <button
+            className="discard"
+            title="自動保存された冒険のデータを消す"
+            onClick={() => {
+              clearSave();
+              setSaved(false);
+            }}
+          >
+            保存データを破棄
+          </button>
+        )}
         <div className="hud-title-hint">ドラッグ=視点 / 青マーカー=移動 / M=マップ / TAB=敵に視線</div>
       </div>
     </div>
