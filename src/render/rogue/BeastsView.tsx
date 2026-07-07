@@ -72,6 +72,7 @@ function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCfg; focu
     c.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
+        m.frustumCulled = false; // スキン境界はボーン更新前に不定なので誤カリングを避ける
         m.material = Array.isArray(m.material)
           ? m.material.map((x) => x.clone())
           : m.material.clone();
@@ -109,11 +110,31 @@ function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCfg; focu
     return out;
   }, [clone]);
 
-  const { scale, yOff } = useMemo(() => {
-    const box = new THREE.Box3().setFromObject(clone);
+  const { scale, off } = useMemo(() => {
+    // Box3.setFromObject はスキン付きメッシュでスキニング込みの境界を計算するが、
+    // 描画前はボーン行列が単位行列のため境界が暴発する(Quaternius 系は armature に
+    // ×100 スケールがあり、実寸の百倍近い値になる → scale がほぼ0で見えなくなる)。
+    // そこでバインドポーズのジオメトリ境界(ノード変換のみ)から正規化する。
+    clone.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    const tmp = new THREE.Box3();
+    clone.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.geometry) {
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        tmp.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld);
+        box.union(tmp);
+      }
+    });
     const h = Math.max(0.01, box.max.y - box.min.y);
     const scale = (cfg.h * S) / h;
-    return { scale, yOff: -box.min.y * scale };
+    // 足元を接地させ、x/z はモデル原点のずれ(Ant は大きい)を中心合わせで打ち消す。
+    const off = new THREE.Vector3(
+      -(box.min.x + box.max.x) * 0.5 * scale,
+      -box.min.y * scale,
+      -(box.min.z + box.max.z) * 0.5 * scale,
+    );
+    return { scale, off };
   }, [clone, cfg.h]);
 
   const findClip = (pats: string[]): string | undefined => {
@@ -166,7 +187,7 @@ function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCfg; focu
 
   return (
     <group ref={group}>
-      <group position={[0, yOff + (cfg.lift - 0.4) * S, 0]} scale={scale}>
+      <group position={[off.x, off.y + (cfg.lift - 0.4) * S, off.z]} scale={scale}>
         <primitive object={clone} />
       </group>
     </group>

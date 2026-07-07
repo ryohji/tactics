@@ -97,6 +97,11 @@ export function createBgmEngine(
   color.type = 'lowpass';
   color.frequency.value = SCENE[scene].cutoff;
   color.connect(master);
+  // ベース層(ドローン・パッド・風・タンプーラ)のバス。深度で加わる層(リズム・
+  // 旋律・流水)が埋もれないよう、深く潜るほどダッキングして道を空ける。
+  const bed = ctx.createGain();
+  bed.gain.value = 1;
+  bed.connect(color);
 
   let dripBus: GainNode | null = null;
   let windBp: BiquadFilterNode | null = null;
@@ -133,10 +138,16 @@ export function createBgmEngine(
     const ramp = 2.0;
     const r = style.rhythm;
     const m = style.melody;
-    if (rhythmGain) rhythmGain.gain.setTargetAtTime(r.level * fade(r.from, r.span), t, ramp);
+    // 加わる層は基準より強めに出し、ベース層は最大4割ほど譲る(ダッキング)。
+    // 「層が増えるほど前段が引く」ことで各パートの聴感バランスを保つ。
+    const grow = Math.max(fade(r.from, r.span), fade(m.from, m.span));
+    bed.gain.setTargetAtTime(1 - 0.4 * grow, t, ramp);
+    if (rhythmGain)
+      rhythmGain.gain.setTargetAtTime(1.3 * r.level * fade(r.from, r.span), t, ramp);
     if (waterGain)
-      waterGain.gain.setTargetAtTime(0.05 * style.ambience.water * fade(6, 6), t, ramp * 1.5);
-    if (melGain) melGain.gain.setTargetAtTime(m.level * fade(m.from, m.span), t, ramp * 1.5);
+      waterGain.gain.setTargetAtTime(0.06 * style.ambience.water * fade(6, 6), t, ramp * 1.5);
+    if (melGain)
+      melGain.gain.setTargetAtTime(1.3 * m.level * fade(m.from, m.span), t, ramp * 1.5);
     if (windGain)
       windGain.gain.setTargetAtTime(
         0.055 * style.ambience.wind * (1 + 0.9 * fade(4, 12)),
@@ -171,7 +182,7 @@ export function createBgmEngine(
       o.start();
       live.push(o);
     }
-    lp.connect(g).connect(color);
+    lp.connect(g).connect(bed);
   }
 
   /** ループする白色ノイズ源。 */
@@ -211,7 +222,7 @@ export function createBgmEngine(
     live.push(lfo);
     windGain = ctx.createGain();
     windGain.gain.value = 0.055 * style.ambience.wind;
-    src.connect(windBp).connect(windGain).connect(color);
+    src.connect(windBp).connect(windGain).connect(bed);
     src.start();
     live.push(src);
   }
@@ -297,7 +308,7 @@ export function createBgmEngine(
         g.gain.linearRampToValueAtTime(peak, t0 + 4.5);
         g.gain.setValueAtTime(peak, t0 + dur - 6);
         g.gain.linearRampToValueAtTime(0, t0 + dur);
-        o.connect(g).connect(color);
+        o.connect(g).connect(bed);
         o.start(t0);
         o.stop(t0 + dur + 0.1);
       }
@@ -414,7 +425,7 @@ export function createBgmEngine(
     g.gain.setValueAtTime(0, t0);
     g.gain.linearRampToValueAtTime(0.05, t0 + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + 2.6);
-    o.connect(lp).connect(g).connect(color);
+    o.connect(lp).connect(g).connect(bed);
     o.start(t0);
     o.stop(t0 + 2.7);
   }
