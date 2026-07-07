@@ -529,6 +529,8 @@
 .hud-help-panel td:first-child { white-space: nowrap; color: #cbd5e1; width: 38%; }
 .hud-help-panel td:last-child { color: #94a3b8; }
 .hud-help-panel > button { margin-top: 16px; width: 100%; }
+.hud-help-links { margin: 12px 0 0; font-size: 12px; }
+.hud-help-links a { color: #93c5fd; }
 
 /* --- rogue-10: スマートフォン向け縮小・再配置 ---
    説明文(hint/viewhint/ボタンのラベル)を隠し、パネルを小さく・タップしやすく。 */

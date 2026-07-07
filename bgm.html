@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>蟻巣迷宮 — BGM 試聴室</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #0b0e14; }
+      body {
+        color: #cfd6e4;
+        font-family: system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+        display: flex;
+        justify-content: center;
+        padding: 24px 16px 48px;
+        box-sizing: border-box;
+      }
+      #app { width: 100%; max-width: 640px; }
+      h1 { font-size: 20px; margin: 0 0 4px; color: #e8edf6; }
+      .sub { font-size: 12px; color: #8892a6; margin: 0 0 20px; }
+      .sub a { color: #7fb0e8; }
+      .styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 20px; }
+      .style-card {
+        background: #141a26;
+        border: 1px solid #232c3f;
+        border-radius: 10px;
+        padding: 10px 12px;
+        cursor: pointer;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .style-card:hover { border-color: #3a4a68; }
+      .style-card.on { border-color: #d9a441; background: #1b2130; }
+      .style-card b { display: block; font-size: 14px; color: #e8edf6; margin-bottom: 4px; }
+      .style-card span { font-size: 11px; color: #8f99ad; line-height: 1.5; }
+      .panel {
+        background: #141a26;
+        border: 1px solid #232c3f;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      .row { display: flex; align-items: center; gap: 12px; }
+      .row + .row { margin-top: 14px; }
+      label.head { font-size: 12px; color: #8892a6; width: 4em; flex: none; }
+      input[type='range'] { flex: 1; accent-color: #d9a441; }
+      .depth-val { font-size: 18px; font-variant-numeric: tabular-nums; color: #e8edf6; width: 2.2em; text-align: right; }
+      .scene-btns, .play-row { display: flex; gap: 8px; }
+      .scene-btns button, #play {
+        background: #1b2130;
+        border: 1px solid #2c3750;
+        border-radius: 8px;
+        color: #cfd6e4;
+        font: inherit;
+        font-size: 13px;
+        padding: 6px 14px;
+        cursor: pointer;
+      }
+      .scene-btns button.on { border-color: #d9a441; color: #f0d9a8; }
+      #play { font-size: 15px; padding: 10px 22px; }
+      #play.on { border-color: #d9a441; color: #f0d9a8; }
+      .layers { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+      .layers li { padding: 3px 0; color: #5d6678; }
+      .layers li.on { color: #cfd6e4; }
+      .layers li b { color: inherit; font-weight: 600; }
+      .note { font-size: 11px; color: #6b7488; line-height: 1.6; margin-top: 16px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/bgm/main.ts"></script>
+  </body>
+</html>

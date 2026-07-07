@@ -395,6 +395,11 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             <tr><td>セーブ</td><td>毎ターン自動保存。死ぬと消える(再挑戦のみ)</td></tr>
           </tbody>
         </table>
+        <p className="hud-help-links">
+          <a href={`${import.meta.env.BASE_URL}bgm.html`} target="_blank" rel="noreferrer">
+            ♪ BGM 試聴室(深度・スタイル別に聴ける)
+          </a>
+        </p>
         <button className="primary" onClick={onClose}>
           閉じる
         </button>
