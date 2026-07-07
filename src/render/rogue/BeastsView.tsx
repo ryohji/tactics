@@ -3,10 +3,9 @@
 // クリック: 通常=隣接なら近接攻撃 / 投擲モード=射程内なら投げナイフ。
 // 投擲モード中は射程内の敵に白いリングを出す。
 
-import { useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Billboard } from '@react-three/drei';
-import { Select } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { cellKey, worldPos } from '../../model/fcc';
 import { distW } from '../../model/dungeon';
@@ -272,6 +271,48 @@ function ColossusBody({ b }: { b: Beast }) {
   );
 }
 
+// フォーカスシルエット用の共有マテリアル(rogue-14)。
+// rim: 拡大した裏面ゴールド — 本体の輪郭の外周だけが見える(反転ハル)。
+// xray: 深度無視の淡いゴースト — 壁や岩の陰でも居場所が読める。
+const SIL_RIM = new THREE.MeshBasicMaterial({
+  color: '#ffd75e',
+  side: THREE.BackSide,
+  toneMapped: false,
+});
+const SIL_XRAY = new THREE.MeshBasicMaterial({
+  color: '#ffd75e',
+  transparent: true,
+  opacity: 0.18,
+  depthTest: false,
+  depthWrite: false,
+  side: THREE.BackSide,
+  toneMapped: false,
+});
+
+/**
+ * フォーカス中の敵のシルエット。Body をもう1組描画し、マウント後に全メッシュの
+ * マテリアルを金色に差し替える(反転ハル)。Body の useFrame は同じ b・同じ位相で
+ * 動くので、羽ばたき等のモーションにもぴったり重なる。ポストエフェクト非依存
+ * (✨オフでも表示される)。
+ */
+function Silhouette({ b, mat, scale }: { b: Beast; mat: THREE.Material; scale: number }) {
+  const g = useRef<THREE.Group>(null);
+  useLayoutEffect(() => {
+    g.current?.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.material = mat;
+        m.renderOrder = 3; // 断面キャップ(2)より後に
+      }
+    });
+  }, [b.kind, mat]);
+  return (
+    <group ref={g} scale={scale}>
+      <Body b={b} />
+    </group>
+  );
+}
+
 function Body({ b }: { b: Beast }) {
   switch (b.kind) {
     case 'bat':
@@ -341,27 +382,31 @@ function BeastItem({ b }: { b: Beast }) {
         document.body.style.cursor = 'auto';
       }}
     >
-      {/* フォーカス中はシルエットを金色にハイライト(RoguePostFx の Outline が拾う) */}
-      <Select enabled={focused}>
-        <Body b={b} />
-        {/* 目: 覚醒で赤く光る */}
-        <mesh position={[0.06 * S, 0.34 * S, 0.11 * S]}>
-          <sphereGeometry args={[0.025 * S, 6, 6]} />
-          <meshStandardMaterial
-            color="#f87171"
-            emissive="#ef4444"
-            emissiveIntensity={b.awake ? 3 : 0.2}
-          />
-        </mesh>
-        <mesh position={[-0.06 * S, 0.34 * S, 0.11 * S]}>
-          <sphereGeometry args={[0.025 * S, 6, 6]} />
-          <meshStandardMaterial
-            color="#f87171"
-            emissive="#ef4444"
-            emissiveIntensity={b.awake ? 3 : 0.2}
-          />
-        </mesh>
-      </Select>
+      {/* フォーカス中は金色のシルエット(反転ハルの縁取り+壁越しゴースト) */}
+      {focused && (
+        <>
+          <Silhouette b={b} mat={SIL_RIM} scale={1.08} />
+          <Silhouette b={b} mat={SIL_XRAY} scale={1.0} />
+        </>
+      )}
+      <Body b={b} />
+      {/* 目: 覚醒で赤く光る */}
+      <mesh position={[0.06 * S, 0.34 * S, 0.11 * S]}>
+        <sphereGeometry args={[0.025 * S, 6, 6]} />
+        <meshStandardMaterial
+          color="#f87171"
+          emissive="#ef4444"
+          emissiveIntensity={b.awake ? 3 : 0.2}
+        />
+      </mesh>
+      <mesh position={[-0.06 * S, 0.34 * S, 0.11 * S]}>
+        <sphereGeometry args={[0.025 * S, 6, 6]} />
+        <meshStandardMaterial
+          color="#f87171"
+          emissive="#ef4444"
+          emissiveIntensity={b.awake ? 3 : 0.2}
+        />
+      </mesh>
       {/* HP バー */}
       {b.hp < def.hp && (
         <Billboard position={[0, 0.72 * S, 0]}>

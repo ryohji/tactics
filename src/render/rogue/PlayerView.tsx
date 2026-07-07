@@ -14,6 +14,7 @@ import { worldPos } from '../../model/fcc';
 import { useRogue, ROGUE_S, PLAYER_ID } from '../../state/rogue';
 import { currentUnitGrid, isUnitMoving } from '../../state/unitAnim';
 import { currentPose } from '../../state/playerPose';
+import { view } from '../../state/view';
 import { glowTexture } from './glowTexture';
 
 const S = ROGUE_S;
@@ -165,11 +166,25 @@ export function PlayerView() {
     const w = worldPos(gp[0], gp[1], gp[2], S);
     const t = clock.elapsedTime;
     g.position.set(w.x, w.y, w.z);
-    // 進行方向へ旋回(短弧補間。停止中は最後の向きを保つ)。
+    // 向きの決定: 移動中=進行方向 / 停止中にフォーカス敵がいれば=その敵の方
+    // (視線追跡と同じく補間位置を使い、短弧補間で滑らかに旋回する)。
     const dx = w.x - lastPos.current.x;
     const dz = w.z - lastPos.current.z;
+    let target: number | null = null;
     if (dx * dx + dz * dz > 1e-6) {
-      const target = Math.atan2(dx, dz);
+      target = Math.atan2(dx, dz);
+    } else if (view.gazeBeastId !== null) {
+      const s = useRogue.getState();
+      const tb = s.beasts.find((x) => x.id === view.gazeBeastId && x.alive);
+      if (tb) {
+        const gp = currentUnitGrid(tb.id, tb.pos);
+        const tw = worldPos(gp[0], gp[1], gp[2], S);
+        const bx = tw.x - w.x;
+        const bz = tw.z - w.z;
+        if (bx * bx + bz * bz > 1e-6) target = Math.atan2(bx, bz);
+      }
+    }
+    if (target !== null) {
       let d = target - yaw.current;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       yaw.current += d * 0.25;

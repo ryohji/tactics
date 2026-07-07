@@ -6,14 +6,7 @@
 // HDR パイプラインでは既定でトーンマッピングが外れるので ToneMapping を最後に足し、
 // 素の描画(postFx オフ時)と見た目を揃える。重い環境向けに ✨ ボタンで切れる。
 
-import {
-  EffectComposer,
-  N8AO,
-  Bloom,
-  Outline,
-  Vignette,
-  ToneMapping,
-} from '@react-three/postprocessing';
+import { EffectComposer, N8AO, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing';
 import { ToneMappingMode } from 'postprocessing';
 import { useRogue, ROGUE_S } from '../../state/rogue';
 
@@ -35,15 +28,6 @@ export function RoguePostFx() {
         intensity={mapMode ? 0.45 : 0.95}
         luminanceThreshold={0.55}
         luminanceSmoothing={0.3}
-      />
-      {/* フォーカス中の敵のシルエット(Selection コンテキスト経由。xRay で壁越しも読める) */}
-      <Outline
-        blur
-        xRay
-        edgeStrength={6}
-        pulseSpeed={0.35}
-        visibleEdgeColor={0xffd75e}
-        hiddenEdgeColor={0x8a6a20}
       />
       <Vignette eskil={false} offset={0.26} darkness={mapMode ? 0.5 : 0.72} />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
