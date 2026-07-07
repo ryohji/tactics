@@ -3,20 +3,175 @@
 // クリック: 通常=隣接なら近接攻撃 / 投擲モード=射程内なら投げナイフ。
 // 投擲モード中は射程内の敵に白いリングを出す。
 
-import { useLayoutEffect, useRef } from 'react';
+import { Suspense, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Billboard } from '@react-three/drei';
+import { Billboard, useGLTF, useAnimations } from '@react-three/drei';
+import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { cellKey, worldPos } from '../../model/fcc';
 import { distW } from '../../model/dungeon';
-import { BEASTS } from '../../model/beasts';
+import { BEASTS, type BeastKind } from '../../model/beasts';
 import { ITEMS } from '../../model/loot';
 import { useRogue, ROGUE_S, type Beast } from '../../state/rogue';
-import { currentUnitGrid } from '../../state/unitAnim';
+import { currentUnitGrid, isUnitMoving } from '../../state/unitAnim';
 import { consumeSuppressedClick } from '../../input/suppress';
 import { tapAction } from '../../input/touch';
 
 const S = ROGUE_S;
+
+// --- glTF モデル(rogue-15)。poly.pizza 経由(出典は credits.json)。 ----------------
+// クリップ名はモデルごとに揺れるため、部分一致の候補列で解決する。
+// アニメ無しの静材(Planet/Ant)は spin/移動ボブの手続きモーションで補う。
+interface BeastModelCfg {
+  url: string;
+  /** 目標の高さ(セル寸法 S 単位)。 */
+  h: number;
+  /** 接地オフセット(S 単位。飛行種は浮かせる)。 */
+  lift: number;
+  idle: string[];
+  move: string[];
+  /** 常時回転(rad/s)。鬼火=Planet 用。 */
+  spin?: number;
+  /** 常時発光の色(鬼火)。フォーカスの金パルスが優先。 */
+  glow?: string;
+  /** 色調(影=骸骨を暗く半透明の怪異に寄せる)。 */
+  tint?: { color: string; opacity: number };
+}
+const MODEL_BASE = `${import.meta.env.BASE_URL}models/beasts/`;
+const BEAST_MODELS: Partial<Record<BeastKind, BeastModelCfg>> = {
+  bat: { url: `${MODEL_BASE}Bat.glb`, h: 0.5, lift: 0.35, idle: ['flying'], move: ['flying'] },
+  spider: { url: `${MODEL_BASE}Spider.glb`, h: 0.45, lift: 0, idle: ['idle'], move: ['walk', 'jump'] },
+  ghoul: { url: `${MODEL_BASE}Zombie.glb`, h: 0.85, lift: 0, idle: ['idle'], move: ['walk', 'run'] },
+  soldier: { url: `${MODEL_BASE}Ant.glb`, h: 0.5, lift: 0, idle: [], move: [] },
+  wisp: { url: `${MODEL_BASE}Planet.glb`, h: 0.42, lift: 0.4, idle: [], move: [], spin: 2.2, glow: '#67d3e0' },
+  shade: {
+    url: `${MODEL_BASE}Skeleton.glb`,
+    h: 0.9,
+    lift: 0,
+    idle: ['idle'],
+    move: ['running', 'walk'],
+    tint: { color: '#8a7ddb', opacity: 0.72 },
+  },
+  drake: { url: `${MODEL_BASE}Dragon.glb`, h: 0.9, lift: 0.15, idle: ['flying_idle', 'idle'], move: ['fast_flying', 'flying'] },
+  colossus: { url: `${MODEL_BASE}Golem.glb`, h: 1.15, lift: 0, idle: ['flying_idle', 'idle'], move: ['fast_flying', 'walk'] },
+};
+for (const cfg of Object.values(BEAST_MODELS)) useGLTF.preload(cfg.url);
+
+const FOCUS_EMISSIVE = new THREE.Color('#c79215');
+
+/**
+ * glTF の敵ボディ。スキン付きモデルはインスタンスごとに SkeletonUtils で複製し、
+ * マテリアルも複製する(フォーカス発光が他個体へ波及しないように)。
+ * アニメ: 移動中=move / 停止=idle(警戒で等速・まどろみは低速)。
+ * フォーカス中は発光パルス(骨アニメと同期しない反転ハルの代替)。
+ */
+function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCfg; focused: boolean }) {
+  const { scene, animations } = useGLTF(cfg.url);
+  const clone = useMemo(() => {
+    const c = SkeletonUtils.clone(scene);
+    c.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.material = Array.isArray(m.material)
+          ? m.material.map((x) => x.clone())
+          : m.material.clone();
+        // 色調(影: 暗い青紫の半透明へ寄せる)。
+        if (cfg.tint) {
+          for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+            const sm = mat as THREE.MeshStandardMaterial;
+            if (sm.color) sm.color.lerp(new THREE.Color(cfg.tint.color), 0.55);
+            sm.transparent = true;
+            sm.opacity = cfg.tint.opacity;
+            sm.depthWrite = false;
+          }
+        }
+      }
+    });
+    return c;
+  }, [scene, cfg]);
+  const group = useRef<THREE.Group>(null);
+  const { actions, names } = useAnimations(animations, group);
+  const cur = useRef('');
+  const wasFocused = useRef(false);
+
+  const mats = useMemo(() => {
+    const out: THREE.MeshStandardMaterial[] = [];
+    clone.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+          if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+            out.push(mat as THREE.MeshStandardMaterial);
+          }
+        }
+      }
+    });
+    return out;
+  }, [clone]);
+
+  const { scale, yOff } = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(clone);
+    const h = Math.max(0.01, box.max.y - box.min.y);
+    const scale = (cfg.h * S) / h;
+    return { scale, yOff: -box.min.y * scale };
+  }, [clone, cfg.h]);
+
+  const findClip = (pats: string[]): string | undefined => {
+    for (const p of pats) {
+      const n = names.find((x) => x.toLowerCase().includes(p));
+      if (n) return n;
+    }
+    return names[0];
+  };
+
+  useFrame(({ clock }, dt) => {
+    const t = clock.elapsedTime;
+    const moving = isUnitMoving(b.id);
+    if (names.length > 0) {
+      const want = findClip(moving ? cfg.move : cfg.idle);
+      if (want && want !== cur.current) {
+        actions[cur.current]?.fadeOut(0.2);
+        actions[want]?.reset().fadeIn(0.2).play();
+        cur.current = want;
+      }
+      const a = actions[cur.current];
+      if (a) a.timeScale = moving ? 1.2 : b.awake ? 1 : 0.45;
+    } else {
+      // アニメ無しの静材: 手続きモーションで補う(回転・移動ボブ)。
+      // clone はラッパで scale されるため、ワールド量はスケールで割って与える。
+      if (cfg.spin) clone.rotation.y += cfg.spin * dt * (b.awake ? 1.6 : 1);
+      clone.position.y = moving ? (Math.abs(Math.sin(t * 11 + b.id)) * 0.05 * S) / scale : 0;
+      clone.rotation.z = moving ? 0.06 * Math.sin(t * 11 + b.id) : 0;
+    }
+    // フォーカス発光(金) > 常時発光(鬼火) > なし。
+    if (focused) {
+      const p = 0.45 + 0.3 * Math.sin(t * 6);
+      for (const m of mats) {
+        m.emissive.copy(FOCUS_EMISSIVE);
+        m.emissiveIntensity = p;
+      }
+      wasFocused.current = true;
+    } else if (cfg.glow) {
+      const p = 0.8 + 0.5 * Math.sin(t * (b.awake ? 5.5 : 1.6) + b.id);
+      for (const m of mats) {
+        m.emissive.set(cfg.glow);
+        m.emissiveIntensity = p;
+      }
+      wasFocused.current = false;
+    } else if (wasFocused.current) {
+      for (const m of mats) m.emissiveIntensity = 0;
+      wasFocused.current = false;
+    }
+  });
+
+  return (
+    <group ref={group}>
+      <group position={[0, yOff + (cfg.lift - 0.4) * S, 0]} scale={scale}>
+        <primitive object={clone} />
+      </group>
+    </group>
+  );
+}
 
 // --- 種族別の身体(rogue-13: アイドル/警戒モーション付き) --------------------------
 // どれも「まどろみ=ゆっくり」「警戒=速く大きく」。位相は id でずらして群れの同期を防ぐ。
@@ -308,12 +463,13 @@ function Silhouette({ b, mat, scale }: { b: Beast; mat: THREE.Material; scale: n
   }, [b.kind, mat]);
   return (
     <group ref={g} scale={scale}>
-      <Body b={b} />
+      <ProceduralBody b={b} />
     </group>
   );
 }
 
-function Body({ b }: { b: Beast }) {
+/** プロシージャル造形(glTF の無い種+読み込み中のフォールバック)。 */
+function ProceduralBody({ b }: { b: Beast }) {
   switch (b.kind) {
     case 'bat':
       return <BatBody b={b} />;
@@ -334,6 +490,18 @@ function Body({ b }: { b: Beast }) {
   }
 }
 
+function Body({ b, focused = false }: { b: Beast; focused?: boolean }) {
+  const cfg = BEAST_MODELS[b.kind];
+  if (cfg) {
+    return (
+      <Suspense fallback={<ProceduralBody b={b} />}>
+        <GltfBeastBody b={b} cfg={cfg} focused={focused} />
+      </Suspense>
+    );
+  }
+  return <ProceduralBody b={b} />;
+}
+
 function BeastItem({ b }: { b: Beast }) {
   const ref = useRef<THREE.Group>(null);
   const clickBeast = useRogue((s) => s.clickBeast);
@@ -345,6 +513,10 @@ function BeastItem({ b }: { b: Beast }) {
 
   const inThrowRange =
     uiMode === 'throw' && distW(playerPos, b.pos) <= (ITEMS.knife.range ?? 0);
+  const isModel = !!BEAST_MODELS[b.kind];
+  const bodyRef = useRef<THREE.Group>(null);
+  const lastPos = useRef(new THREE.Vector3(1e9, 0, 0));
+  const yaw = useRef(0);
 
   useFrame(({ clock }) => {
     const g = ref.current;
@@ -353,6 +525,25 @@ function BeastItem({ b }: { b: Beast }) {
     const w = worldPos(gp[0], gp[1], gp[2], S);
     const hover = b.kind === 'bat' || b.kind === 'wisp' ? 0.08 * S * Math.sin(clock.elapsedTime * 3 + b.id) : 0;
     g.position.set(w.x, w.y + hover, w.z);
+    // 向き: 移動中=進行方向 / 覚醒して停止中=プレイヤーの方(短弧補間)。
+    const dx = w.x - lastPos.current.x;
+    const dz = w.z - lastPos.current.z;
+    let target: number | null = null;
+    if (lastPos.current.x < 1e8 && dx * dx + dz * dz > 1e-6) {
+      target = Math.atan2(dx, dz);
+    } else if (b.awake) {
+      const pw = worldPos(playerPos[0], playerPos[1], playerPos[2], S);
+      const px = pw.x - w.x;
+      const pz = pw.z - w.z;
+      if (px * px + pz * pz > 1e-6) target = Math.atan2(px, pz);
+    }
+    if (target !== null) {
+      let d = target - yaw.current;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      yaw.current += d * 0.18;
+    }
+    lastPos.current.set(w.x, w.y, w.z);
+    if (bodyRef.current) bodyRef.current.rotation.y = yaw.current;
   });
 
   return (
@@ -382,31 +573,38 @@ function BeastItem({ b }: { b: Beast }) {
         document.body.style.cursor = 'auto';
       }}
     >
-      {/* フォーカス中は金色のシルエット(反転ハルの縁取り+壁越しゴースト) */}
-      {focused && (
-        <>
-          <Silhouette b={b} mat={SIL_RIM} scale={1.08} />
-          <Silhouette b={b} mat={SIL_XRAY} scale={1.0} />
-        </>
-      )}
-      <Body b={b} />
-      {/* 目: 覚醒で赤く光る */}
-      <mesh position={[0.06 * S, 0.34 * S, 0.11 * S]}>
-        <sphereGeometry args={[0.025 * S, 6, 6]} />
-        <meshStandardMaterial
-          color="#f87171"
-          emissive="#ef4444"
-          emissiveIntensity={b.awake ? 3 : 0.2}
-        />
-      </mesh>
-      <mesh position={[-0.06 * S, 0.34 * S, 0.11 * S]}>
-        <sphereGeometry args={[0.025 * S, 6, 6]} />
-        <meshStandardMaterial
-          color="#f87171"
-          emissive="#ef4444"
-          emissiveIntensity={b.awake ? 3 : 0.2}
-        />
-      </mesh>
+      <group ref={bodyRef}>
+        {/* フォーカス中のシルエット: プロシージャル種は反転ハル(縁取り+壁越しゴースト)。
+            glTF 種は骨アニメと同期しないため Body 側の発光パルスで示す。 */}
+        {focused && !isModel && (
+          <>
+            <Silhouette b={b} mat={SIL_RIM} scale={1.08} />
+            <Silhouette b={b} mat={SIL_XRAY} scale={1.0} />
+          </>
+        )}
+        <Body b={b} focused={focused} />
+        {/* 目: 覚醒で赤く光る(モデル種は顔があるので不要) */}
+        {!isModel && (
+          <>
+            <mesh position={[0.06 * S, 0.34 * S, 0.11 * S]}>
+              <sphereGeometry args={[0.025 * S, 6, 6]} />
+              <meshStandardMaterial
+                color="#f87171"
+                emissive="#ef4444"
+                emissiveIntensity={b.awake ? 3 : 0.2}
+              />
+            </mesh>
+            <mesh position={[-0.06 * S, 0.34 * S, 0.11 * S]}>
+              <sphereGeometry args={[0.025 * S, 6, 6]} />
+              <meshStandardMaterial
+                color="#f87171"
+                emissive="#ef4444"
+                emissiveIntensity={b.awake ? 3 : 0.2}
+              />
+            </mesh>
+          </>
+        )}
+      </group>
       {/* HP バー */}
       {b.hp < def.hp && (
         <Billboard position={[0, 0.72 * S, 0]}>

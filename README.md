@@ -82,8 +82,10 @@ main への push で GitHub Actions が自動ビルドし GitHub Pages へデプ
 - 効果音・BGM(深度連動の生成アンビエント)は WebAudio 合成、岩肌・グロー等の
   テクスチャも canvas 生成(トライプレーナー投影)。SSAO+ブルーム+ビネットの
   ポストエフェクト付き(✨で切替)
-- 外部アセットはプレイヤーモデルのみ: KayKit Adventurers の Knight(CC0,
-  Kay Lousberg / kaylousberg.com)。`public/models/` にライセンス文を同梱
+- 外部アセットは 3D モデルのみ(`public/models/` に出典・ライセンスを同梱):
+  プレイヤー = KayKit Adventurers の Knight(CC0, Kay Lousberg / kaylousberg.com)、
+  敵 = Quaternius の CC0 モデル群(poly.pizza 経由)と
+  「Ant」(Poly by Google, **CC-BY 3.0**)。詳細は `public/models/beasts/credits.json`
 
 ### リポジトリ構成
 
