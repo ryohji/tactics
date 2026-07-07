@@ -51,6 +51,7 @@ import { animateUnit, clearUnitAnims, STEP_MS } from './unitAnim';
 import { view, resetView, setGazeGoal, clearGazeGoal } from './view';
 import * as sfx from '../audio/sfx';
 import * as bgm from '../audio/bgm';
+import { triggerPose } from './playerPose';
 
 // --- 定数・型 ---------------------------------------------------------------------
 
@@ -956,6 +957,7 @@ export const useRogue = create<RogueState>((set, get) => {
   /** 近接攻撃。薙ぎ払い武器はリーチ内の敵全員に、通常はクリックした1体に当たる。 */
   async function meleeAttack(clicked: Beast): Promise<void> {
     const run = runSeq;
+    triggerPose('attack', 600); // プレイヤーモデルの攻撃モーション
     set({ busy: true, reach: { cells: [], parent: new Map() } });
     const player = get().player;
     const targets = weaponSweep(player)
@@ -1015,6 +1017,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const idx = player.pack.findIndex((x) => x.item === 'knife');
     if (idx < 0) return;
     const knife = player.pack[idx];
+    triggerPose('throw', 500); // プレイヤーモデルの投擲モーション
     set({ busy: true, uiMode: 'walk', reach: { cells: [], parent: new Map() } });
     player.pack.splice(idx, 1);
     set({ player: { ...player, pack: [...player.pack] } });

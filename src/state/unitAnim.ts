@@ -54,6 +54,13 @@ export function currentUnitGrid(
   return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f];
 }
 
+/** 経路アニメが進行中か(描画側のポーズ切替用。期限切れの破棄はしない)。 */
+export function isUnitMoving(id: number, now: number = performance.now()): boolean {
+  const a = anims.get(id);
+  if (!a) return false;
+  return (now - a.start) / a.stepMs < a.waypoints.length - 1;
+}
+
 /** すべてのアニメを破棄（盤面リセット時）。 */
 export function clearUnitAnims(): void {
   anims.clear();
