@@ -4,6 +4,7 @@
 // アイテム・敵は隠し、可視表面(発見済み空洞の内表面)だけを明るめの照明で見せる。
 
 import * as THREE from 'three';
+import { Selection } from '@react-three/postprocessing';
 import { useRogue, ROGUE_S } from '../../state/rogue';
 import { DungeonShell } from './DungeonShell';
 import { LevelFloor } from './LevelFloor';
@@ -25,7 +26,9 @@ const S = ROGUE_S;
 export function RogueScene() {
   const mapMode = useRogue((s) => s.mapMode);
   return (
-    <>
+    // Selection: フォーカス敵のシルエット(Outline)用の選択コンテキスト
+    // (BeastsView の <Select> と RoguePostFx の <Outline> を繋ぐ)。
+    <Selection>
       {/* 暗い土色の背景・霧: 幾何が何も無い方向(未発見の岩の中)も「土」として読める。
           断面キャップの明るい土色 → 遠景の暗い土色、の層で奥行きを出す。 */}
       <color attach="background" args={['#2a1e14']} />
@@ -54,6 +57,6 @@ export function RogueScene() {
       <RogueEffects />
       <RogueCamera />
       <RoguePostFx />
-    </>
+    </Selection>
   );
 }

@@ -6,6 +6,7 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Billboard } from '@react-three/drei';
+import { Select } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { cellKey, worldPos } from '../../model/fcc';
 import { distW } from '../../model/dungeon';
@@ -298,6 +299,7 @@ function BeastItem({ b }: { b: Beast }) {
   const hoverBeast = useRogue((s) => s.hoverBeast);
   const uiMode = useRogue((s) => s.uiMode);
   const playerPos = useRogue((s) => s.player.pos);
+  const focused = useRogue((s) => s.hoverBeastId === b.id);
   const def = BEASTS[b.kind];
 
   const inThrowRange =
@@ -339,24 +341,27 @@ function BeastItem({ b }: { b: Beast }) {
         document.body.style.cursor = 'auto';
       }}
     >
-      <Body b={b} />
-      {/* 目: 覚醒で赤く光る */}
-      <mesh position={[0.06 * S, 0.34 * S, 0.11 * S]}>
-        <sphereGeometry args={[0.025 * S, 6, 6]} />
-        <meshStandardMaterial
-          color="#f87171"
-          emissive="#ef4444"
-          emissiveIntensity={b.awake ? 3 : 0.2}
-        />
-      </mesh>
-      <mesh position={[-0.06 * S, 0.34 * S, 0.11 * S]}>
-        <sphereGeometry args={[0.025 * S, 6, 6]} />
-        <meshStandardMaterial
-          color="#f87171"
-          emissive="#ef4444"
-          emissiveIntensity={b.awake ? 3 : 0.2}
-        />
-      </mesh>
+      {/* フォーカス中はシルエットを金色にハイライト(RoguePostFx の Outline が拾う) */}
+      <Select enabled={focused}>
+        <Body b={b} />
+        {/* 目: 覚醒で赤く光る */}
+        <mesh position={[0.06 * S, 0.34 * S, 0.11 * S]}>
+          <sphereGeometry args={[0.025 * S, 6, 6]} />
+          <meshStandardMaterial
+            color="#f87171"
+            emissive="#ef4444"
+            emissiveIntensity={b.awake ? 3 : 0.2}
+          />
+        </mesh>
+        <mesh position={[-0.06 * S, 0.34 * S, 0.11 * S]}>
+          <sphereGeometry args={[0.025 * S, 6, 6]} />
+          <meshStandardMaterial
+            color="#f87171"
+            emissive="#ef4444"
+            emissiveIntensity={b.awake ? 3 : 0.2}
+          />
+        </mesh>
+      </Select>
       {/* HP バー */}
       {b.hp < def.hp && (
         <Billboard position={[0, 0.72 * S, 0]}>

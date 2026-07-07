@@ -5,9 +5,10 @@
 import { useThree, useFrame } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { worldPos } from '../../model/fcc';
+import { cellKey, worldPos } from '../../model/fcc';
 import { fromFrame } from '../../model/terrain';
-import { useRogue, ROGUE_S } from '../../state/rogue';
+import { useRogue, gazeAngles, ROGUE_S } from '../../state/rogue';
+import { currentUnitGrid } from '../../state/unitAnim';
 import { view, clearGazeGoal } from '../../state/view';
 import { setSuppressNextClick } from '../../input/suppress';
 import { isSpaceHeld } from '../../input/keys';
@@ -169,12 +170,30 @@ export function RogueCamera() {
   useFrame(() => {
     const { mapMode } = useRogue.getState();
 
+    // 敵追跡(rogue-14): TAB でフォーカスした敵が動いても見失わないよう、
+    // 追跡中は毎フレーム目標角を敵の補間位置へ更新する(移動アニメにも追従)。
+    // 終了条件: 死亡・フォーカス解除・マップ切替。発見範囲外に出た間は最後の向きを保つ。
+    if (view.gazeBeastId !== null && !mapMode) {
+      const s = useRogue.getState();
+      const b = s.beasts.find((x) => x.id === view.gazeBeastId);
+      if (!b || !b.alive || s.hoverBeastId !== b.id) {
+        view.gazeBeastId = null;
+      } else if (s.discovered.has(cellKey(b.pos))) {
+        const gp = currentUnitGrid(b.id, b.pos);
+        const g = gazeAngles(s.player.pos, gp);
+        view.phiGoal = g.phi;
+        view.thetaGoal = g.theta;
+      }
+    }
+
     // TAB 視線ゴールへの短弧補間(到達で解除。ドラッグ側でも解除される)。
+    // 敵追跡中(gazeBeastId)は到達しても解除しない — 目標角は毎フレーム敵位置へ
+    // 更新され続け、この補間を通るので視線の移動は常に滑らかなアニメーションになる。
     if (view.phiGoal !== null && view.thetaGoal !== null) {
       let dPhi = view.phiGoal - view.phi;
       dPhi = Math.atan2(Math.sin(dPhi), Math.cos(dPhi)); // 短い側の弧へ正規化
       const dTheta = view.thetaGoal - view.theta;
-      if (Math.abs(dPhi) < 0.01 && Math.abs(dTheta) < 0.01) {
+      if (Math.abs(dPhi) < 0.01 && Math.abs(dTheta) < 0.01 && view.gazeBeastId === null) {
         view.phi = view.phiGoal;
         view.theta = view.thetaGoal;
         clearGazeGoal();

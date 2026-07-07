@@ -1511,6 +1511,7 @@ export const useRogue = create<RogueState>((set, get) => {
       const b = cands[beastCycleIdx];
       const g = gazeAngles(s.player.pos, b.pos);
       setGazeGoal(g.phi, g.theta);
+      view.gazeBeastId = b.id; // 以後、敵が動いても視線が追跡する(カメラ側が毎フレーム更新)
       sfx.play('cursor');
       set({ hoverBeastId: b.id });
     },
