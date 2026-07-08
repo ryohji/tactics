@@ -17,12 +17,11 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
+import { cellKey, keyToCell, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
   slotKeyOfCell,
-  cellRng,
   lcg,
   distW,
   adjacent,
@@ -31,7 +30,7 @@ import {
   type Chamber,
 } from '../model/dungeon';
 import * as persist from './persist';
-import { BEASTS, spawnTable } from '../model/beasts';
+import { BEASTS } from '../model/beasts';
 import {
   ITEMS,
   lootTable,
@@ -97,6 +96,7 @@ import {
   outOfTerritory,
   chooseChaseStep,
 } from '../model/rogue/beastAI';
+import { spawnChamber } from '../model/rogue/spawn';
 import type { GameEvent } from '../model/rogue/types';
 
 // ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
@@ -302,40 +302,13 @@ export const useRogue = create<RogueState>((set, get) => {
   function populate(ch: Chamber): void {
     const { dungeon, beasts, items, cellChamber } = get();
     for (const k of ch.cells) cellChamber.set(k, ch.id);
-    const depth = Math.max(0, depthOf(ch.center));
-    // 広間の中心から導出した rng(生成順・戦闘に依らずシードだけで決まる)。
-    const rng = cellRng(dungeon.seed, ch.center, 2);
-    const spots = ch.cells.filter((k) => k !== cellKey(ch.center));
-    const takeSpot = (): Cell | null => {
-      if (spots.length === 0) return null;
-      const i = Math.floor(rng() * spots.length);
-      return keyToCell(spots.splice(i, 1)[0]);
-    };
-    const homeL = layer(ch.center);
-    for (const kind of spawnTable(depth, rng)) {
-      const pos = takeSpot();
-      if (!pos) break;
-      const def = BEASTS[kind];
-      beasts.push({
-        id: beastSeq++,
-        kind,
-        pos,
-        hp: def.hp,
-        home: ch.center,
-        homeChamber: ch.id,
-        layerFloor: homeL - def.vBelow,
-        layerCeil: homeL + def.vAbove,
-        awake: false,
-        alive: true,
-        status: null,
-      });
-    }
-    for (const stack of lootTable(depth, rng)) {
-      const pos = takeSpot();
-      if (!pos) break;
-      items.push({ id: itemSeq++, stack, pos });
-    }
-    set({ beasts: [...beasts], items: [...items] });
+    const spawned = spawnChamber(
+      dungeon,
+      ch,
+      () => beastSeq++,
+      () => itemSeq++,
+    );
+    set({ beasts: [...beasts, ...spawned.beasts], items: [...items, ...spawned.items] });
   }
 
   /** クリック可能な移動先(発見済み空洞・敵なし・BFS≤REACH_STEPS)。 */
