@@ -5,9 +5,9 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { cellKey, keyToCell, layer, worldPos, type Cell } from '../../model/fcc';
-import { useRogue, ROGUE_S } from '../../state/rogue';
-import { buildHexTile, buildHexEdges } from '../hex';
+import { cellKey, keyToCell, layer, worldPos, type Cell } from '../model/fcc';
+import { useRogue, ROGUE_S } from '../state/rogue';
+import { buildHexTile, buildHexEdges } from './hex';
 
 const S = ROGUE_S;
 const FILL = '#8b7fd8';

@@ -5,9 +5,9 @@
 
 import { useMemo } from 'react';
 import * as THREE from 'three';
-import { keyToCell, worldPos, type Cell } from '../../model/fcc';
-import { lcg } from '../../model/dungeon';
-import { useRogue, ROGUE_S } from '../../state/rogue';
+import { keyToCell, worldPos, type Cell } from '../model/fcc';
+import { lcg } from '../model/dungeon';
+import { useRogue, ROGUE_S } from '../state/rogue';
 import { glowTexture } from './glowTexture';
 
 const S = ROGUE_S;

@@ -25,9 +25,9 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../../model/fcc';
-import { useRogue, clearedChambers, ROGUE_S } from '../../state/rogue';
-import { RD_FACES, RD_VERTICES } from '../rd';
+import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../model/fcc';
+import { useRogue, clearedChambers, ROGUE_S } from '../state/rogue';
+import { RD_FACES, RD_VERTICES } from './rd';
 import { currentFocusGrid } from './rogueFocus';
 import { makeRockMaterial } from './rockMaterial';
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { RogueScene } from './render/rogue/RogueScene';
+import { RogueScene } from './render/RogueScene';
 import { RogueHud } from './ui/RogueHud';
 import { useRogue, parseSeed } from './state/rogue';
 import { hasSave, clearSave } from './state/persist';

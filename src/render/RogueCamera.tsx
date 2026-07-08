@@ -5,12 +5,12 @@
 import { useThree, useFrame } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { cellKey, worldPos, latticeAt } from '../../model/fcc';
-import { useRogue, gazeAngles, ROGUE_S } from '../../state/rogue';
-import { currentUnitGrid } from '../../state/unitAnim';
-import { view, clearGazeGoal } from '../../state/view';
-import { setSuppressNextClick } from '../../input/suppress';
-import { isSpaceHeld } from '../../input/keys';
+import { cellKey, worldPos, latticeAt } from '../model/fcc';
+import { useRogue, gazeAngles, ROGUE_S } from '../state/rogue';
+import { currentUnitGrid } from '../state/unitAnim';
+import { view, clearGazeGoal } from '../state/view';
+import { setSuppressNextClick } from '../input/suppress';
+import { isSpaceHeld } from '../input/keys';
 import { currentFocusGrid } from './rogueFocus';
 
 const K = 0.005;

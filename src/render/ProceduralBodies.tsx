@@ -4,8 +4,8 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { BEASTS } from '../../model/beasts';
-import { ROGUE_S, type Beast } from '../../state/rogue';
+import { BEASTS } from '../model/beasts';
+import { ROGUE_S, type Beast } from '../state/rogue';
 
 const S = ROGUE_S;
 

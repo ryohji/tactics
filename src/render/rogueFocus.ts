@@ -1,6 +1,6 @@
 // カメラフォーカスの補間(rogue)。focusAnim.ts と同型だが useRogue を購読する。
 
-import { useRogue } from '../../state/rogue';
+import { useRogue } from '../state/rogue';
 
 const DUR = 350;
 

@@ -10,11 +10,11 @@ import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { createPortal, useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
-import { worldPos } from '../../model/fcc';
-import { useRogue, ROGUE_S, PLAYER_ID } from '../../state/rogue';
-import { currentUnitGrid, isUnitMoving } from '../../state/unitAnim';
-import { currentPose } from '../../state/playerPose';
-import { view } from '../../state/view';
+import { worldPos } from '../model/fcc';
+import { useRogue, ROGUE_S, PLAYER_ID } from '../state/rogue';
+import { currentUnitGrid, isUnitMoving } from '../state/unitAnim';
+import { currentPose } from '../state/playerPose';
+import { view } from '../state/view';
 import { glowTexture } from './glowTexture';
 
 const S = ROGUE_S;

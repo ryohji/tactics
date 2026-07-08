@@ -6,11 +6,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { cellKey, keyToCell, layer, worldPos, type Cell } from '../../model/fcc';
-import { useRogue, placeableCells, ROGUE_S } from '../../state/rogue';
-import { consumeSuppressedClick } from '../../input/suppress';
-import { tapAction } from '../../input/touch';
-import { buildHexTile, buildHexEdges } from '../hex';
+import { cellKey, keyToCell, layer, worldPos, type Cell } from '../model/fcc';
+import { useRogue, placeableCells, ROGUE_S } from '../state/rogue';
+import { consumeSuppressedClick } from '../input/suppress';
+import { tapAction } from '../input/touch';
+import { buildHexTile, buildHexEdges } from './hex';
 
 const S = ROGUE_S;
 const R_MARKER = 0.14;

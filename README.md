@@ -94,11 +94,12 @@ main への push で GitHub Actions が自動ビルドし GitHub Pages へデプ
 ### リポジトリ構成
 
 ```
-src/model/   幾何・ダンジョン生成・敵/アイテム定義(Three 非依存・テスト対象)
-src/state/   ゲーム状態機械(zustand)・視点・アニメーション
-src/render/  R3F コンポーネント(rogue/ 配下がローグライク用)
-src/ui/      DOM オーバーレイの HUD
-docs/        VISION / REQUIREMENTS / DESIGN / ROADMAP / DECISIONS(経緯の記録)
+src/model/       幾何・ダンジョン生成・敵/アイテム定義(Three 非依存・テスト対象)
+src/model/rogue/ ゲームのドメイン層(戦闘・敵AI・可視性・経路・湧き。Three/React 非依存の純関数)
+src/state/       zustand ストア(rogue.ts)・視点・アニメーション。純関数を呼びコミットする薄い層
+src/render/      R3F コンポーネント
+src/ui/          DOM オーバーレイの HUD
+docs/            VISION / REQUIREMENTS / DESIGN / ROADMAP / DECISIONS(経緯の記録)
 ```
 
 `tactics` ブランチには前身の3Dタクティクス試作(FE式戦術戦闘)が残っている。

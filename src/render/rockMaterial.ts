@@ -4,7 +4,7 @@
 // 重なる。ノイズ1枚を 色ムラ(2スケール)/擬似バンプ/粗さ変調 に共用。
 
 import * as THREE from 'three';
-import { ROGUE_S } from '../../state/rogue';
+import { ROGUE_S } from '../state/rogue';
 import { rockTexture } from './rockTexture';
 
 export function makeRockMaterial(): THREE.MeshStandardMaterial {

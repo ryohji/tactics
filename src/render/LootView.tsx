@@ -4,9 +4,9 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { cellKey, worldPos } from '../../model/fcc';
-import { ITEMS } from '../../model/loot';
-import { useRogue, ROGUE_S, type GroundItem } from '../../state/rogue';
+import { cellKey, worldPos } from '../model/fcc';
+import { ITEMS } from '../model/loot';
+import { useRogue, ROGUE_S, type GroundItem } from '../state/rogue';
 
 const S = ROGUE_S;
 

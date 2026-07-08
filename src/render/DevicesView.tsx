@@ -4,9 +4,9 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { worldPos } from '../../model/fcc';
-import { useRogue, ROGUE_S, type PlacedTrap, type Turret, type Decoy } from '../../state/rogue';
-import type { TrapKind } from '../../model/loot';
+import { worldPos } from '../model/fcc';
+import { useRogue, ROGUE_S, type PlacedTrap, type Turret, type Decoy } from '../state/rogue';
+import type { TrapKind } from '../model/loot';
 
 const S = ROGUE_S;
 

@@ -8,12 +8,12 @@
 import { useEffect, useMemo } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { cellKey, neighbors, worldPos, type Cell } from '../../model/fcc';
-import { stepDist } from '../../model/dungeon';
-import { itemLabel } from '../../model/loot';
-import { BEASTS } from '../../model/beasts';
-import { useRogue, ROGUE_S } from '../../state/rogue';
-import { tapAction } from '../../input/touch';
+import { cellKey, neighbors, worldPos, type Cell } from '../model/fcc';
+import { stepDist } from '../model/dungeon';
+import { itemLabel } from '../model/loot';
+import { BEASTS } from '../model/beasts';
+import { useRogue, ROGUE_S } from '../state/rogue';
+import { tapAction } from '../input/touch';
 
 const S = ROGUE_S;
 

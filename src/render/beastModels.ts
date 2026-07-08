@@ -4,7 +4,7 @@
 // アニメ無しの静材(Planet/Ant)は spin/移動ボブの手続きモーションで補う。
 
 import { useGLTF } from '@react-three/drei';
-import type { BeastKind } from '../../model/beasts';
+import type { BeastKind } from '../model/beasts';
 
 export interface BeastModelCfg {
   url: string;

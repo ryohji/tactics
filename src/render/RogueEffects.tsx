@@ -9,8 +9,8 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { worldPos, type Cell } from '../../model/fcc';
-import { useRogue, ROGUE_S, type RogueFx } from '../../state/rogue';
+import { worldPos, type Cell } from '../model/fcc';
+import { useRogue, ROGUE_S, type RogueFx } from '../state/rogue';
 
 const S = ROGUE_S;
 

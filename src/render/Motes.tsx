@@ -5,9 +5,9 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { worldPos } from '../../model/fcc';
-import { useRogue, ROGUE_S, PLAYER_ID } from '../../state/rogue';
-import { currentUnitGrid } from '../../state/unitAnim';
+import { worldPos } from '../model/fcc';
+import { useRogue, ROGUE_S, PLAYER_ID } from '../state/rogue';
+import { currentUnitGrid } from '../state/unitAnim';
 import { glowTexture } from './glowTexture';
 
 const S = ROGUE_S;

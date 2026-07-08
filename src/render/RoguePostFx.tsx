@@ -8,7 +8,7 @@
 
 import { EffectComposer, N8AO, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing';
 import { ToneMappingMode } from 'postprocessing';
-import { useRogue, ROGUE_S } from '../../state/rogue';
+import { useRogue, ROGUE_S } from '../state/rogue';
 
 export function RoguePostFx() {
   const postFx = useRogue((s) => s.postFx);

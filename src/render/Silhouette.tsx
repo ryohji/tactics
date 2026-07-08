@@ -5,7 +5,7 @@
 
 import { useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
-import type { Beast } from '../../state/rogue';
+import type { Beast } from '../state/rogue';
 import { ProceduralBody } from './ProceduralBodies';
 
 // rim: 拡大した裏面ゴールド — 本体の輪郭の外周だけが見える。

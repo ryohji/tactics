@@ -4,7 +4,7 @@
 // アイテム・敵は隠し、可視表面(発見済み空洞の内表面)だけを明るめの照明で見せる。
 
 import * as THREE from 'three';
-import { useRogue, ROGUE_S } from '../../state/rogue';
+import { useRogue, ROGUE_S } from '../state/rogue';
 import { DungeonShell } from './DungeonShell';
 import { LevelFloor } from './LevelFloor';
 import { DevicesView } from './DevicesView';

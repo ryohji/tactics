@@ -8,8 +8,8 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
-import { ROGUE_S, type Beast } from '../../state/rogue';
-import { isUnitMoving } from '../../state/unitAnim';
+import { ROGUE_S, type Beast } from '../state/rogue';
+import { isUnitMoving } from '../state/unitAnim';
 import type { BeastModelCfg } from './beastModels';
 
 const S = ROGUE_S;
