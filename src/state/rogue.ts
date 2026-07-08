@@ -17,7 +17,7 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { OFFSETS, cellKey, keyToCell, layer, neighbors, worldPos, type Cell, type CellKey } from '../model/fcc';
+import { OFFSETS, cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
@@ -29,127 +29,84 @@ import {
   stepDist,
   type Dungeon,
   type Chamber,
-  type Stub,
 } from '../model/dungeon';
 import * as persist from './persist';
-import { BEASTS, spawnTable, type BeastKind } from '../model/beasts';
+import { BEASTS, spawnTable } from '../model/beasts';
 import {
   ITEMS,
   lootTable,
   itemLabel,
-  stackAtk,
-  stackDef,
   stackHeal,
   stackDmg,
   stackTurns,
   turretTurns,
   decoyHp,
-  type ItemId,
   type ItemStack,
-  type TrapKind,
 } from '../model/loot';
 import { animateUnit, clearUnitAnims, STEP_MS } from './unitAnim';
 import { view, resetView, setGazeGoal, clearGazeGoal } from './view';
 import * as sfx from '../audio/sfx';
 import * as bgm from '../audio/bgm';
 import { triggerPose } from './playerPose';
+import {
+  ROGUE_S,
+  PLAYER_ID,
+  REACH_STEPS,
+  EXPAND_R,
+  LIGHT,
+  type LightLevel,
+  type Beast,
+  type GroundItem,
+  type PlacedTrap,
+  type Turret,
+  type Decoy,
+  type RogueFx,
+  type PlayerState,
+  type SaveData,
+} from '../model/rogue/types';
+import {
+  BURN_DMG,
+  depthOf,
+  beastAt,
+  playerAtk,
+  playerDef,
+  weaponReach,
+  weaponSweep,
+  placeableCells,
+  gazeAngles,
+} from '../model/rogue/rules';
 
-// --- 定数・型 ---------------------------------------------------------------------
-
-/** rogue の表示倍率(固定。leva デバッグ盤は使わない)。 */
-export const ROGUE_S = 2;
-/** unitAnim 上のプレイヤー id(敵は 1〜)。 */
-export const PLAYER_ID = 0;
-/** 1クリックで歩ける最大歩数(洞窟は狭いので2近傍)。 */
-export const REACH_STEPS = 2;
-/** スタブ終端がこの距離に入ると次の広間が生成される。 */
-const EXPAND_R = 5;
-/** 素手の攻撃力。 */
-const BASE_ATK = 2;
-/** 延焼の毎ターンダメージ。 */
-const BURN_DMG = 2;
-
-/** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
-export const LIGHT = [
-  { name: '絞る', see: 4.5, regenEvery: 10, aggro: 0.7 },
-  { name: '普通', see: 6, regenEvery: 6, aggro: 1.0 },
-  { name: '広げる', see: 8, regenEvery: 4, aggro: 1.35 },
-] as const;
-export type LightLevel = 0 | 1 | 2;
-
-/** 状態異常(罠で誘発)。burn=延焼DoT / confuse=混乱 / fear=恐慌 / sleep=昏睡。 */
-export interface BeastStatus {
-  kind: 'burn' | 'confuse' | 'fear' | 'sleep';
-  turns: number;
-}
-
-export interface Beast {
-  id: number;
-  kind: BeastKind;
-  pos: Cell;
-  hp: number;
-  home: Cell;
-  /** ホームの広間 id(掃討判定に使う)。 */
-  homeChamber: number;
-  layerFloor: number;
-  layerCeil: number;
-  awake: boolean;
-  alive: boolean;
-  status: BeastStatus | null;
-}
-
-export interface GroundItem {
-  id: number;
-  stack: ItemStack;
-  pos: Cell;
-}
-
-/** 設置済みの罠。敵が踏むと発動して消える。 */
-export interface PlacedTrap {
-  id: number;
-  item: ItemId;
-  kind: TrapKind;
-  q: number;
-  pos: Cell;
-}
-
-/** 魔導砲塔。毎ターン射程内の最も近い敵を撃つ(時限)。 */
-export interface Turret {
-  id: number;
-  q: number;
-  pos: Cell;
-  turns: number;
-}
-
-/** 囮人形。敵のターゲットを吸う(耐久制)。 */
-export interface Decoy {
-  id: number;
-  q: number;
-  pos: Cell;
-  hp: number;
-  maxHp: number;
-}
-
-export interface RogueFx {
-  id: number;
-  kind: 'popup' | 'hit' | 'death' | 'heal' | 'bolt';
-  at?: Cell;
-  from?: Cell;
-  to?: Cell;
-  text?: string;
-  color?: string;
-  start: number;
-  dur: number;
-}
-
-export interface PlayerState {
-  pos: Cell;
-  hp: number;
-  maxHp: number;
-  weapon: ItemStack | null;
-  armor: ItemStack | null;
-  pack: ItemStack[];
-}
+// ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
+// 保つためここから再輸出する。
+export {
+  ROGUE_S,
+  PLAYER_ID,
+  REACH_STEPS,
+  LIGHT,
+} from '../model/rogue/types';
+export type {
+  LightLevel,
+  Beast,
+  BeastStatus,
+  GroundItem,
+  PlacedTrap,
+  Turret,
+  Decoy,
+  RogueFx,
+  PlayerState,
+  SaveData,
+} from '../model/rogue/types';
+export {
+  depthOf,
+  playerAtk,
+  playerDef,
+  weaponReach,
+  weaponSweep,
+  placeableCells,
+  gazeAngles,
+  clearedChambers,
+} from '../model/rogue/rules';
+export { parseSeed } from '../model/rogue/rules';
 
 export interface RogueState {
   seed: number;
@@ -234,34 +191,6 @@ export interface RogueState {
 
 // --- セーブデータ -----------------------------------------------------------------
 
-/**
- * localStorage(persist.ts)に置くスナップショット。Set/Map は配列化する。
- * ダンジョンの rng 関数は保存しない(展開時にスタブ位置から導出し直すため不要)。
- */
-export interface SaveData {
-  /** 2: rogue-16 スロット式生成(旧 v1 の迷宮とは非互換)。 */
-  v: 2;
-  seed: number;
-  /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
-  rng: number;
-  seqs: { beast: number; item: number; device: number };
-  dungeon: { open: CellKey[]; chambers: Chamber[]; stubs: Stub[]; rev: number };
-  discovered: CellKey[];
-  cellChamber: [CellKey, number][];
-  visitedChambers: number[];
-  player: PlayerState;
-  lightLevel: LightLevel;
-  beasts: Beast[];
-  items: GroundItem[];
-  traps: PlacedTrap[];
-  turrets: Turret[];
-  decoys: Decoy[];
-  turn: number;
-  kills: number;
-  maxDepth: number;
-  log: string[];
-}
-
 // --- RNG(戦闘分散用。ダンジョン生成は dungeon.rng) --------------------------------
 
 let rngState = (Date.now() ^ 0x2f6e2b1) >>> 0;
@@ -269,22 +198,6 @@ let rngState = (Date.now() ^ 0x2f6e2b1) >>> 0;
 /** 戦闘乱数列を固定する(restart がシードから呼ぶ。テストは restart 後に上書き)。 */
 export function seedRogueRng(seed: number): void {
   rngState = seed >>> 0;
-}
-
-/**
- * シード入力の解釈: 数字列はそのまま(2^31 で丸め)、その他の文字列は FNV-1a で
- * ハッシュ(言葉でもシードにできる)、空文字は undefined(=ランダム)。
- */
-export function parseSeed(text: string): number | undefined {
-  const t = text.trim();
-  if (t === '') return undefined;
-  if (/^\d+$/.test(t)) return Number(t) % 0x80000000;
-  let h = 0x811c9dc5;
-  for (const ch of t) {
-    h = (h ^ ch.codePointAt(0)!) >>> 0;
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h % 0x80000000;
 }
 
 function rand(): number {
@@ -312,81 +225,6 @@ let runSeq = 0;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-/**
- * 深度表示(入口=0、下ほど正)。スロット式生成(rogue-16)ではスロット1段の
- * 下降がレイヤ約10に相当するため、1/4 に換算して従来の深度ペース
- * (1部屋の下降 ≈ +2〜3)と敵・アイテムの深度テーブルを保つ。
- */
-export function depthOf(c: Cell): number {
-  return Math.round(-layer(c) / 4) + 0; // +0 で -0 を正規化
-}
-
-function beastAt(beasts: readonly Beast[], k: CellKey): Beast | undefined {
-  return beasts.find((b) => b.alive && cellKey(b.pos) === k);
-}
-
-/** 装備込みの攻撃力/防御力。 */
-export function playerAtk(p: PlayerState): number {
-  return BASE_ATK + (p.weapon ? stackAtk(p.weapon) : 0);
-}
-export function playerDef(p: PlayerState): number {
-  return p.armor ? stackDef(p.armor) : 0;
-}
-
-/** 武器の攻撃リーチ(FCC 歩数)。素手・通常武器は 1(隣接)。長槍などは 2。 */
-export function weaponReach(p: PlayerState): number {
-  return p.weapon ? (ITEMS[p.weapon.item].reach ?? 1) : 1;
-}
-/** 薙ぎ払い武器か(リーチ内の敵全員に当たる)。 */
-export function weaponSweep(p: PlayerState): boolean {
-  return p.weapon ? (ITEMS[p.weapon.item].sweep ?? false) : false;
-}
-
-/** 罠を置けるセル(足元+12近傍のうち、空洞・発見済み・設置物/敵なし)。 */
-export function placeableCells(
-  s: Pick<RogueState, 'player' | 'dungeon' | 'discovered' | 'traps' | 'turrets' | 'decoys' | 'beasts'>,
-): Cell[] {
-  const occupied = new Set<CellKey>([
-    ...s.traps.map((t) => cellKey(t.pos)),
-    ...s.turrets.map((t) => cellKey(t.pos)),
-    ...s.decoys.map((d) => cellKey(d.pos)),
-    ...s.beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)),
-  ]);
-  return [s.player.pos, ...neighbors(s.player.pos)].filter((c) => {
-    const k = cellKey(c);
-    return s.dungeon.open.has(k) && s.discovered.has(k) && !occupied.has(k);
-  });
-}
-
-/**
- * from から to を見る視線のカメラ角(球面座標)。カメラは from を挟んで to の反対側に
- * 回り込む(=画面上で to が奥に来る)。theta は相手との高低差を反映しつつ、
- * 見やすい俯角レンジ [0.15, 0.9] にクランプする。
- */
-export function gazeAngles(from: Cell, to: Cell): { phi: number; theta: number } {
-  const a = worldPos(from[0], from[1], from[2], 1);
-  const b = worldPos(to[0], to[1], to[2], 1);
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  const dz = a.z - b.z;
-  const len = Math.hypot(dx, dy, dz) || 1;
-  const phi = Math.atan2(dx, dz);
-  const theta = Math.min(0.9, Math.max(0.15, Math.asin(dy / len) + 0.35));
-  return { phi, theta };
-}
-
-/** 掃討済みの広間(訪問済みで、そこをホームとする敵が全滅)。壁色の明化に使う。 */
-export function clearedChambers(
-  visited: ReadonlySet<number>,
-  beasts: readonly Beast[],
-): Set<number> {
-  const out = new Set(visited);
-  for (const b of beasts) {
-    if (b.alive) out.delete(b.homeChamber);
-  }
-  return out;
 }
 
 // --- ストア本体 -------------------------------------------------------------------
