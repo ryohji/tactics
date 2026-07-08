@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { cellKey, layer } from './fcc';
-import { createDungeon, expandAt, maybeExpand, reachableCount, distW, stepDist } from './dungeon';
+import {
+  createDungeon,
+  expandAt,
+  maybeExpand,
+  reachableCount,
+  distW,
+  stepDist,
+  slotKeyOfCell,
+} from './dungeon';
 
 describe('stepDist(FCC 最短歩数)', () => {
   it('近傍は1歩、軸方向2は2歩', () => {
@@ -39,14 +47,14 @@ describe('createDungeon', () => {
 });
 
 describe('expandAt / maybeExpand', () => {
-  it('掘る順序に依らず同じ迷宮になる(スタブ位置から rng を導出)', () => {
-    // 同じ seed のふたつの巣で、最初の2本のスタブを逆順に展開しても空洞集合が一致する。
+  it('掘る順序に依らず同じ迷宮になる(生成が位置の純関数)', () => {
+    // 同じ seed のふたつの巣を、3世代ぶん逆順に展開しても空洞集合が一致する。
     const a = createDungeon(11);
     const b = createDungeon(11);
-    expandAt(a, a.stubs[0]);
-    expandAt(a, a.stubs[1]);
-    expandAt(b, b.stubs[1]);
-    expandAt(b, b.stubs[0]);
+    for (let gen = 0; gen < 3; gen++) {
+      for (const st of [...a.stubs]) if (!st.used) expandAt(a, st);
+      for (const st of [...b.stubs].reverse()) if (!st.used) expandAt(b, st);
+    }
     expect([...a.open].sort()).toEqual([...b.open].sort());
     // 同じ位置に生えた広間は同じ半径・同じセル集合。
     const chA = a.chambers.find((c) => cellKey(c.center) === cellKey(a.stubs[0].exit))!;
@@ -121,9 +129,16 @@ describe('expandAt / maybeExpand', () => {
             const ok = chId === st.from || cellKey(child.center) === cellKey(st.exit);
             expect(ok, `seed ${seed}: 通路 ${st.id} のセル ${k} が無関係な広間 ${chId} と重なる`).toBe(true);
           } else {
-            // 通路同士の共有は、同じ広間から出た兄弟が戸口付近で重なる場合のみ許す。
+            // 通路同士の共有は、同じ広間(スロット)に接する通路が
+            // 戸口付近で触れる場合のみ許す(端点スロットを共有していること)。
+            const ends = (x: (typeof dg.stubs)[number]) => [
+              slotKeyOfCell(dg.chambers[x.from].center),
+              slotKeyOfCell(x.exit),
+            ];
             const prev = corridorOf.get(k);
-            const ok = prev === undefined || dg.stubs[prev].from === st.from;
+            const ok =
+              prev === undefined ||
+              ends(dg.stubs[prev]).some((e) => ends(st).includes(e));
             expect(ok, `seed ${seed}: セル ${k} を通路 ${prev} と ${st.id} が共有`).toBe(true);
             corridorOf.set(k, st.id);
           }
@@ -140,13 +155,16 @@ describe('expandAt / maybeExpand', () => {
     }
   });
 
-  it('通路の入り口(mouth)は掘削済みで、広間の縁の外・終端より内にある', () => {
-    const dg = createDungeon(17);
-    for (const st of dg.stubs) {
-      const home = dg.chambers[st.from];
-      expect(dg.open.has(cellKey(st.mouth))).toBe(true);
-      expect(distW(st.mouth, home.center)).toBeGreaterThan(home.r);
-      expect(distW(st.mouth, home.center)).toBeLessThanOrEqual(distW(st.exit, home.center));
+  it('通路の入り口(mouth)は掘削済みで、自分の広間の戸口(縁のすぐ外)にある', () => {
+    for (const seed of [13, 17, 23]) {
+      const dg = createDungeon(seed);
+      for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+      for (const st of dg.stubs) {
+        const home = dg.chambers[st.from];
+        expect(dg.open.has(cellKey(st.mouth))).toBe(true);
+        expect(distW(st.mouth, home.center)).toBeGreaterThan(home.r);
+        expect(distW(st.mouth, home.center)).toBeLessThanOrEqual(home.r + 3); // 遠端ではない
+      }
     }
   });
 });

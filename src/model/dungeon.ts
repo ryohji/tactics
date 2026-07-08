@@ -1,10 +1,27 @@
-// 蟻の巣ダンジョン(rogue-1)。Three 非依存の純 TS。
-// 岩の塊の中に空洞セル(open)を掘る。広間(不整形の胞塊)を作るとき 2〜3本の通路を
-// 先に掘り切り、終端を「スタブ」として記録する。プレイヤーがスタブ終端へ近づいたら
-// そこへ次の広間を生成する(maybeExpand)。方位は下向きバイアス(蟻の巣は深くへ)。
-// 生成はすべて dungeon 自身の seed 付き RNG で決まる(同 seed なら同じ巣)。
+// 蟻の巣ダンジョン(rogue-1 / rogue-16 でスロット式に再設計)。Three 非依存の純 TS。
+//
+// ## 設計(rogue-16): すべてを (シード, 位置) の純関数にする
+// 旧設計は「広間を掘り、通路を伸ばし、終端に次の広間」を逐次成長させていた。
+// 重なり禁止を「その時点で存在する空洞を避ける」チェックで入れたところ、
+// 巣の形が探索順に依存してしまい(30シード中23で分岐)、シード再現と競合した。
+// そこで生成を次の構造に整理した:
+//
+// - 空間を一辺 SLOT=12(ワールド単位)の立方体スロットに分割する。
+// - 各スロットの「広間プロフィール」(存在するか・中心アンカー・半径)は
+//   (seed, スロット座標) の純関数。**実体化しなくても計算できる。**
+// - 広間はスロットに最大1つ、予約領域(1.27r+マージン)はスロット内に収まる
+//   → 広間同士の重なりは構造的に不可能。
+// - 通路は隣接スロットのアンカー間を結ぶリンクの純関数で、掘削中は
+//   **両端スロットの外に出ない** → 他の広間・他系統の通路と交わらない
+//   (同じ広間に接する通路同士が戸口付近で触れるのだけは許す)。
+// - 掘削はすべて加法的(和集合)なので、どの順に実体化しても同じ巣になる。
+//   プレイヤーの接近(maybeExpand)は「無限に広がる決定済みの巣のどこまでを
+//   実体化するか」だけを決める。
+//
+// 深さ: スロット1段の下降はレイヤ約10に相当するため、ゲーム側の深度表示
+// (rogue.ts depthOf)はレイヤ/4 に換算して従来のペース(1部屋あたり+2〜3)を保つ。
 
-import { OFFSETS, cellKey, keyToCell, worldPos, type Cell, type CellKey } from './fcc';
+import { OFFSETS, cellKey, keyToCell, nearestFCC, worldPos, type Cell, type CellKey } from './fcc';
 
 export interface Chamber {
   id: number;
@@ -15,14 +32,14 @@ export interface Chamber {
   cells: CellKey[];
 }
 
-/** 掘りかけ通路の終端。ここに近づくと次の広間が生成される。 */
+/** 掘りかけ通路の終端(=隣接スロットのアンカー)。近づくと広間が実体化する。 */
 export interface Stub {
   id: number;
   from: number;
   exit: Cell;
   /** 通路の入り口(広間の縁を出た最初のセル)。探索バブルの表示位置。 */
   mouth: Cell;
-  /** この通路が通ったセル列。展開時に「自分の通路」を重なり判定から除くため。 */
+  /** この通路が通ったセル列(テスト・重なり検証用)。 */
   path: CellKey[];
   used: boolean;
 }
@@ -31,7 +48,9 @@ export interface Dungeon {
   open: Set<CellKey>;
   chambers: Chamber[];
   stubs: Stub[];
-  /** 生成シード(スタブごとの導出 rng と、プレイ再現の表示に使う)。 */
+  /** 実体化済みスロット(slotKey → chamber id)。 */
+  slots: Map<string, number>;
+  /** 生成シード(プレイ再現の表示にも使う)。 */
   seed: number;
   rng: () => number;
   /** 掘削のたびに増える(描画・テストの変更検知用)。 */
@@ -75,9 +94,8 @@ export function lcg(seed: number): () => number {
 }
 
 /**
- * セル位置から導出する rng(シード+セル座標+用途 salt のハッシュ)。
- * 迷宮生成をこの導出 rng で行うことで、同じシードなら**探索の順序に依らず**
- * 同じ迷宮になる(共有ストリームだと先に掘った順で結果が変わる)。プレイ再現の要。
+ * 座標から導出する rng(シード+座標+用途 salt のハッシュ)。
+ * 生成をこの導出 rng で行うことが「探索順に依らず同じ迷宮」の要。
  */
 export function cellRng(seed: number, c: Cell, salt: number): () => number {
   let h = (seed ^ Math.imul(salt, 0x9e3779b9)) >>> 0;
@@ -89,18 +107,146 @@ export function cellRng(seed: number, c: Cell, salt: number): () => number {
   return lcg(h);
 }
 
+// --- スロット(純関数の世界) -------------------------------------------------
+
+/** スロットの一辺(ワールド単位)。広間の最大到達 1.27×4 + 余白が半辺に収まる寸法。 */
+export const SLOT = 12;
+/** carveChamber の半径揺らぎ上限。 */
+const FLUX = 1.27;
+/** アンカーのセル量子化誤差 + 安全余白(ワールド単位)。 */
+const MARGIN = 1.3;
+
+const SALT_PROFILE = 101;
+const SALT_EXISTS = 102;
+const SALT_LINKS = 103;
+const SALT_CARVE = 104;
+const SALT_TUNNEL = 105;
+
+type Slot = [number, number, number];
+
+const slotKey = (s: Slot): string => `${s[0]},${s[1]},${s[2]}`;
+
+/** セルの属するスロット。 */
+export function slotOfCell(c: Cell): Slot {
+  const w = worldPos(c[0], c[1], c[2], 1);
+  return [
+    Math.floor((w.x + SLOT / 2) / SLOT),
+    Math.floor((w.y + SLOT / 2) / SLOT),
+    Math.floor((w.z + SLOT / 2) / SLOT),
+  ];
+}
+
+/** rogue.ts の resume が slots マップを再構築するための鍵。 */
+export function slotKeyOfCell(c: Cell): string {
+  return slotKey(slotOfCell(c));
+}
+
+/** ワールド座標 → 最寄りの FCC セル(worldPos の逆変換 + 量子化)。 */
+function cellAtWorld(wx: number, wy: number, wz: number): Cell {
+  const SQRT2 = Math.SQRT2;
+  const SQRT3 = Math.sqrt(3);
+  const SQRT6 = Math.sqrt(6);
+  const u = wx * SQRT2; // x - y
+  const s = wy * SQRT3; // x + y + z
+  const t = wz * SQRT6; // x + y - 2z
+  const z = (s - t) / 3;
+  const xy = s - z;
+  return nearestFCC((xy + u) / 2, (xy - u) / 2, z);
+}
+
+/** スロットに広間があるか(なければ巣の空隙 — 不規則さの源)。入口は必ずある。 */
+function slotExists(seed: number, s: Slot): boolean {
+  if (s[0] === 0 && s[1] === 0 && s[2] === 0) return true;
+  return cellRng(seed, s, SALT_EXISTS)() < 0.85;
+}
+
+/** スロットの広間プロフィール(アンカーと半径)。入口は原点・r=3 に固定。 */
+function profile(seed: number, s: Slot): { anchor: Cell; r: number } {
+  if (s[0] === 0 && s[1] === 0 && s[2] === 0) return { anchor: [0, 0, 0], r: 3 };
+  const rng = cellRng(seed, s, SALT_PROFILE);
+  const r = 2 + Math.floor(rng() * 3); // 2..4
+  // 予約領域(FLUX*r + MARGIN)がスロット内に収まる範囲でジッタ(小部屋ほど動ける)。
+  const jmax = Math.max(0, SLOT / 2 - MARGIN - FLUX * r);
+  const jx = (rng() * 2 - 1) * jmax;
+  const jy = (rng() * 2 - 1) * jmax;
+  const jz = (rng() * 2 - 1) * jmax;
+  return { anchor: cellAtWorld(s[0] * SLOT + jx, s[1] * SLOT + jy, s[2] * SLOT + jz), r };
+}
+
+/** 面隣接の6スロット(候補)。ワールド y が下がる方向が「深い」。 */
+const SLOT_DIRS: readonly Slot[] = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+  [0, -1, 0], // 下
+  [0, 1, 0], // 上
+];
+
 /**
- * 広間を掘る。center から BFS し、セルごとに揺らいだ半径 r·(0.72..1.27) 以内なら空洞化。
- * 戻り値は広間セル(既に空洞だったセルも含む)。
+ * スロットから伸びるリンク(隣接スロットの列)。純関数。
+ * 下向きバイアス(下 3 / 水平 1.2 / 上 0.4)で 2〜3 本選び、
+ * 下が候補にあるのに1本も選ばれなければ最後の1本を下に差し替える。
  */
-function carveChamber(dg: Dungeon, center: Cell, r: number): CellKey[] {
+function slotLinks(seed: number, s: Slot): Slot[] {
+  const rng = cellRng(seed, s, SALT_LINKS);
+  const n = rng() < 0.45 ? 3 : 2;
+  const pool: { t: Slot; w: number }[] = [];
+  for (const d of SLOT_DIRS) {
+    const t: Slot = [s[0] + d[0], s[1] + d[1], s[2] + d[2]];
+    if (!slotExists(seed, t)) continue;
+    pool.push({ t, w: d[1] < 0 ? 3 : d[1] > 0 ? 0.4 : 1.2 });
+  }
+  const picked: Slot[] = [];
+  for (let i = 0; i < n && pool.length > 0; i++) {
+    let total = 0;
+    for (const p of pool) total += p.w;
+    let x = rng() * total;
+    let idx = 0;
+    for (; idx < pool.length - 1; idx++) {
+      x -= pool[idx].w;
+      if (x < 0) break;
+    }
+    picked.push(pool[idx].t);
+    pool.splice(idx, 1);
+  }
+  const down = picked.some((t) => t[1] < s[1]);
+  if (!down) {
+    const t: Slot = [s[0], s[1] - 1, s[2]];
+    if (slotExists(seed, t) && picked.length > 0) picked[picked.length - 1] = t;
+  }
+  return picked;
+}
+
+/** リンクの正規化キー(どちら側から掘っても同じ通路)。 */
+function linkKey(a: Slot, b: Slot): string {
+  const ka = slotKey(a);
+  const kb = slotKey(b);
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+}
+
+/** リンク専用の rng(両端スロットから対称に導出)。 */
+function linkRng(seed: number, a: Slot, b: Slot): () => number {
+  const [lo, hi] = slotKey(a) < slotKey(b) ? [a, b] : [b, a];
+  const s1 = Math.floor(cellRng(seed, lo, SALT_TUNNEL)() * 0x100000000);
+  return cellRng(s1, hi, SALT_TUNNEL);
+}
+
+// --- 掘削(加法的 — どの順に実体化しても同じ和集合) --------------------------
+
+/**
+ * 広間を掘る。center から BFS し、セルごとに揺らいだ半径 r·(0.72..1.27) 以内なら
+ * 空洞化。揺らぎはスロット導出 rng なので同スロットなら常に同じ形。
+ */
+function carveChamber(dg: Dungeon, s: Slot, center: Cell, r: number): CellKey[] {
+  const rng = cellRng(dg.seed, s, SALT_CARVE);
   const cells: CellKey[] = [];
   const seen = new Set<CellKey>([cellKey(center)]);
   const queue: Cell[] = [center];
   while (queue.length > 0) {
     const c = queue.shift()!;
     const k = cellKey(c);
-    const rr = r * (0.72 + 0.55 * dg.rng());
+    const rr = r * (0.72 + 0.55 * rng());
     if (distW(center, c) > rr) continue;
     dg.open.add(k);
     cells.push(k);
@@ -118,40 +264,39 @@ function carveChamber(dg: Dungeon, center: Cell, r: number): CellKey[] {
 }
 
 /**
- * start から方向 dir(ワールド単位ベクトル)へ長さ len の通路を掘る。
- * 各歩で目標点へ最も近づく近傍を選ぶ(確率 0.35 で次点=蛇行)。
- * 出発広間のセル(home)と自分の掘り跡以外の**既存空洞セルには入らない**
- * (他の広間・他の通路と重ならない)。
- * 掘り進めなくなったらそこで打ち切る(短すぎる終端は呼び出し側が捨てる)。
- * 終端セル・入り口(start から mouthR を最初に越えたセル)・通ったセル列を返す。
- * 注: かつて「確率 0.3 で脇を1胞広げる」処理があったが、開口1面だけの壁内ポケット
- * (見た目は壁なのに歩けて、切断時はセル形の穴に見える)を量産したため撤去した。
+ * リンク(a→b)の通路を掘る。アンカー間を蛇行しながら結ぶ。
+ * **両端スロットの外に出ない**(隣接スロットの合併は凸なので必ず進める)。
+ * どちら側から掘っても同じセル列になる(rng・端点とも対称)。
  */
-function carveTunnel(
+function carveLink(
   dg: Dungeon,
-  start: Cell,
-  dir: { x: number; y: number; z: number },
-  len: number,
-  mouthR: number,
-  home: ReadonlySet<CellKey>,
-): { exit: Cell; mouth: Cell; path: CellKey[] } {
-  const s = worldPos(start[0], start[1], start[2], 1);
-  const goal = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
-  const own = new Set<CellKey>([cellKey(start)]);
+  a: Slot,
+  b: Slot,
+): { exitA: Cell; exitB: Cell; path: CellKey[] } {
+  const rng = linkRng(dg.seed, a, b);
+  const [lo, hi] = slotKey(a) < slotKey(b) ? [a, b] : [b, a];
+  const from = profile(dg.seed, lo).anchor;
+  const to = profile(dg.seed, hi).anchor;
+  const goal = worldPos(to[0], to[1], to[2], 1);
+  const inLink = (c: Cell): boolean => {
+    const s = slotOfCell(c);
+    return (
+      (s[0] === lo[0] && s[1] === lo[1] && s[2] === lo[2]) ||
+      (s[0] === hi[0] && s[1] === hi[1] && s[2] === hi[2])
+    );
+  };
   const path: CellKey[] = [];
-  let cur = start;
-  let mouth: Cell | null = null;
-  const maxSteps = Math.ceil(len) + 8;
-  for (let i = 0; i < maxSteps; i++) {
-    // 掘ってよい近傍(未開 or 出発広間のセル or 自分の掘り跡)から目標に近い順に2つ選ぶ。
+  let cur = from;
+  dg.open.add(cellKey(cur));
+  const maxSteps = Math.ceil(distW(from, to)) * 3 + 12;
+  for (let i = 0; i < maxSteps && cellKey(cur) !== cellKey(to); i++) {
     let best: Cell | null = null;
     let second: Cell | null = null;
     let bd = Infinity;
     let sd = Infinity;
     for (const o of OFFSETS) {
       const n: Cell = [cur[0] + o[0], cur[1] + o[1], cur[2] + o[2]];
-      const nk = cellKey(n);
-      if (dg.open.has(nk) && !own.has(nk) && !home.has(nk)) continue;
+      if (!inLink(n)) continue;
       const w = worldPos(n[0], n[1], n[2], 1);
       const d = Math.hypot(w.x - goal.x, w.y - goal.y, w.z - goal.z);
       if (d < bd) {
@@ -164,89 +309,79 @@ function carveTunnel(
         sd = d;
       }
     }
-    if (best === null) break; // 既存の空洞に囲まれた — ここで行き止まり
-    cur = dg.rng() < 0.35 && second ? second : best;
+    if (best === null) break; // 起こらないはずだが安全弁
+    // 蛇行。ただし目標を追い越さないよう、終盤は最良手のみ。
+    cur = rng() < 0.35 && second && bd > 2.5 ? second : best;
     const ck = cellKey(cur);
     dg.open.add(ck);
-    own.add(ck);
     path.push(ck);
-    if (mouth === null && distW(start, cur) > mouthR) mouth = cur;
-    if (Math.min(bd, sd) < 1.0) break;
   }
   dg.rev++;
-  return { exit: cur, mouth: mouth ?? cur, path };
+  return { exitA: from, exitB: to, path };
 }
 
-/**
- * 兄弟スタブの終端同士に要求する最小距離。広間の半径は最大 4、セルごとの揺らぎ
- * 上限は 1.27 倍なので、中心間が 1.27×(4+4)≈10.2 以上あれば広間は重ならない。
- */
-const SIBLING_SEP = 11;
-
-/** 広間から 2〜3 本の通路を掘り、終端をスタブ登録する(少なくとも1本は下向き)。 */
-function spawnStubs(dg: Dungeon, ch: Chamber): void {
-  const n = dg.rng() < 0.45 ? 3 : 2;
-  const home: ReadonlySet<CellKey> = new Set(ch.cells);
-  const exits: Cell[] = [];
-  let hasDown = false;
-  for (let i = 0; i < n; i++) {
-    const az = dg.rng() * Math.PI * 2;
-    let el = 0.15 - 0.75 * dg.rng(); // (-0.6 .. 0.15) — 下向きバイアス
-    if (i === n - 1 && !hasDown) el = -(0.3 + 0.35 * dg.rng());
-    if (el < -0.25) hasDown = true;
-    const dir = {
-      x: Math.cos(el) * Math.cos(az),
-      y: Math.sin(el),
-      z: Math.cos(el) * Math.sin(az),
-    };
-    const len = ch.r + 7 + dg.rng() * 7;
-    const { exit, mouth, path } = carveTunnel(dg, ch.center, dir, len, ch.r + 1, home);
-    // 壁に沿って戻ってきた等で広間の縁に留まった通路はスタブにしない(掘った跡は残る)。
-    if (distW(exit, ch.center) < ch.r + 3) continue;
-    // 兄弟の終端が近すぎると将来の広間同士が重なるので登録しない(通路は残る)。
-    if (exits.some((e) => distW(e, exit) < SIBLING_SEP)) continue;
-    exits.push(exit);
-    dg.stubs.push({ id: dg.stubs.length, from: ch.id, exit, mouth, path, used: false });
-  }
-}
+// --- 実体化(遅延ロード) -----------------------------------------------------
 
 /**
- * スタブ位置に新しい広間を生成し、そこからさらにスタブを伸ばす。
- * 自分の通路**以外**の既存空洞(他の広間・他の通路)と重ならない半径まで絞り、
- * 部屋にならないほど窮屈なら生成しない(null。掘ってあった通路は行き止まりとして
- * 残る)。重複領域は cellChamber の所属が曖昧になり、マップのフォーカスや湧きが
- * 狂うため禁止。通路側も carveTunnel が既存空洞を避けるので、巣のどの2要素も
- * セルを共有しない。兄弟間は SIBLING_SEP で先に分離済みなので、この絞りが効く
- * のは通路が既存の巣へ回り込んだとき(まれ)だけ — 探索順への影響も実質出ない。
+ * スロットの広間を実体化する: 広間を掘り、リンクの通路を掘り、未実体化の
+ * 行き先をスタブとして登録する。既に実体化済みなら null(重複展開なし)。
+ * このスロットを指していた他系統のスタブは「使用済み」に落とす(合流=ループ)。
  */
-export function expandAt(dg: Dungeon, stub: Stub): Chamber | null {
-  stub.used = true;
-  // 掘削 rng をスタブ位置から導出し直す(探索順に依らない決定性)。
-  dg.rng = cellRng(dg.seed, stub.exit, 1);
-  let r = 2 + Math.floor(dg.rng() * 3); // 2..4
-  // 最寄りの「自通路以外の空洞セル」までの距離 d に対し 1.27r + 0.5 ≤ d を要求
-  // (1.27 は carveChamber の揺らぎ上限)。path は旧セーブに無いことがある。
-  const own = new Set<CellKey>(stub.path ?? []);
-  own.add(cellKey(stub.exit));
-  let dMin = Infinity;
-  for (const k of dg.open) {
-    if (own.has(k)) continue;
-    const d = distW(stub.exit, keyToCell(k));
-    if (d < dMin) dMin = d;
-  }
-  r = Math.min(r, Math.floor((dMin - 0.5) / 1.27));
-  if (r < 2) return null;
-  const cells = carveChamber(dg, stub.exit, r);
-  const ch: Chamber = { id: dg.chambers.length, center: stub.exit, r, cells };
+function materializeSlot(dg: Dungeon, s: Slot): Chamber | null {
+  const key = slotKey(s);
+  if (dg.slots.has(key) || !slotExists(dg.seed, s)) return null;
+  const { anchor, r } = profile(dg.seed, s);
+  const cells = carveChamber(dg, s, anchor, r);
+  const ch: Chamber = { id: dg.chambers.length, center: anchor, r, cells };
   dg.chambers.push(ch);
-  // 全部の通路が捨てられて巣が行き止まりにならないよう、0本なら掘り直す。
-  for (let guard = 0; guard < 3 && !dg.stubs.some((s) => s.from === ch.id); guard++) {
-    spawnStubs(dg, ch);
+  dg.slots.set(key, ch.id);
+  // このスロットへ向いていた他のスタブは開通済みになった。
+  for (const st of dg.stubs) {
+    if (!st.used && slotKeyOfCell(st.exit) === key) st.used = true;
+  }
+  // 掘削済みリンク(既存スタブ+実体化済みペア)を数え上げて重複掘削を避ける。
+  const dug = new Set<string>();
+  for (const st of dg.stubs) {
+    dug.add(linkKey(slotOfCell(dg.chambers[st.from].center), slotOfCell(st.exit)));
+  }
+  for (const t of slotLinks(dg.seed, s)) {
+    const lk = linkKey(s, t);
+    if (dug.has(lk)) continue;
+    dug.add(lk);
+    const { path } = carveLink(dg, s, t);
+    const tKey = slotKey(t);
+    const target = profile(dg.seed, t).anchor;
+    // 入り口 = 通路のうち、自広間の縁(r+1)を最初に越えたセル。
+    // path はキー正規化順(小さいスロット→大きいスロット)なので、
+    // 自分が大きい側なら逆から辿って「自分の側の戸口」を得る。
+    const ordered = slotKey(s) < tKey ? path : [...path].reverse();
+    let mouth: Cell = target;
+    for (const k of ordered) {
+      const c = keyToCell(k);
+      if (distW(anchor, c) > r + 1) {
+        mouth = c;
+        break;
+      }
+    }
+    dg.stubs.push({
+      id: dg.stubs.length,
+      from: ch.id,
+      exit: target,
+      mouth,
+      path,
+      used: dg.slots.has(tKey), // 既存の広間への合流(ループ)は最初から開通済み
+    });
   }
   return ch;
 }
 
-/** pos から radius 以内に未使用スタブがあれば広間を生成する。生成した広間を返す。 */
+/** スタブ位置(隣接スロットのアンカー)の広間を実体化する。 */
+export function expandAt(dg: Dungeon, stub: Stub): Chamber | null {
+  stub.used = true;
+  return materializeSlot(dg, slotOfCell(stub.exit));
+}
+
+/** pos から radius 以内に未使用スタブがあれば広間を実体化する。生成分を返す。 */
 export function maybeExpand(dg: Dungeon, pos: Cell, radius = 5): Chamber[] {
   const out: Chamber[] = [];
   for (const st of dg.stubs) {
@@ -258,13 +393,18 @@ export function maybeExpand(dg: Dungeon, pos: Cell, radius = 5): Chamber[] {
   return out;
 }
 
-/** 入口広間(原点・r=3)とスタブ2本以上を持つ初期ダンジョン。 */
+/** 入口広間(原点・r=3)とスタブを持つ初期ダンジョン。 */
 export function createDungeon(seed: number): Dungeon {
-  const dg: Dungeon = { open: new Set(), chambers: [], stubs: [], seed, rng: lcg(seed), rev: 0 };
-  const cells = carveChamber(dg, [0, 0, 0], 3);
-  const entrance: Chamber = { id: 0, center: [0, 0, 0], r: 3, cells };
-  dg.chambers.push(entrance);
-  for (let guard = 0; guard < 5 && dg.stubs.length < 2; guard++) spawnStubs(dg, entrance);
+  const dg: Dungeon = {
+    open: new Set(),
+    chambers: [],
+    stubs: [],
+    slots: new Map(),
+    seed,
+    rng: lcg(seed),
+    rev: 0,
+  };
+  materializeSlot(dg, [0, 0, 0]);
   return dg;
 }
 

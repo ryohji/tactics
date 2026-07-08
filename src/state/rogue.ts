@@ -21,6 +21,7 @@ import { OFFSETS, cellKey, keyToCell, layer, neighbors, worldPos, type Cell, typ
 import {
   createDungeon,
   maybeExpand,
+  slotKeyOfCell,
   cellRng,
   lcg,
   distW,
@@ -238,7 +239,8 @@ export interface RogueState {
  * ダンジョンの rng 関数は保存しない(展開時にスタブ位置から導出し直すため不要)。
  */
 export interface SaveData {
-  v: 1;
+  /** 2: rogue-16 スロット式生成(旧 v1 の迷宮とは非互換)。 */
+  v: 2;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;
@@ -312,9 +314,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** 深度表示(入口=0、下ほど正)。 */
+/**
+ * 深度表示(入口=0、下ほど正)。スロット式生成(rogue-16)ではスロット1段の
+ * 下降がレイヤ約10に相当するため、1/4 に換算して従来の深度ペース
+ * (1部屋の下降 ≈ +2〜3)と敵・アイテムの深度テーブルを保つ。
+ */
 export function depthOf(c: Cell): number {
-  return -layer(c) + 0; // +0 で -0 を正規化
+  return Math.round(-layer(c) / 4) + 0; // +0 で -0 を正規化
 }
 
 function beastAt(beasts: readonly Beast[], k: CellKey): Beast | undefined {
@@ -858,7 +864,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const s = get();
     if (s.phase !== 'play') return;
     const data: SaveData = {
-      v: 1,
+      v: 2,
       seed: s.seed,
       rng: rngState,
       seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
@@ -1136,7 +1142,7 @@ export const useRogue = create<RogueState>((set, get) => {
 
     resume: () => {
       const d = persist.readSave<SaveData>();
-      if (!d || d.v !== 1) return false;
+      if (!d || d.v !== 2) return false;
       resetView();
       clearUnitAnims();
       runSeq++; // 進行中の自動歩行などを打ち切る
@@ -1152,8 +1158,9 @@ export const useRogue = create<RogueState>((set, get) => {
         open: new Set(d.dungeon.open),
         chambers: d.dungeon.chambers,
         stubs: d.dungeon.stubs,
+        slots: new Map(d.dungeon.chambers.map((c) => [slotKeyOfCell(c.center), c.id])),
         seed: d.seed,
-        rng: lcg(d.seed), // 展開時に cellRng で導出し直すので初期値は使われない
+        rng: lcg(d.seed), // 生成はすべて座標導出 rng なのでこの値は使われない
         rev: d.dungeon.rev,
       };
       set({
