@@ -103,6 +103,35 @@ describe('expandAt / maybeExpand', () => {
     }
   });
 
+  it('通路は他の通路・無関係な広間と重ならない', () => {
+    for (const seed of [1, 2, 3, 5, 7, 11, 42]) {
+      const dg = createDungeon(seed);
+      for (let gen = 0; gen < 3; gen++) {
+        for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+      }
+      const chamberOf = new Map<string, number>();
+      for (const ch of dg.chambers) for (const k of ch.cells) chamberOf.set(k, ch.id);
+      const corridorOf = new Map<string, number>();
+      for (const st of dg.stubs) {
+        for (const k of st.path) {
+          const chId = chamberOf.get(k);
+          if (chId !== undefined) {
+            // 通路セルが広間に属してよいのは、出発点の親広間と、終端に生えた自分の広間だけ。
+            const child = dg.chambers[chId];
+            const ok = chId === st.from || cellKey(child.center) === cellKey(st.exit);
+            expect(ok, `seed ${seed}: 通路 ${st.id} のセル ${k} が無関係な広間 ${chId} と重なる`).toBe(true);
+          } else {
+            // 通路同士の共有は、同じ広間から出た兄弟が戸口付近で重なる場合のみ許す。
+            const prev = corridorOf.get(k);
+            const ok = prev === undefined || dg.stubs[prev].from === st.from;
+            expect(ok, `seed ${seed}: セル ${k} を通路 ${prev} と ${st.id} が共有`).toBe(true);
+            corridorOf.set(k, st.id);
+          }
+        }
+      }
+    }
+  });
+
   it('スタブ終端は広間の外にある(通路として意味を持つ)', () => {
     const dg = createDungeon(13);
     for (const st of dg.stubs) {

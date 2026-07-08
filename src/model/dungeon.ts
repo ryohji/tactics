@@ -22,6 +22,8 @@ export interface Stub {
   exit: Cell;
   /** 通路の入り口(広間の縁を出た最初のセル)。探索バブルの表示位置。 */
   mouth: Cell;
+  /** この通路が通ったセル列。展開時に「自分の通路」を重なり判定から除くため。 */
+  path: CellKey[];
   used: boolean;
 }
 
@@ -118,7 +120,10 @@ function carveChamber(dg: Dungeon, center: Cell, r: number): CellKey[] {
 /**
  * start から方向 dir(ワールド単位ベクトル)へ長さ len の通路を掘る。
  * 各歩で目標点へ最も近づく近傍を選ぶ(確率 0.35 で次点=蛇行)。
- * 終端セルと、start から mouthR を最初に越えたセル(=通路の入り口)を返す。
+ * 出発広間のセル(home)と自分の掘り跡以外の**既存空洞セルには入らない**
+ * (他の広間・他の通路と重ならない)。
+ * 掘り進めなくなったらそこで打ち切る(短すぎる終端は呼び出し側が捨てる)。
+ * 終端セル・入り口(start から mouthR を最初に越えたセル)・通ったセル列を返す。
  * 注: かつて「確率 0.3 で脇を1胞広げる」処理があったが、開口1面だけの壁内ポケット
  * (見た目は壁なのに歩けて、切断時はセル形の穴に見える)を量産したため撤去した。
  */
@@ -128,20 +133,25 @@ function carveTunnel(
   dir: { x: number; y: number; z: number },
   len: number,
   mouthR: number,
-): { exit: Cell; mouth: Cell } {
+  home: ReadonlySet<CellKey>,
+): { exit: Cell; mouth: Cell; path: CellKey[] } {
   const s = worldPos(start[0], start[1], start[2], 1);
   const goal = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
+  const own = new Set<CellKey>([cellKey(start)]);
+  const path: CellKey[] = [];
   let cur = start;
   let mouth: Cell | null = null;
   const maxSteps = Math.ceil(len) + 8;
   for (let i = 0; i < maxSteps; i++) {
-    // 目標への距離が近い順に近傍を2つ選ぶ。
+    // 掘ってよい近傍(未開 or 出発広間のセル or 自分の掘り跡)から目標に近い順に2つ選ぶ。
     let best: Cell | null = null;
     let second: Cell | null = null;
     let bd = Infinity;
     let sd = Infinity;
     for (const o of OFFSETS) {
       const n: Cell = [cur[0] + o[0], cur[1] + o[1], cur[2] + o[2]];
+      const nk = cellKey(n);
+      if (dg.open.has(nk) && !own.has(nk) && !home.has(nk)) continue;
       const w = worldPos(n[0], n[1], n[2], 1);
       const d = Math.hypot(w.x - goal.x, w.y - goal.y, w.z - goal.z);
       if (d < bd) {
@@ -154,13 +164,17 @@ function carveTunnel(
         sd = d;
       }
     }
-    cur = dg.rng() < 0.35 && second ? second : best!;
-    dg.open.add(cellKey(cur));
+    if (best === null) break; // 既存の空洞に囲まれた — ここで行き止まり
+    cur = dg.rng() < 0.35 && second ? second : best;
+    const ck = cellKey(cur);
+    dg.open.add(ck);
+    own.add(ck);
+    path.push(ck);
     if (mouth === null && distW(start, cur) > mouthR) mouth = cur;
     if (Math.min(bd, sd) < 1.0) break;
   }
   dg.rev++;
-  return { exit: cur, mouth: mouth ?? cur };
+  return { exit: cur, mouth: mouth ?? cur, path };
 }
 
 /**
@@ -172,6 +186,7 @@ const SIBLING_SEP = 11;
 /** 広間から 2〜3 本の通路を掘り、終端をスタブ登録する(少なくとも1本は下向き)。 */
 function spawnStubs(dg: Dungeon, ch: Chamber): void {
   const n = dg.rng() < 0.45 ? 3 : 2;
+  const home: ReadonlySet<CellKey> = new Set(ch.cells);
   const exits: Cell[] = [];
   let hasDown = false;
   for (let i = 0; i < n; i++) {
@@ -185,33 +200,41 @@ function spawnStubs(dg: Dungeon, ch: Chamber): void {
       z: Math.cos(el) * Math.sin(az),
     };
     const len = ch.r + 7 + dg.rng() * 7;
-    const { exit, mouth } = carveTunnel(dg, ch.center, dir, len, ch.r + 1);
+    const { exit, mouth, path } = carveTunnel(dg, ch.center, dir, len, ch.r + 1, home);
     // 壁に沿って戻ってきた等で広間の縁に留まった通路はスタブにしない(掘った跡は残る)。
     if (distW(exit, ch.center) < ch.r + 3) continue;
     // 兄弟の終端が近すぎると将来の広間同士が重なるので登録しない(通路は残る)。
     if (exits.some((e) => distW(e, exit) < SIBLING_SEP)) continue;
     exits.push(exit);
-    dg.stubs.push({ id: dg.stubs.length, from: ch.id, exit, mouth, used: false });
+    dg.stubs.push({ id: dg.stubs.length, from: ch.id, exit, mouth, path, used: false });
   }
 }
 
 /**
  * スタブ位置に新しい広間を生成し、そこからさらにスタブを伸ばす。
- * 既存のどの広間とも**重ならない**半径まで絞り、部屋にならないほど窮屈なら
- * 生成しない(null。掘ってあった通路は行き止まりとして残る)。重複領域は
- * cellChamber の所属が曖昧になり、マップのフォーカスや湧きが狂うため禁止。
- * 兄弟間は SIBLING_SEP で先に分離済みなので、この絞りが効くのは通路が既存の
- * 巣へ回り込んだとき(まれ)だけ — そのため探索順への影響も実質出ない。
+ * 自分の通路**以外**の既存空洞(他の広間・他の通路)と重ならない半径まで絞り、
+ * 部屋にならないほど窮屈なら生成しない(null。掘ってあった通路は行き止まりとして
+ * 残る)。重複領域は cellChamber の所属が曖昧になり、マップのフォーカスや湧きが
+ * 狂うため禁止。通路側も carveTunnel が既存空洞を避けるので、巣のどの2要素も
+ * セルを共有しない。兄弟間は SIBLING_SEP で先に分離済みなので、この絞りが効く
+ * のは通路が既存の巣へ回り込んだとき(まれ)だけ — 探索順への影響も実質出ない。
  */
 export function expandAt(dg: Dungeon, stub: Stub): Chamber | null {
   stub.used = true;
   // 掘削 rng をスタブ位置から導出し直す(探索順に依らない決定性)。
   dg.rng = cellRng(dg.seed, stub.exit, 1);
   let r = 2 + Math.floor(dg.rng() * 3); // 2..4
-  // 揺らぎ上限 1.27 を見込み、1.27*(r + c.r) + 0.5 ≤ 中心間距離 を全広間に要求。
-  for (const c of dg.chambers) {
-    r = Math.min(r, Math.floor((distW(stub.exit, c.center) - 0.5) / 1.27 - c.r));
+  // 最寄りの「自通路以外の空洞セル」までの距離 d に対し 1.27r + 0.5 ≤ d を要求
+  // (1.27 は carveChamber の揺らぎ上限)。path は旧セーブに無いことがある。
+  const own = new Set<CellKey>(stub.path ?? []);
+  own.add(cellKey(stub.exit));
+  let dMin = Infinity;
+  for (const k of dg.open) {
+    if (own.has(k)) continue;
+    const d = distW(stub.exit, keyToCell(k));
+    if (d < dMin) dMin = d;
   }
+  r = Math.min(r, Math.floor((dMin - 0.5) / 1.27));
   if (r < 2) return null;
   const cells = carveChamber(dg, stub.exit, r);
   const ch: Chamber = { id: dg.chambers.length, center: stub.exit, r, cells };
