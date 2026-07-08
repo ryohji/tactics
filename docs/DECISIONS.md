@@ -633,3 +633,13 @@
 
 - Phase 0: ゴールデンテスト(固定シード+固定方針120手 — 戦闘・回復・罠・探索・拡張・降下・死亡を1本で通し、最終状態をスナップショット固定)。以降の分割で乱数呼び出し順が保たれていることの回帰検知。
 - Phase 1: 旧タクティクス(it-1〜6)の死蔵コード約5,800行を削除(`tactics` ブランチに保存済み)。fromFrame(ワールド→格子の逆変換)だけは rogue が使うため `fcc.latticeAt` として移設し、dungeon.ts の重複実装も統合。leva 依存・preview:terrain スクリプト・sfx の不使用音6種(battle/move/miss/levitate/turn/victory)も削除。テストは 167→89(消えたのは全て旧ゲームのもの)。
+
+## 2026-07-08: rogue-17 完了 — 設計整理(死蔵コード削除+ドメイン層分離+render フラット化)
+
+計画(docs/refactor-plan.md)の全5フェーズを実施。
+- **Phase 0**: ゴールデンテスト(固定シード+固定方針120手)を先に固定。以降の分割で乱数呼び出し順が保たれていることの回帰検知に使った。
+- **Phase 1**: 旧タクティクス(it-1〜6)約5,800行を削除(`tactics` ブランチに保存済み)。leva 依存・preview:terrain スクリプト・sfx 不使用音6種も除去。fromFrame は rogue が使うため `fcc.latticeAt` として移設。
+- **Phase 2**: `state/rogue.ts`(1547行)から `model/rogue/` へドメイン層を新設 — types/rules/visibility/reach/combat/beastAI/spawn の7モジュール。純関数は `GameEvent[]` を返し、store の `applyEvents` が実行する方式に統一。store は 1262行(残りは restart/resume・非同期演出・UI状態遷移などの正当な store 責務)。
+- **Phase 3**: BeastsView(690行)をデータ表(beastModels.ts)+部品(GltfBeastBody/ProceduralBodies/Silhouette)に分割。DungeonShell から rockMaterial.ts を抽出。sfx の音色定義を switch/クロージャからデータ表(SfxLayer[])へ。
+- **Phase 4**: `render/rogue/` を `render/` へフラット化(タクティクス消滅後は階層が冗長)。`docs/DESIGN.md` を現行アーキテクチャで全面書き直し、設計原則(クラス不使用・純関数+データ・可変状態は境界のみ・イベント方式)を明文化。
+- 全フェーズを通じて typecheck・テスト(最終89件)・build 緑を維持。ゴールデンテストで挙動の不変を確認しながら進めたため、機能追加なしの構造整理として安全に完了できた。
