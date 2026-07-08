@@ -21,7 +21,7 @@
 // 深さ: スロット1段の下降はレイヤ約10に相当するため、ゲーム側の深度表示
 // (rogue.ts depthOf)はレイヤ/4 に換算して従来のペース(1部屋あたり+2〜3)を保つ。
 
-import { OFFSETS, cellKey, keyToCell, nearestFCC, worldPos, type Cell, type CellKey } from './fcc';
+import { OFFSETS, cellKey, keyToCell, latticeAt, nearestFCC, worldPos, type Cell, type CellKey } from './fcc';
 
 export interface Chamber {
   id: number;
@@ -143,15 +143,8 @@ export function slotKeyOfCell(c: Cell): string {
 
 /** ワールド座標 → 最寄りの FCC セル(worldPos の逆変換 + 量子化)。 */
 function cellAtWorld(wx: number, wy: number, wz: number): Cell {
-  const SQRT2 = Math.SQRT2;
-  const SQRT3 = Math.sqrt(3);
-  const SQRT6 = Math.sqrt(6);
-  const u = wx * SQRT2; // x - y
-  const s = wy * SQRT3; // x + y + z
-  const t = wz * SQRT6; // x + y - 2z
-  const z = (s - t) / 3;
-  const xy = s - z;
-  return nearestFCC((xy + u) / 2, (xy - u) / 2, z);
+  const [a, b, c] = latticeAt(wx, wy, wz);
+  return nearestFCC(a, b, c);
 }
 
 /** スロットに広間があるか(なければ巣の空隙 — 不規則さの源)。入口は必ずある。 */

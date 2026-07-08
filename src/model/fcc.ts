@@ -46,6 +46,20 @@ export function worldPos(
   };
 }
 
+/** worldPos の逆変換: ワールド座標 → 実数格子座標(量子化は nearestFCC で)。 */
+export function latticeAt(
+  wx: number,
+  wy: number,
+  wz: number,
+): [number, number, number] {
+  const u = wx * SQRT2; // x - y
+  const s = wy * SQRT3; // x + y + z
+  const t = wz * SQRT6; // x + y - 2z
+  const z = (s - t) / 3;
+  const xy = s - z;
+  return [(xy + u) / 2, (xy - u) / 2, z];
+}
+
 /**
  * 実数点 (a,b,c) を最も近い FCC 格子点へ量子化する（仕様7.2）。
  * 各成分を丸め、和が奇数なら丸め残差最大の軸を2番目に近い整数へ振って偶奇を直す。

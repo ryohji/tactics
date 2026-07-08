@@ -5,8 +5,7 @@
 import { useThree, useFrame } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { cellKey, worldPos } from '../../model/fcc';
-import { fromFrame } from '../../model/terrain';
+import { cellKey, worldPos, latticeAt } from '../../model/fcc';
 import { useRogue, gazeAngles, ROGUE_S } from '../../state/rogue';
 import { currentUnitGrid } from '../../state/unitAnim';
 import { view, clearGazeGoal } from '../../state/view';
@@ -54,7 +53,7 @@ export function RogueCamera() {
       const wx = (-dx * right.x + dy * up.x) * k;
       const wy = (-dx * right.y + dy * up.y) * k;
       const wz = (-dx * right.z + dy * up.z) * k;
-      const g = fromFrame(wx / S, wy / S, wz / S);
+      const g = latticeAt(wx / S, wy / S, wz / S);
       view.base = [view.base[0] + g[0], view.base[1] + g[1], view.base[2] + g[2]];
     };
 

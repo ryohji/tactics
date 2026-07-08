@@ -1,4 +1,4 @@
-// 効果音（it-6）。外部アセットなしの WebAudio 合成。
+// 効果音(it-6 で導入、rogue で使用)。外部アセットなしの WebAudio 合成。
 // AudioContext はブラウザでの初回ユーザ操作時に生成/resume する（自動再生制限対応）。
 // テスト/Node 環境では AudioContext が無いので全 API が no-op になる。
 //
@@ -10,18 +10,12 @@ export type SfxName =
   | 'cancel' // キャンセル・戻る
   | 'place' // 配置（デプロイ）確定
   | 'land' // 降着（浮遊切れ）
-  | 'battle' // 開戦の角笛
-  | 'move' // 移動（ふわっと）
   | 'melee' // 近接攻撃（打撃）
   | 'arrow' // 弓（風切り）
   | 'magic' // 魔法（ザップ）
   | 'hit' // 命中（衝撃）
-  | 'miss' // 回避（空振り）
   | 'heal' // 回復（チャイム）
-  | 'levitate' // 浮遊付与（上昇シマー）
   | 'death' // 撃破（下降）
-  | 'turn' // ターン交代（太鼓）
-  | 'victory' // 勝利ファンファーレ
   | 'defeat' // 敗北
   | 'step' // 足音(rogue)
   | 'pickup' // 拾得(rogue)
@@ -135,14 +129,6 @@ const SFX: Record<SfxName, () => void> = {
     noise(0.16, { filter: 'lowpass', freq: 420, gain: 0.6 });
     tone(95, 0.2, { type: 'sine', gain: 0.7, sweepTo: 55 });
   },
-  battle: () => {
-    // 角笛(完全5度)+ 太鼓。開戦の合図。
-    tone(220, 0.55, { type: 'sawtooth', gain: 0.3 });
-    tone(330, 0.55, { type: 'sawtooth', gain: 0.22, delay: 0.02 });
-    tone(440, 0.4, { type: 'sawtooth', gain: 0.18, delay: 0.22 });
-    tone(110, 0.25, { type: 'sine', gain: 0.9, sweepTo: 60, delay: 0.05 });
-  },
-  move: () => noise(0.28, { filter: 'bandpass', freq: 500, sweepTo: 1400, gain: 0.4 }),
   melee: () => {
     noise(0.12, { filter: 'lowpass', freq: 900, gain: 0.9 });
     tone(120, 0.16, { type: 'sine', gain: 0.9, sweepTo: 60 });
@@ -156,28 +142,14 @@ const SFX: Record<SfxName, () => void> = {
     noise(0.14, { filter: 'lowpass', freq: 1400, gain: 0.9 });
     tone(200, 0.2, { type: 'triangle', gain: 0.7, sweepTo: 90 });
   },
-  miss: () => noise(0.16, { filter: 'highpass', freq: 2500, sweepTo: 4000, gain: 0.25 }),
   heal: () => {
     tone(523, 0.16, { gain: 0.4 });
     tone(659, 0.16, { gain: 0.4, delay: 0.09 });
     tone(784, 0.28, { gain: 0.4, delay: 0.18 });
   },
-  levitate: () => {
-    tone(400, 0.5, { type: 'sine', gain: 0.35, sweepTo: 820 });
-    tone(405, 0.5, { type: 'sine', gain: 0.2, sweepTo: 830, delay: 0.04 }); // うなりでシマー感
-  },
   death: () => {
     tone(280, 0.5, { type: 'sawtooth', gain: 0.5, sweepTo: 70 });
     noise(0.35, { filter: 'lowpass', freq: 700, sweepTo: 120, gain: 0.5 });
-  },
-  turn: () => {
-    tone(100, 0.22, { type: 'sine', gain: 0.9, sweepTo: 55 });
-    tone(160, 0.18, { type: 'sine', gain: 0.6, sweepTo: 90, delay: 0.14 });
-  },
-  victory: () => {
-    const seq = [523, 659, 784, 1047];
-    seq.forEach((f, i) => tone(f, 0.22, { type: 'square', gain: 0.3, delay: i * 0.13 }));
-    tone(1047, 0.5, { type: 'square', gain: 0.3, delay: seq.length * 0.13 });
   },
   defeat: () => {
     const seq = [440, 415, 349, 262];
