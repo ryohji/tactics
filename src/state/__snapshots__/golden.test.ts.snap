@@ -1,0 +1,119 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ゴールデン(挙動保持の回帰検知) > シード12345・固定方針120手の最終状態が変わらない 1`] = `
+{
+  "armor": null,
+  "beastSample": [
+    {
+      "alive": false,
+      "awake": true,
+      "home": [
+        -12,
+        -12,
+        2,
+      ],
+      "homeChamber": 2,
+      "hp": 0,
+      "id": 1,
+      "kind": "spider",
+      "layerCeil": -10,
+      "layerFloor": -12,
+      "pos": [
+        -12,
+        -11,
+        3,
+      ],
+      "status": null,
+    },
+    {
+      "alive": true,
+      "awake": true,
+      "home": [
+        -20,
+        -19,
+        -3,
+      ],
+      "homeChamber": 3,
+      "hp": 2,
+      "id": 2,
+      "kind": "ghoul",
+      "layerCeil": -18,
+      "layerFloor": -23,
+      "pos": [
+        -20,
+        -18,
+        -2,
+      ],
+      "status": null,
+    },
+    {
+      "alive": false,
+      "awake": true,
+      "home": [
+        -20,
+        -19,
+        -3,
+      ],
+      "homeChamber": 3,
+      "hp": 0,
+      "id": 3,
+      "kind": "bat",
+      "layerCeil": -16,
+      "layerFloor": -24,
+      "pos": [
+        -19,
+        -17,
+        0,
+      ],
+      "status": null,
+    },
+  ],
+  "beastsAlive": 1,
+  "chambers": 4,
+  "deathCause": "グール",
+  "discovered": 221,
+  "groundItems": 4,
+  "hp": 0,
+  "kills": 2,
+  "lightLevel": 1,
+  "maxDepth": 5,
+  "maxHp": 24,
+  "open": 249,
+  "pack": [
+    {
+      "item": "potion",
+      "q": 0,
+    },
+    {
+      "item": "knife",
+      "q": 0,
+    },
+    {
+      "item": "knife",
+      "q": 0,
+    },
+    {
+      "item": "decoy",
+      "q": 0,
+    },
+  ],
+  "phase": "dead",
+  "pos": [
+    -19,
+    -19,
+    -2,
+  ],
+  "stubs": 8,
+  "turn": 45,
+  "visited": [
+    0,
+    1,
+    2,
+    3,
+  ],
+  "weapon": {
+    "item": "dagger",
+    "q": 0,
+  },
+}
+`;
