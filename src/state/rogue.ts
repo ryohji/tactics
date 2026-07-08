@@ -17,7 +17,7 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { OFFSETS, cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
+import { cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
@@ -89,6 +89,14 @@ import {
   statusAppliedEvents,
   turretTarget,
 } from '../model/rogue/combat';
+import {
+  stepCandidates as stepCandidatesPure,
+  checkAggro,
+  chooseTarget,
+  chooseFleeStep,
+  outOfTerritory,
+  chooseChaseStep,
+} from '../model/rogue/beastAI';
 import type { GameEvent } from '../model/rogue/types';
 
 // ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
@@ -441,17 +449,7 @@ export const useRogue = create<RogueState>((set, get) => {
   /** b の移動先候補(空洞・他の敵/プレイヤー/囮が居ない)。 */
   function stepCandidates(b: Beast): Cell[] {
     const s = get();
-    const occupied = new Set(
-      s.beasts.filter((x) => x.alive && x.id !== b.id).map((x) => cellKey(x.pos)),
-    );
-    occupied.add(cellKey(s.player.pos));
-    for (const d of s.decoys) occupied.add(cellKey(d.pos));
-    const out: Cell[] = [];
-    for (const o of OFFSETS) {
-      const n: Cell = [b.pos[0] + o[0], b.pos[1] + o[1], b.pos[2] + o[2]];
-      if (s.dungeon.open.has(cellKey(n)) && !occupied.has(cellKey(n))) out.push(n);
-    }
-    return out;
+    return stepCandidatesPure(s.dungeon, b, s.beasts, s.player.pos, s.decoys);
   }
 
   function moveBeast(b: Beast, to: Cell): void {
@@ -512,27 +510,15 @@ export const useRogue = create<RogueState>((set, get) => {
         }
         if (st.kind === 'fear') {
           // 恐慌: 縄張り・階層を忘れてプレイヤーから遠ざかる。
-          const cands = stepCandidates(b);
-          let best: Cell | null = null;
-          let bd = distW(b.pos, player.pos);
-          for (const n of cands) {
-            const d = distW(n, player.pos);
-            if (d > bd) {
-              bd = d;
-              best = n;
-            }
-          }
+          const best = chooseFleeStep(b, stepCandidates(b), player.pos);
           if (best) moveBeast(b, best);
           continue;
         }
         // burn は通常行動へ続く
       }
 
-      const dW = distW(b.pos, player.pos);
-      const dL = Math.abs(layer(b.pos) - layer(player.pos));
-
       // 気づき: 明かりを広げているほど遠くから気づかれる。
-      if (!b.awake && dW <= def.aggroR * LIGHT[lightLevel].aggro && dL <= def.vAggro) {
+      if (!b.awake && checkAggro(b, def, player.pos, lightLevel)) {
         b.awake = true;
         interrupted = true;
         pushLog(`${def.name} がこちらに気づいた!`);
@@ -545,14 +531,7 @@ export const useRogue = create<RogueState>((set, get) => {
       if (!b.awake) continue;
 
       // ターゲット: プレイヤーと囮のうち最も近いもの。
-      let tgtPos = player.pos;
-      let tgtDecoy: Decoy | null = null;
-      for (const d of get().decoys) {
-        if (distW(b.pos, d.pos) < distW(b.pos, tgtPos)) {
-          tgtPos = d.pos;
-          tgtDecoy = d;
-        }
-      }
+      const { pos: tgtPos, decoy: tgtDecoy } = chooseTarget(b, player.pos, get().decoys);
 
       if (adjacent(b.pos, tgtPos)) {
         if (tgtDecoy) {
@@ -565,25 +544,14 @@ export const useRogue = create<RogueState>((set, get) => {
       }
 
       // 縄張りから離れすぎたら追跡を諦める(ターゲット基準)。
-      if (distW(b.pos, tgtPos) > def.territoryR + def.aggroR) {
+      if (outOfTerritory(b, def, tgtPos)) {
         b.awake = false;
         pushLog(`${def.name} は追跡を諦めた`);
         continue;
       }
 
       // 追跡: 縄張り・階層制限内でターゲットへ最も近づく空洞セルへ1歩。
-      let best: Cell | null = null;
-      let bd = distW(b.pos, tgtPos);
-      for (const n of stepCandidates(b)) {
-        const nl = layer(n);
-        if (nl < b.layerFloor || nl > b.layerCeil) continue;
-        if (distW(n, b.home) > def.territoryR) continue;
-        const d = distW(n, tgtPos);
-        if (d < bd) {
-          bd = d;
-          best = n;
-        }
-      }
+      const best = chooseChaseStep(b, def, stepCandidates(b), tgtPos);
       if (best) moveBeast(b, best);
     }
     set({ beasts: [...get().beasts] });
