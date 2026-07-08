@@ -114,59 +114,90 @@ function noise(
   src.start(t0);
 }
 
-// --- 効果音の定義 -----------------------------------------------------------------
+// --- 効果音の定義(データ表。「何を鳴らすか」と「どう合成するか」を分離) -----------
 
-const SFX: Record<SfxName, () => void> = {
-  select: () => tone(660, 0.07, { type: 'square', gain: 0.35 }),
-  cursor: () => tone(1180, 0.035, { type: 'sine', gain: 0.14 }),
-  cancel: () => tone(440, 0.12, { type: 'square', gain: 0.3, sweepTo: 220 }),
-  place: () => {
-    noise(0.08, { filter: 'lowpass', freq: 700, gain: 0.45 });
-    tone(520, 0.1, { type: 'triangle', gain: 0.35 });
-    tone(780, 0.14, { type: 'triangle', gain: 0.3, delay: 0.07 });
-  },
-  land: () => {
-    noise(0.16, { filter: 'lowpass', freq: 420, gain: 0.6 });
-    tone(95, 0.2, { type: 'sine', gain: 0.7, sweepTo: 55 });
-  },
-  melee: () => {
-    noise(0.12, { filter: 'lowpass', freq: 900, gain: 0.9 });
-    tone(120, 0.16, { type: 'sine', gain: 0.9, sweepTo: 60 });
-  },
-  arrow: () => noise(0.18, { filter: 'highpass', freq: 1800, sweepTo: 600, gain: 0.5 }),
-  magic: () => {
-    tone(300, 0.25, { type: 'sawtooth', gain: 0.4, sweepTo: 950 });
-    tone(600, 0.25, { type: 'sine', gain: 0.25, sweepTo: 1900 });
-  },
-  hit: () => {
-    noise(0.14, { filter: 'lowpass', freq: 1400, gain: 0.9 });
-    tone(200, 0.2, { type: 'triangle', gain: 0.7, sweepTo: 90 });
-  },
-  heal: () => {
-    tone(523, 0.16, { gain: 0.4 });
-    tone(659, 0.16, { gain: 0.4, delay: 0.09 });
-    tone(784, 0.28, { gain: 0.4, delay: 0.18 });
-  },
-  death: () => {
-    tone(280, 0.5, { type: 'sawtooth', gain: 0.5, sweepTo: 70 });
-    noise(0.35, { filter: 'lowpass', freq: 700, sweepTo: 120, gain: 0.5 });
-  },
-  defeat: () => {
-    const seq = [440, 415, 349, 262];
-    seq.forEach((f, i) => tone(f, 0.4, { type: 'triangle', gain: 0.4, delay: i * 0.22 }));
-  },
-  step: () => noise(0.05, { filter: 'lowpass', freq: 480, gain: 0.28 }),
-  pickup: () => {
-    tone(880, 0.07, { type: 'triangle', gain: 0.3 });
-    tone(1320, 0.09, { type: 'triangle', gain: 0.25, delay: 0.06 });
-  },
-  alert: () => tone(950, 0.12, { type: 'square', gain: 0.35, sweepTo: 1250 }),
+interface ToneLayer {
+  kind: 'tone';
+  freq: number;
+  dur: number;
+  type?: OscillatorType;
+  gain?: number;
+  sweepTo?: number;
+  delay?: number;
+}
+interface NoiseLayer {
+  kind: 'noise';
+  dur: number;
+  filter?: 'lowpass' | 'highpass' | 'bandpass';
+  freq?: number;
+  sweepTo?: number;
+  gain?: number;
+  delay?: number;
+}
+type SfxLayer = ToneLayer | NoiseLayer;
+
+const DEFEAT_SEQ: SfxLayer[] = [440, 415, 349, 262].map((freq, i) => ({
+  kind: 'tone',
+  freq,
+  dur: 0.4,
+  type: 'triangle',
+  gain: 0.4,
+  delay: i * 0.22,
+}));
+
+const SFX: Record<SfxName, SfxLayer[]> = {
+  select: [{ kind: 'tone', freq: 660, dur: 0.07, type: 'square', gain: 0.35 }],
+  cursor: [{ kind: 'tone', freq: 1180, dur: 0.035, type: 'sine', gain: 0.14 }],
+  cancel: [{ kind: 'tone', freq: 440, dur: 0.12, type: 'square', gain: 0.3, sweepTo: 220 }],
+  place: [
+    { kind: 'noise', dur: 0.08, filter: 'lowpass', freq: 700, gain: 0.45 },
+    { kind: 'tone', freq: 520, dur: 0.1, type: 'triangle', gain: 0.35 },
+    { kind: 'tone', freq: 780, dur: 0.14, type: 'triangle', gain: 0.3, delay: 0.07 },
+  ],
+  land: [
+    { kind: 'noise', dur: 0.16, filter: 'lowpass', freq: 420, gain: 0.6 },
+    { kind: 'tone', freq: 95, dur: 0.2, type: 'sine', gain: 0.7, sweepTo: 55 },
+  ],
+  melee: [
+    { kind: 'noise', dur: 0.12, filter: 'lowpass', freq: 900, gain: 0.9 },
+    { kind: 'tone', freq: 120, dur: 0.16, type: 'sine', gain: 0.9, sweepTo: 60 },
+  ],
+  arrow: [{ kind: 'noise', dur: 0.18, filter: 'highpass', freq: 1800, sweepTo: 600, gain: 0.5 }],
+  magic: [
+    { kind: 'tone', freq: 300, dur: 0.25, type: 'sawtooth', gain: 0.4, sweepTo: 950 },
+    { kind: 'tone', freq: 600, dur: 0.25, type: 'sine', gain: 0.25, sweepTo: 1900 },
+  ],
+  hit: [
+    { kind: 'noise', dur: 0.14, filter: 'lowpass', freq: 1400, gain: 0.9 },
+    { kind: 'tone', freq: 200, dur: 0.2, type: 'triangle', gain: 0.7, sweepTo: 90 },
+  ],
+  heal: [
+    { kind: 'tone', freq: 523, dur: 0.16, gain: 0.4 },
+    { kind: 'tone', freq: 659, dur: 0.16, gain: 0.4, delay: 0.09 },
+    { kind: 'tone', freq: 784, dur: 0.28, gain: 0.4, delay: 0.18 },
+  ],
+  death: [
+    { kind: 'tone', freq: 280, dur: 0.5, type: 'sawtooth', gain: 0.5, sweepTo: 70 },
+    { kind: 'noise', dur: 0.35, filter: 'lowpass', freq: 700, sweepTo: 120, gain: 0.5 },
+  ],
+  defeat: DEFEAT_SEQ,
+  step: [{ kind: 'noise', dur: 0.05, filter: 'lowpass', freq: 480, gain: 0.28 }],
+  pickup: [
+    { kind: 'tone', freq: 880, dur: 0.07, type: 'triangle', gain: 0.3 },
+    { kind: 'tone', freq: 1320, dur: 0.09, type: 'triangle', gain: 0.25, delay: 0.06 },
+  ],
+  alert: [{ kind: 'tone', freq: 950, dur: 0.12, type: 'square', gain: 0.35, sweepTo: 1250 }],
 };
+
+function playLayer(l: SfxLayer): void {
+  if (l.kind === 'tone') tone(l.freq, l.dur, l);
+  else noise(l.dur, l);
+}
 
 /** 名前で鳴らす。Audio 不可環境では静かに何もしない。 */
 export function play(name: SfxName): void {
   try {
-    SFX[name]();
+    for (const l of SFX[name]) playLayer(l);
   } catch {
     // Audio 環境の問題でゲームを止めない
   }
