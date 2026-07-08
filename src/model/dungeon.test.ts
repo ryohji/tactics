@@ -58,7 +58,8 @@ describe('expandAt / maybeExpand', () => {
   it('スタブ位置に広間が生成され、連結が保たれ、新スタブが伸びる', () => {
     const dg = createDungeon(5);
     const stubsBefore = dg.stubs.length;
-    const ch = expandAt(dg, dg.stubs[0]);
+    const ch = expandAt(dg, dg.stubs[0])!;
+    expect(ch).not.toBeNull();
     expect(dg.chambers).toHaveLength(2);
     expect(ch.cells.length).toBeGreaterThan(5);
     expect(dg.stubs[0].used).toBe(true);
@@ -82,6 +83,24 @@ describe('expandAt / maybeExpand', () => {
     for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
     const minLayer = Math.min(...dg.chambers.map((c) => layer(c.center)));
     expect(minLayer).toBeLessThan(0);
+  });
+
+  it('広間は互いに重ならない(セル集合が素)', () => {
+    for (const seed of [1, 2, 3, 5, 7, 11, 42]) {
+      const dg = createDungeon(seed);
+      // 3世代ぶん全スタブを展開して重なりの機会を作る。
+      for (let gen = 0; gen < 3; gen++) {
+        for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+      }
+      const owner = new Map<string, number>();
+      for (const ch of dg.chambers) {
+        for (const k of ch.cells) {
+          expect(owner.has(k), `seed ${seed}: セル ${k} を広間 ${owner.get(k)} と ${ch.id} が共有`).toBe(false);
+          owner.set(k, ch.id);
+        }
+      }
+      expect(reachableCount(dg)).toBe(dg.open.size); // 連結は保たれる
+    }
   });
 
   it('スタブ終端は広間の外にある(通路として意味を持つ)', () => {

@@ -163,9 +163,16 @@ function carveTunnel(
   return { exit: cur, mouth: mouth ?? cur };
 }
 
+/**
+ * 兄弟スタブの終端同士に要求する最小距離。広間の半径は最大 4、セルごとの揺らぎ
+ * 上限は 1.27 倍なので、中心間が 1.27×(4+4)≈10.2 以上あれば広間は重ならない。
+ */
+const SIBLING_SEP = 11;
+
 /** 広間から 2〜3 本の通路を掘り、終端をスタブ登録する(少なくとも1本は下向き)。 */
 function spawnStubs(dg: Dungeon, ch: Chamber): void {
   const n = dg.rng() < 0.45 ? 3 : 2;
+  const exits: Cell[] = [];
   let hasDown = false;
   for (let i = 0; i < n; i++) {
     const az = dg.rng() * Math.PI * 2;
@@ -181,20 +188,38 @@ function spawnStubs(dg: Dungeon, ch: Chamber): void {
     const { exit, mouth } = carveTunnel(dg, ch.center, dir, len, ch.r + 1);
     // 壁に沿って戻ってきた等で広間の縁に留まった通路はスタブにしない(掘った跡は残る)。
     if (distW(exit, ch.center) < ch.r + 3) continue;
+    // 兄弟の終端が近すぎると将来の広間同士が重なるので登録しない(通路は残る)。
+    if (exits.some((e) => distW(e, exit) < SIBLING_SEP)) continue;
+    exits.push(exit);
     dg.stubs.push({ id: dg.stubs.length, from: ch.id, exit, mouth, used: false });
   }
 }
 
-/** スタブ位置に新しい広間を生成し、そこからさらにスタブを伸ばす。 */
-export function expandAt(dg: Dungeon, stub: Stub): Chamber {
+/**
+ * スタブ位置に新しい広間を生成し、そこからさらにスタブを伸ばす。
+ * 既存のどの広間とも**重ならない**半径まで絞り、部屋にならないほど窮屈なら
+ * 生成しない(null。掘ってあった通路は行き止まりとして残る)。重複領域は
+ * cellChamber の所属が曖昧になり、マップのフォーカスや湧きが狂うため禁止。
+ * 兄弟間は SIBLING_SEP で先に分離済みなので、この絞りが効くのは通路が既存の
+ * 巣へ回り込んだとき(まれ)だけ — そのため探索順への影響も実質出ない。
+ */
+export function expandAt(dg: Dungeon, stub: Stub): Chamber | null {
   stub.used = true;
   // 掘削 rng をスタブ位置から導出し直す(探索順に依らない決定性)。
   dg.rng = cellRng(dg.seed, stub.exit, 1);
-  const r = 2 + Math.floor(dg.rng() * 3); // 2..4
+  let r = 2 + Math.floor(dg.rng() * 3); // 2..4
+  // 揺らぎ上限 1.27 を見込み、1.27*(r + c.r) + 0.5 ≤ 中心間距離 を全広間に要求。
+  for (const c of dg.chambers) {
+    r = Math.min(r, Math.floor((distW(stub.exit, c.center) - 0.5) / 1.27 - c.r));
+  }
+  if (r < 2) return null;
   const cells = carveChamber(dg, stub.exit, r);
   const ch: Chamber = { id: dg.chambers.length, center: stub.exit, r, cells };
   dg.chambers.push(ch);
-  spawnStubs(dg, ch);
+  // 全部の通路が捨てられて巣が行き止まりにならないよう、0本なら掘り直す。
+  for (let guard = 0; guard < 3 && !dg.stubs.some((s) => s.from === ch.id); guard++) {
+    spawnStubs(dg, ch);
+  }
   return ch;
 }
 
@@ -202,7 +227,10 @@ export function expandAt(dg: Dungeon, stub: Stub): Chamber {
 export function maybeExpand(dg: Dungeon, pos: Cell, radius = 5): Chamber[] {
   const out: Chamber[] = [];
   for (const st of dg.stubs) {
-    if (!st.used && distW(st.exit, pos) <= radius) out.push(expandAt(dg, st));
+    if (!st.used && distW(st.exit, pos) <= radius) {
+      const ch = expandAt(dg, st);
+      if (ch) out.push(ch);
+    }
   }
   return out;
 }
