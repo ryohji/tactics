@@ -38,7 +38,6 @@ import {
   itemLabel,
   stackHeal,
   stackDmg,
-  stackTurns,
   turretTurns,
   decoyHp,
   type ItemStack,
@@ -69,7 +68,6 @@ import {
   depthOf,
   beastAt,
   playerAtk,
-  playerDef,
   weaponReach,
   weaponSweep,
   placeableCells,
@@ -83,6 +81,15 @@ import {
   pathFromReach,
   type Reach,
 } from '../model/rogue/reach';
+import {
+  beastStrike as beastStrikeCalc,
+  beastStrikeDecoy as beastStrikeDecoyCalc,
+  damageEvents,
+  resolveTrapEffect,
+  statusAppliedEvents,
+  turretTarget,
+} from '../model/rogue/combat';
+import type { GameEvent } from '../model/rogue/types';
 
 // ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
 // 保つためここから再輸出する。
@@ -249,6 +256,32 @@ export const useRogue = create<RogueState>((set, get) => {
     set({ log: [...get().log.slice(-7), msg] });
   }
 
+  /** model/rogue/combat.ts など純関数が返す GameEvent[] をまとめて実行する。 */
+  function applyEvents(events: readonly GameEvent[]): void {
+    for (const e of events) {
+      switch (e.kind) {
+        case 'log':
+          pushLog(e.msg);
+          break;
+        case 'sfx':
+          sfx.play(e.name);
+          break;
+        case 'fx':
+          pushFx(e.fx);
+          break;
+        case 'anim':
+          animateUnit(e.unit, e.path);
+          break;
+        case 'playerDied':
+          set({ deathCause: e.cause });
+          break;
+        case 'exploreRev':
+          set({ exploreRev: get().exploreRev + 1 });
+          break;
+      }
+    }
+  }
+
   /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
   /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
   function discover(): void {
@@ -345,12 +378,9 @@ export const useRogue = create<RogueState>((set, get) => {
   function beastStrike(b: Beast): void {
     const { player } = get();
     const def = BEASTS[b.kind];
-    const dmg = Math.max(1, def.atk - playerDef(player) + irnd(-1, 1));
+    const { dmg, events } = beastStrikeCalc(b, player, rand);
     player.hp = Math.max(0, player.hp - dmg);
-    pushFx({ kind: 'hit', at: player.pos, dur: 320 });
-    pushFx({ kind: 'popup', at: player.pos, text: `${dmg}`, color: '#fca5a5', dur: 900 });
-    sfx.play('hit');
-    pushLog(`${def.name} の攻撃! ${dmg}ダメージ`);
+    applyEvents(events);
     set({ player: { ...player } });
     if (player.hp <= 0) set({ deathCause: def.name }); // checkDead が使う死因
     checkDead();
@@ -358,10 +388,9 @@ export const useRogue = create<RogueState>((set, get) => {
 
   /** 敵→囮の一撃。壊れたら除去。 */
   function hitDecoy(b: Beast, d: Decoy): void {
-    const dmg = Math.max(1, BEASTS[b.kind].atk + irnd(-1, 1));
+    const { dmg, events } = beastStrikeDecoyCalc(b, d, rand);
     d.hp -= dmg;
-    pushFx({ kind: 'popup', at: d.pos, text: `${dmg}`, color: '#d6c9a8', dur: 900 });
-    sfx.play('melee');
+    applyEvents(events);
     if (d.hp <= 0) {
       pushFx({ kind: 'death', at: d.pos, dur: 600 });
       pushLog('囮人形が壊れた');
@@ -374,8 +403,7 @@ export const useRogue = create<RogueState>((set, get) => {
   /** ダメージ適用(死亡処理込み)。生存していれば false。 */
   function damageBeast(b: Beast, dmg: number, color = '#fecaca'): boolean {
     b.hp = Math.max(0, b.hp - dmg);
-    pushFx({ kind: 'hit', at: b.pos, dur: 320 });
-    pushFx({ kind: 'popup', at: b.pos, text: `${dmg}`, color, dur: 900 });
+    applyEvents(damageEvents(b.pos, dmg, color));
     if (b.hp === 0) {
       killBeast(b);
       return true;
@@ -391,37 +419,22 @@ export const useRogue = create<RogueState>((set, get) => {
     if (!t) return;
     set({ traps: traps.filter((x) => x.id !== t.id) });
     const name = BEASTS[b.kind].name;
-    const s: ItemStack = { item: t.item, q: t.q };
+    const stack: ItemStack = { item: t.item, q: t.q };
     sfx.play('hit');
-    switch (t.kind) {
-      case 'spike': {
-        pushLog(`${name} が棘の罠を踏んだ!`);
-        damageBeast(b, stackDmg(s));
-        break;
+    const effect = resolveTrapEffect(t.kind, stack);
+    if (effect.kind === 'damage') {
+      pushLog(
+        t.kind === 'spike'
+          ? `${name} が棘の罠を踏んだ!`
+          : `${name} が火炎の罠を踏んだ! 延焼した`,
+      );
+      if (!damageBeast(b, effect.dmg, effect.color) && effect.burnOnSurvive) {
+        b.status = effect.burnOnSurvive;
       }
-      case 'fire': {
-        pushLog(`${name} が火炎の罠を踏んだ! 延焼した`);
-        if (!damageBeast(b, stackDmg(s), '#fdba74')) {
-          b.status = { kind: 'burn', turns: stackTurns(s) };
-        }
-        break;
-      }
-      case 'confuse':
-        b.status = { kind: 'confuse', turns: stackTurns(s) };
-        pushFx({ kind: 'popup', at: b.pos, text: '混乱', color: '#f472b6', dur: 900 });
-        pushLog(`${name} は混乱した!`);
-        break;
-      case 'fear':
-        b.status = { kind: 'fear', turns: stackTurns(s) };
-        b.awake = true;
-        pushFx({ kind: 'popup', at: b.pos, text: '恐慌', color: '#a78bfa', dur: 900 });
-        pushLog(`${name} は恐慌に陥った!`);
-        break;
-      default: // sleep
-        b.status = { kind: 'sleep', turns: stackTurns(s) };
-        pushFx({ kind: 'popup', at: b.pos, text: '昏睡', color: '#60a5fa', dur: 900 });
-        pushLog(`${name} は昏睡した!`);
-        break;
+    } else {
+      b.status = effect.status;
+      if (effect.awaken) b.awake = true;
+      applyEvents(statusAppliedEvents(name, b.pos, effect.status));
     }
   }
 
@@ -454,9 +467,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const range = ITEMS.turret.range ?? 8;
     const remaining: Turret[] = [];
     for (const t of s.turrets) {
-      const target = s.beasts
-        .filter((b) => b.alive && distW(t.pos, b.pos) <= range)
-        .sort((a, b) => distW(t.pos, a.pos) - distW(t.pos, b.pos))[0];
+      const target = turretTarget(t, s.beasts, range);
       if (target) {
         pushFx({ kind: 'bolt', from: t.pos, to: target.pos, dur: 240 });
         sfx.play('magic');
