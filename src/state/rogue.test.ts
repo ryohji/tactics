@@ -661,6 +661,13 @@ describe('マップモードとターゲット巡回', () => {
     expect(view.thetaGoal).toBeGreaterThanOrEqual(0.15);
   });
 
+  it('TAB は部屋の外(通路など)でも、気づいて迫る敵を拾う', () => {
+    const b = placeBeastAdjacent('bat'); // awake=true
+    useRogue.getState().cellChamber.delete(cellKey(b.pos)); // 通路セルに見立てる
+    useRogue.getState().cycleTarget();
+    expect(useRogue.getState().hoverBeastId).toBe(b.id);
+  });
+
   it('近くに敵がいなければログだけ出す', () => {
     useRogue.getState().cycleTarget();
     expect(useRogue.getState().log.at(-1)).toContain('気配はない');

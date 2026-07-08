@@ -1486,17 +1486,16 @@ export const useRogue = create<RogueState>((set, get) => {
         return;
       }
       if (s.phase !== 'play' || s.busy) return;
-      // 部屋内(通路に居るときは近傍8歩)の敵を距離順に巡回し、視線を向けて情報を出す。
+      // 部屋内の敵を距離順に巡回し、視線を向けて情報を出す。部屋の外でも、
+      // すぐ近く(3歩)の敵と、こちらに気づいた敵(8歩)は拾う — 戸口や通路から
+      // 迫る敵に「気づかれた」「攻撃されている」のに気配がない矛盾を防ぐ。
       const ch = s.cellChamber.get(cellKey(s.player.pos));
       const cands = s.beasts
-        .filter(
-          (b) =>
-            b.alive &&
-            s.discovered.has(cellKey(b.pos)) &&
-            (ch !== undefined
-              ? s.cellChamber.get(cellKey(b.pos)) === ch
-              : stepDist(s.player.pos, b.pos) <= 8),
-        )
+        .filter((b) => {
+          if (!b.alive || !s.discovered.has(cellKey(b.pos))) return false;
+          if (ch !== undefined && s.cellChamber.get(cellKey(b.pos)) === ch) return true;
+          return stepDist(s.player.pos, b.pos) <= (b.awake || ch === undefined ? 8 : 3);
+        })
         .sort(
           (x, y) => stepDist(s.player.pos, x.pos) - stepDist(s.player.pos, y.pos) || x.id - y.id,
         );
