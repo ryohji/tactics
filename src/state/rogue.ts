@@ -75,6 +75,14 @@ import {
   placeableCells,
   gazeAngles,
 } from '../model/rogue/rules';
+import { discoverInto } from '../model/rogue/visibility';
+import {
+  computeReach as computeReachPure,
+  findPath as findPathPure,
+  findPathWhere as findPathWherePure,
+  pathFromReach,
+  type Reach,
+} from '../model/rogue/reach';
 
 // ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
 // 保つためここから再輸出する。
@@ -242,29 +250,10 @@ export const useRogue = create<RogueState>((set, get) => {
   }
 
   /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
+  /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
   function discover(): void {
     const { dungeon, discovered, player, lightLevel } = get();
-    const seeR = LIGHT[lightLevel].see;
-    const start = player.pos;
-    const seen = new Set<CellKey>([cellKey(start)]);
-    const queue: Cell[] = [start];
-    let grew = false;
-    while (queue.length > 0) {
-      const c = queue.shift()!;
-      const k = cellKey(c);
-      if (!discovered.has(k)) {
-        discovered.add(k);
-        grew = true;
-      }
-      for (const o of OFFSETS) {
-        const n: Cell = [c[0] + o[0], c[1] + o[1], c[2] + o[2]];
-        const nk = cellKey(n);
-        if (seen.has(nk) || !dungeon.open.has(nk)) continue;
-        if (distW(start, n) > seeR) continue;
-        seen.add(nk);
-        queue.push(n);
-      }
-    }
+    const grew = discoverInto(dungeon, player.pos, LIGHT[lightLevel].see, discovered);
     if (grew) set({ discoveredRev: get().discoveredRev + 1 });
   }
 
@@ -309,32 +298,11 @@ export const useRogue = create<RogueState>((set, get) => {
   }
 
   /** クリック可能な移動先(発見済み空洞・敵なし・BFS≤REACH_STEPS)。 */
-  function computeReach(): { cells: Cell[]; parent: Map<CellKey, CellKey> } {
+  function computeReach(): Reach {
     const { dungeon, discovered, beasts, player, phase } = get();
-    const cells: Cell[] = [];
-    const parent = new Map<CellKey, CellKey>();
-    if (phase !== 'play') return { cells, parent };
+    if (phase !== 'play') return { cells: [], parent: new Map() };
     const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
-    const start = cellKey(player.pos);
-    const depth = new Map<CellKey, number>([[start, 0]]);
-    const queue: Cell[] = [player.pos];
-    while (queue.length > 0) {
-      const c = queue.shift()!;
-      const k = cellKey(c);
-      const d = depth.get(k)!;
-      if (d >= REACH_STEPS) continue;
-      for (const o of OFFSETS) {
-        const n: Cell = [c[0] + o[0], c[1] + o[1], c[2] + o[2]];
-        const nk = cellKey(n);
-        if (depth.has(nk)) continue;
-        if (!dungeon.open.has(nk) || !discovered.has(nk) || occupied.has(nk)) continue;
-        depth.set(nk, d + 1);
-        parent.set(nk, k);
-        cells.push(n);
-        queue.push(n);
-      }
-    }
-    return { cells, parent };
+    return computeReachPure(dungeon, discovered, occupied, player.pos, REACH_STEPS);
   }
 
   function refreshReach(): void {
@@ -342,67 +310,24 @@ export const useRogue = create<RogueState>((set, get) => {
     set({ reach: computeReach(), armedKey: null });
   }
 
-  /**
-   * 発見済み空洞を通る任意長の最短経路(生きた敵のセルは避ける)。
-   * 目標は述語で与える(多目標 BFS — 最初に条件を満たしたセルで停止)。
-   * [現在地, ..., 目的地] を返す。到達不能なら null。
-   */
+  /** 発見済み空洞を通る任意長の最短経路(生きた敵のセルは避ける)を述語で探す。 */
   function findPathWhere(isGoal: (k: CellKey) => boolean): Cell[] | null {
     const { dungeon, discovered, beasts, player } = get();
-    const start = cellKey(player.pos);
     const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
-    const parent = new Map<CellKey, CellKey>();
-    const seen = new Set<CellKey>([start]);
-    const queue: Cell[] = [player.pos];
-    let guard = 0;
-    while (queue.length > 0 && guard++ < 6000) {
-      const c = queue.shift()!;
-      const ck = cellKey(c);
-      for (const o of OFFSETS) {
-        const n: Cell = [c[0] + o[0], c[1] + o[1], c[2] + o[2]];
-        const nk = cellKey(n);
-        if (seen.has(nk)) continue;
-        if (!dungeon.open.has(nk) || !discovered.has(nk) || occupied.has(nk)) continue;
-        seen.add(nk);
-        parent.set(nk, ck);
-        if (isGoal(nk)) {
-          const path: Cell[] = [n];
-          let k = nk;
-          while (k !== start) {
-            k = parent.get(k)!;
-            path.unshift(keyToCell(k));
-          }
-          return path;
-        }
-        queue.push(n);
-      }
-    }
-    return null;
+    return findPathWherePure(dungeon, discovered, occupied, player.pos, isGoal);
   }
 
   /** 指定セルへの最短経路。 */
   function findPath(to: Cell): Cell[] | null {
     const { dungeon, discovered, beasts, player } = get();
-    const goal = cellKey(to);
-    if (goal === cellKey(player.pos)) return null;
-    if (!dungeon.open.has(goal) || !discovered.has(goal)) return null;
-    if (beasts.some((b) => b.alive && cellKey(b.pos) === goal)) return null;
-    return findPathWhere((k) => k === goal);
+    const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
+    return findPathPure(dungeon, discovered, occupied, player.pos, to);
   }
 
   /** parent 木から経路を復元([現在地, ..., 目的地])。 */
   function pathTo(to: Cell): Cell[] {
     const { reach, player } = get();
-    const path: Cell[] = [to];
-    let k = cellKey(to);
-    const start = cellKey(player.pos);
-    while (k !== start) {
-      const p = reach.parent.get(k);
-      if (!p) return [];
-      path.unshift(keyToCell(p));
-      k = p;
-    }
-    return path;
+    return pathFromReach(reach, player.pos, to);
   }
 
   function checkDead(): boolean {
