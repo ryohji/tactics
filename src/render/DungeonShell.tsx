@@ -22,14 +22,14 @@
 // そこへ平面上の大板を描けば、断面は**空洞の断面だけ穴の開いた塗り潰しの土**になる。
 // 未発見の空洞は計数に現れない=土として塗られる(未知は土)。
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OFFSETS, keyToCell, layer, worldPos, type Cell, type CellKey } from '../model/fcc';
 import { useRogue, clearedChambers, ROGUE_S } from '../state/rogue';
 import { RD_FACES, RD_VERTICES } from './rd';
 import { currentFocusGrid } from './rogueFocus';
-import { makeRockMaterial } from './rockMaterial';
+import { makeRockMaterial, type RockDitherUniforms } from './rockMaterial';
 
 const ROCK_SHALLOW = new THREE.Color('#7a6a55');
 const ROCK_DEEP = new THREE.Color('#3a3452');
@@ -57,6 +57,15 @@ const CAP_R0 = 5 * ROGUE_S;
 const CAP_R1 = 13 * ROGUE_S;
 /** ステンシル計数用の「土の外周」球の半径。注視点に追従(カメラ far=1000 未満に収める)。 */
 const EARTH_R = 300 * ROGUE_S;
+/**
+ * プレイヤー中心「可視ドーム」の半径(世界座標)。iter2: TAB でカメラが未発見の土中へ
+ * 飛び出すと、カメラが常にくり抜き側に居る前提が崩れてステンシル計数が壊れ、
+ * キャップがプレイヤー・敵ごと塗り潰してしまう(診断で実証済み: クリップは無関係、
+ * キャップだけが原因)。カメラ側を直さず、キャップ自体にプレイヤー中心の穴を開けて
+ * 必ず地肌・プレイヤー・敵が見えるようにする対症療法。stencil のリセット(Replace)は
+ * discard せず維持し、色のみ透明にする(ドーム外側でのカウントずれを防ぐ)。
+ */
+const DOME_R = 12;
 
 // 全シェルマテリアルで共有するクリッピング平面(毎フレーム更新)。
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6);
@@ -69,8 +78,10 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1);
 // 板は視軸上に置かれるので、板ローカルの xy 距離がそのまま視軸からの距離になる。
 const CAP_VERT = /* glsl */ `
   varying vec2 vPos;
+  varying vec3 vWorldPos;
   void main() {
     vPos = position.xy;
+    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -79,10 +90,18 @@ const CAP_FRAG = /* glsl */ `
   uniform vec3 uFar;
   uniform float uR0;
   uniform float uR1;
+  uniform vec3 uPlayerPos;
+  uniform float uDomeR;
   varying vec2 vPos;
+  varying vec3 vWorldPos;
   void main() {
     float t = smoothstep(uR0, uR1, length(vPos));
-    gl_FragColor = vec4(mix(uNear, uFar, t), 1.0);
+    vec3 col = mix(uNear, uFar, t);
+    // プレイヤー中心ドーム: 内側は透明にして必ず地肌・プレイヤー・敵が見えるようにする。
+    // discard は使わない(discard すると stencil の Replace リセットも飛んで次フレームの
+    // カウントが狂うため。色のみ透明にしてステンシル計算は毎フレーム正しくリセットさせる)。
+    float domeT = smoothstep(uDomeR * 0.6, uDomeR, distance(vWorldPos, uPlayerPos));
+    gl_FragColor = vec4(col, domeT);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -205,9 +224,39 @@ function buildShellGeometry(
   return g;
 }
 
+/** QA診断用(iter2): ?qa のときだけ true。TAB消失バグの原因切り分け用トグルを window に出す。 */
+const QA = typeof location !== 'undefined' && new URLSearchParams(location.search).has('qa');
+
 export function DungeonShell() {
   const discoveredRev = useRogue((s) => s.discoveredRev);
   const gl = useThree((s) => s.gl);
+
+  // QA専用(iter2/3診断): window.__qaSetShell({ noClip, noCap, domeR, ditherMode, hemiOn }) で
+  // クリップ/キャップ/可視ドーム半径/壁ディザの方式/半球フェードを上書きできるようにする
+  // (仮説検証・比較撮影用)。本番は無効。
+  const [qaOverride, setQaOverride] = useState<{
+    noClip?: boolean;
+    noCap?: boolean;
+    domeR?: number;
+    ditherMode?: number;
+    hemiOn?: boolean;
+  }>({});
+  useEffect(() => {
+    if (!QA) return;
+    const w = window as unknown as {
+      __qaSetShell?: (p: {
+        noClip?: boolean;
+        noCap?: boolean;
+        domeR?: number;
+        ditherMode?: number;
+        hemiOn?: boolean;
+      }) => void;
+    };
+    w.__qaSetShell = (patch) => setQaOverride((o) => ({ ...o, ...patch }));
+    return () => {
+      delete w.__qaSetShell;
+    };
+  }, []);
 
   // マテリアル単位のクリッピングはレンダラ側の許可が要る。
   useEffect(() => {
@@ -265,13 +314,26 @@ export function DungeonShell() {
   useEffect(() => () => geom.dispose(), [geom]);
 
   // マップモードはカットしない(巣の全体像。クリップ/キャップ/計数を停止)。
-  const planes = mapMode ? [] : [cutPlane];
-  const showCut = hasStencil && !mapMode;
+  const planes = mapMode || qaOverride.noClip ? [] : [cutPlane];
+  const showCut = hasStencil && !mapMode && !qaOverride.noCap;
 
   // 岩肌マテリアル(トライプレーナー)。クリップ平面はレンダーごとに差し替える。
   const rockMat = useMemo(() => makeRockMaterial(), []);
   useEffect(() => () => rockMat.dispose(), [rockMat]);
   rockMat.clippingPlanes = planes;
+
+  // キャップの uniform はレンダーを跨いで同一参照を保つ(useFrame から直接 .value を書き換えるため)。
+  const capUniforms = useMemo(
+    () => ({
+      uNear: { value: new THREE.Color(CUT_COLOR) },
+      uFar: { value: new THREE.Color(EARTH_BG) },
+      uR0: { value: CAP_R0 },
+      uR1: { value: CAP_R1 },
+      uPlayerPos: { value: new THREE.Vector3() },
+      uDomeR: { value: DOME_R },
+    }),
+    [],
+  );
 
   // カット平面の更新。「平面よりカメラ側」(n·p + c < 0)が描画されない。
   // 視線直交のままだと、俯瞰時に平面がほぼ水平になってプレイヤー頭上すれすれに浮き、
@@ -286,6 +348,24 @@ export function DungeonShell() {
   const tmpP = useRef(new THREE.Vector3());
   const tmpN = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
+    // プレイヤー中心ディザ: 視点(focus)ではなくプレイヤー本体の位置を使う
+    // (視点だと TAB で他広間を見ている間もそこが透けてしまう)。
+    const playerPos = useRogue.getState().player.pos;
+    const pw = worldPos(playerPos[0], playerPos[1], playerPos[2], ROGUE_S);
+    const dither = rockMat.userData.dither as RockDitherUniforms | undefined;
+    dither?.uPlayerPos.value.set(pw.x, pw.y, pw.z);
+    if (dither) {
+      // 既定=1(alpha 半透明)。iter3 でユーザ確定(ディザの砂嵐状の粒を避ける)。
+      // QA専用: window.__qaSetShell({ditherMode:0}) でディザ/ハイブリッドと比較できる。
+      const mode = qaOverride.ditherMode ?? 1;
+      dither.uDitherMode.value = mode;
+      rockMat.transparent = mode > 0.5; // alpha を使うモードは transparent 必須
+      // QA専用: window.__qaSetShell({hemiOn:false}) で全球フェード(iter2旧挙動)に戻して比較できる。
+      dither.uHemiOn.value = qaOverride.hemiOn === false ? 0 : 1;
+    }
+    capUniforms.uPlayerPos.value.set(pw.x, pw.y, pw.z); // 可視ドームの中心もプレイヤー本体
+    capUniforms.uDomeR.value = qaOverride.domeR ?? DOME_R; // QA専用: window.__qaSetShell({domeR:0}) で無効化して比較できる
+
     const g = currentFocusGrid();
     const w = worldPos(g[0], g[1], g[2], ROGUE_S);
     const p = tmpP.current.set(w.x, w.y, w.z);
@@ -298,6 +378,27 @@ export function DungeonShell() {
     const off = CUT_OFFSET * (1 - t) + H_CUT * t;
     p.addScaledVector(n, -off);
     cutPlane.setFromNormalAndCoplanarPoint(n, p);
+    // QA専用(iter2診断): カット平面・ステンシル状態を毎フレーム公開。
+    if (QA) {
+      (
+        window as unknown as {
+          __qaShell: {
+            hasStencil: boolean;
+            showCut: boolean;
+            focusWorld: { x: number; y: number; z: number };
+            planeNormal: { x: number; y: number; z: number };
+            planeConstant: number;
+          };
+        }
+      ).__qaShell = {
+        hasStencil,
+        showCut,
+        focusWorld: { x: w.x, y: w.y, z: w.z },
+        planeNormal: { x: cutPlane.normal.x, y: cutPlane.normal.y, z: cutPlane.normal.z },
+        planeConstant: cutPlane.constant,
+      };
+    }
+
     const cap = capRef.current;
     if (cap) {
       cap.position.copy(p).addScaledVector(n, -0.02 * ROGUE_S);
@@ -381,12 +482,8 @@ export function DungeonShell() {
         <shaderMaterial
           vertexShader={CAP_VERT}
           fragmentShader={CAP_FRAG}
-          uniforms={{
-            uNear: { value: new THREE.Color(CUT_COLOR) },
-            uFar: { value: new THREE.Color(EARTH_BG) },
-            uR0: { value: CAP_R0 },
-            uR1: { value: CAP_R1 },
-          }}
+          uniforms={capUniforms}
+          transparent
           side={THREE.DoubleSide}
           stencilWrite
           stencilRef={0}

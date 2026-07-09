@@ -23,9 +23,17 @@ const R_DEFAULT = 15 * ROGUE_S;
 const R_MIN = 2.5 * ROGUE_S;
 const R_MAX = 60 * ROGUE_S;
 
+/** QA診断用(iter2): ?qa のときだけ true。カメラ座標・view state を window に出す。 */
+const QA = typeof location !== 'undefined' && new URLSearchParams(location.search).has('qa');
+
 export function RogueCamera() {
   const camera = useThree((s) => s.camera);
   const domElement = useThree((s) => s.gl.domElement);
+
+  useEffect(() => {
+    // QA専用(iter2診断): TAB消失バグの原因切り分け用に view state をそのまま公開。本番は無効。
+    if (QA) (window as unknown as { __qaView: typeof view }).__qaView = view;
+  }, []);
 
   useEffect(() => {
     const el = domElement;
@@ -231,6 +239,15 @@ export function RogueCamera() {
       tv.current.z + dir.current.z * Rc,
     );
     cam.lookAt(tv.current);
+
+    // QA専用(iter2診断): カメラのワールド座標を毎フレーム公開(洞窟外=土中に入っていないか確認用)。
+    if (QA) {
+      (window as unknown as { __qaCamera: { x: number; y: number; z: number } }).__qaCamera = {
+        x: cam.position.x,
+        y: cam.position.y,
+        z: cam.position.z,
+      };
+    }
   });
 
   return null;

@@ -643,3 +643,11 @@
 - **Phase 3**: BeastsView(690行)をデータ表(beastModels.ts)+部品(GltfBeastBody/ProceduralBodies/Silhouette)に分割。DungeonShell から rockMaterial.ts を抽出。sfx の音色定義を switch/クロージャからデータ表(SfxLayer[])へ。
 - **Phase 4**: `render/rogue/` を `render/` へフラット化(タクティクス消滅後は階層が冗長)。`docs/DESIGN.md` を現行アーキテクチャで全面書き直し、設計原則(クラス不使用・純関数+データ・可変状態は境界のみ・イベント方式)を明文化。
 - 全フェーズを通じて typecheck・テスト(最終89件)・build 緑を維持。ゴールデンテストで挙動の不変を確認しながら進めたため、機能追加なしの構造整理として安全に完了できた。
+
+## 2026-07-09: rogue-18 — 視認性改善(プレイヤー中心の近傍透過 + TAB 消失の修正)
+
+TAB フォーカスや通路でプレイヤー・敵が岩に隠れて見えなくなる問題への対処。
+- **TAB 消失の真因**: gaze 旋回でカメラが未発見の土中へ出ると「カメラは常にくり抜き側」というステンシル計数の前提が崩れ、**断面キャップがプレイヤー・敵ごと視界全体を土色に塗り潰していた**(切り分け実証: クリップ無効化では復活せず、キャップ無効化だけで復活。クリップは無関係)。カメラ側は直さず、**キャップのフラグメントにプレイヤー中心の穴を開ける**対症療法(`DungeonShell` CAP_FRAG に uPlayerPos/uDomeR、domeT を alpha に。discard は使わない——stencil の Replace リセットを毎フレーム維持してカウントのずれを防ぐ。DOME_R=12)。
+- **近傍の壁透過**: `rockMaterial` にプレイヤーからの距離フェードを追加。当初はスクリーンドア discard(ディザ)だったが「砂嵐状の粒が目立つ」ため **alpha 半透明を既定**に(uDitherMode: 0=ディザ/1=alpha/2=ハイブリッド。alpha 採用)。さらに「背後の壁まで抜ける」フィードバックを受け、three 組み込みの `cameraPosition` で**カメラ側の半球だけ**フェードするよう限定(frontness=dot(正規化 toFrag, toCam)、赤道付近は smoothstep で滑らかに)。既存の視線カットアウェイ・ステンシル断面は温存(併用)。
+- **オフライン QA 手法の確立**: ヘッドレスで WebGL を撮れない環境(gstack /browse は起動不能、three 0.169 は WebGL2 前提で headless-gl 不可)への解として、**実 Safari を safaridriver + selenium-webdriver で自動操作しスクリーンショットを撮る**方法を確立。SwiftShader と違いユーザが見る実エンジン+実 GPU の描画そのものを検証できる。`?qa` フック(本番無効・gated)でストア/シェルを Selenium から操作して盤面を再現。この一連の視認性改修はすべてこの手法でオフライン反復・目視検証した。
+- 実装は Sonnet サブエージェントへオフロード。設計・レビュー・最終判断はメイン。typecheck/vitest(golden 含む89件)/build 緑。

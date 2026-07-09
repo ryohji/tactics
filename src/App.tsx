@@ -17,6 +17,8 @@ import { startBgm } from './audio/bgm';
 // (startBgm は冪等。初回はタイトルの「潜る」クリックがその操作になる)。
 export function App() {
   useEffect(() => {
+    // QA専用: ?qa のときだけストアを window に公開(ディザ調整のSelenium操作用。本番は無効)。
+    if (new URLSearchParams(location.search).has('qa')) (window as unknown as { __rogue: typeof useRogue }).__rogue = useRogue;
     const onDown = () => {
       unlock();
       startBgm();
