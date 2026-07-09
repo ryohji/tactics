@@ -107,6 +107,14 @@ function BeastItem({ b }: { b: Beast }) {
         document.body.style.cursor = 'auto';
       }}
     >
+      {/* 当たり判定用の不可視球: 小さい敵(蝙蝠・蜘蛛等)はモデル自体のヒットボックスが
+          細く、カーソルオーバー/クリックを拾い損ねやすい。opacity=0 でも visible なら
+          raycast されるので、group のイベントハンドラをこの球でも発火させて底上げする
+          (モデルの当たり判定も引き続き有効。半径は隣セルに大きくはみ出さない値)。 */}
+      <mesh position={[0, 0.3 * S, 0]}>
+        <sphereGeometry args={[0.45 * S, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <group ref={bodyRef}>
         {/* フォーカス中のシルエット: プロシージャル種は反転ハル(縁取り+壁越しゴースト)。
             glTF 種は骨アニメと同期しないため Body 側の発光パルスで示す。 */}

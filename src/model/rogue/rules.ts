@@ -85,9 +85,18 @@ export function placeableCells(s: {
 }
 
 /**
- * from から to を見る視線のカメラ角(球面座標)。カメラは from を挟んで to の反対側に
- * 回り込む(=画面上で to が奥に来る)。theta は相手との高低差を反映しつつ、
- * 見やすい俯角レンジ [0.15, 0.9] にクランプする。
+ * TAB 視線の方位オフセット(rad)。プレイヤーを挟んで敵の真反対にカメラを置くと
+ * カメラ→プレイヤー→敵が一直線になり、プレイヤーモデル自身が敵を隠してしまう。
+ * 「プレイヤーの斜め後ろ」寄りにずらして肩越しに見えるようにする(45°〜60°が目安、
+ * 90°は横に寄りすぎて「見ている感」が薄れる)。
+ */
+const GAZE_YAW = Math.PI / 3; // 60°
+
+/**
+ * from から to を見る視線のカメラ角(球面座標)。カメラは from を挟んで to の反対側
+ * から GAZE_YAW だけ斜めにずらした位置に回り込む(=画面上で to が奥・斜め手前に
+ * プレイヤーの肩、という構図になり、プレイヤーモデルが敵を隠さない)。theta は
+ * 相手との高低差を反映しつつ、見やすい俯角レンジ [0.15, 0.9] にクランプする。
  */
 export function gazeAngles(from: Cell, to: Cell): { phi: number; theta: number } {
   const a = worldPos(from[0], from[1], from[2], 1);
@@ -96,7 +105,7 @@ export function gazeAngles(from: Cell, to: Cell): { phi: number; theta: number }
   const dy = a.y - b.y;
   const dz = a.z - b.z;
   const len = Math.hypot(dx, dy, dz) || 1;
-  const phi = Math.atan2(dx, dz);
+  const phi = Math.atan2(dx, dz) + GAZE_YAW;
   const theta = Math.min(0.9, Math.max(0.15, Math.asin(dy / len) + 0.35));
   return { phi, theta };
 }
