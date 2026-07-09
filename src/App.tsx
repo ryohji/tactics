@@ -22,12 +22,22 @@ export function App() {
     const onDown = () => {
       unlock();
       startBgm();
+      // 歩行中の画面タップ/クリックはファストトラベルの中断(travelTo を起こす
+      // マーカーのクリックは click で、busy 化はその後。この pointerdown が先に
+      // 走る時点ではまだ非歩行なので、開始操作を誤って打ち切ることはない)。
+      useRogue.getState().cancelTravel();
     };
     window.addEventListener('pointerdown', onDown);
     installTouchFlag();
     installKeys({
       onCycle: (dir) => useRogue.getState().cycleTarget(dir),
       onToggleMap: () => useRogue.getState().toggleMap(),
+      onEscape: () => {
+        const s = useRogue.getState();
+        if (s.busy) s.cancelTravel();
+        else if (s.uiMode !== 'walk') s.cancelThrow();
+        else if (s.mapMode) s.toggleMap();
+      },
     });
     return () => window.removeEventListener('pointerdown', onDown);
   }, []);

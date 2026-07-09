@@ -196,6 +196,8 @@ export interface RogueState {
   cancelThrow: () => void;
   /** 発見済みセルへのファストトラベル(1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。 */
   travelTo: (c: Cell) => void;
+  /** 進行中のファストトラベルを中断する(タップ/クリック/ESC)。歩行中でなければ無視。 */
+  cancelTravel: () => void;
   setHoverMarker: (k: CellKey | null) => void;
   /** タッチの2段階操作: 1度目のタップで選択された対象のキー("cell:…"/"beast:…"/"bubble:…")。 */
   armedKey: string | null;
@@ -245,6 +247,9 @@ let chamberCycleIdx = -1;
 // リスタート世代。await を跨ぐ非同期処理(自動歩行・攻撃演出)が、restart 後に
 // 古い経路のまま新しいダンジョンを触らないよう、世代が変わったら打ち切る。
 let runSeq = 0;
+// ファストトラベル(walkPath)が進行中か。cancelTravel はこのときだけ runSeq を進めて
+// 打ち切る(攻撃演出など他の busy 処理を巻き込まないためのガード)。
+let traveling = false;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -653,25 +658,30 @@ export const useRogue = create<RogueState>((set, get) => {
   /** 経路を1歩=1ターンで自動歩行。敵に気づかれた/攻撃されたら中断。 */
   async function walkPath(path: Cell[]): Promise<void> {
     const run = runSeq;
+    traveling = true;
     set({ busy: true, reach: { cells: [], parent: new Map() }, hoverBeastId: null, hoverMarker: null });
-    for (let i = 1; i < path.length; i++) {
-      if (runSeq !== run || get().phase !== 'play') break;
-      const next = path[i];
-      if (beastAt(get().beasts, cellKey(next))) break; // 起きた敵が塞いだ
-      stepPlayer(next);
-      await sleep(STEP_MS + 40);
-      if (runSeq !== run) return; // restart された
-      const interrupted = beastsTurn();
-      endTurn();
-      if (get().phase !== 'play') break;
-      if (interrupted && i < path.length - 1) {
-        pushLog('(足を止めた)');
-        break;
+    try {
+      for (let i = 1; i < path.length; i++) {
+        if (runSeq !== run || get().phase !== 'play') break;
+        const next = path[i];
+        if (beastAt(get().beasts, cellKey(next))) break; // 起きた敵が塞いだ
+        stepPlayer(next);
+        await sleep(STEP_MS + 40);
+        if (runSeq !== run) return; // restart / cancelTravel された
+        const interrupted = beastsTurn();
+        endTurn();
+        if (get().phase !== 'play') break;
+        if (interrupted && i < path.length - 1) {
+          pushLog('(足を止めた)');
+          break;
+        }
       }
+      if (runSeq !== run) return;
+      set({ busy: false });
+      refreshReach();
+    } finally {
+      traveling = false;
     }
-    if (runSeq !== run) return;
-    set({ busy: false });
-    refreshReach();
   }
 
   /** プレイヤー→敵の近接攻撃。 */
@@ -1142,6 +1152,16 @@ export const useRogue = create<RogueState>((set, get) => {
       if (get().uiMode === 'walk') return;
       sfx.play('cancel');
       set({ uiMode: 'walk', placeIndex: null });
+    },
+
+    cancelTravel: () => {
+      if (!traveling) return; // 歩行中のみ。攻撃演出などの busy は巻き込まない
+      runSeq++; // 進行中の walkPath ループを次のチェックで打ち切る
+      traveling = false;
+      sfx.play('cancel');
+      pushLog('(足を止めた)');
+      set({ busy: false });
+      refreshReach();
     },
 
     setArmed: (key) => {

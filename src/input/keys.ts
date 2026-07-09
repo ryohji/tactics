@@ -2,6 +2,7 @@
 //   TAB   : ターゲット巡回(ゲーム=部屋内の敵へ視線 / マップ=訪問済み広間を巡回)。
 //           Shift+TAB で逆順。
 //   M     : マップモード切替
+//   ESC   : ファストトラベルの中断 / マップを閉じる / 投擲・設置のキャンセル
 //   Space : 押している間、マップのドラッグを回転→移動(パン)に変える
 // ブラウザ既定(TAB のフォーカス移動・Space のスクロール)は抑止する。
 
@@ -11,6 +12,7 @@ let installed = false;
 type Handlers = {
   onCycle: (dir: 1 | -1) => void;
   onToggleMap: () => void;
+  onEscape: () => void;
 };
 
 let handlers: Handlers | null = null;
@@ -33,6 +35,8 @@ export function installKeys(h: Handlers): void {
       handlers?.onCycle(e.shiftKey ? -1 : 1);
     } else if (e.key === 'm' || e.key === 'M') {
       handlers?.onToggleMap();
+    } else if (e.key === 'Escape') {
+      handlers?.onEscape();
     } else if (e.code === 'Space') {
       e.preventDefault(); // ページスクロール抑止
       spaceHeld = true;

@@ -39,7 +39,6 @@ function SystemButtons({ onHelp }: { onHelp: () => void }) {
   const toggleMute = useRogue((s) => s.toggleMute);
   const postFx = useRogue((s) => s.postFx);
   const togglePostFx = useRogue((s) => s.togglePostFx);
-  const restart = useRogue((s) => s.restart);
   return (
     <>
       <div className="hud-system">
@@ -55,16 +54,13 @@ function SystemButtons({ onHelp }: { onHelp: () => void }) {
           ✨
         </button>
         <button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button>
-        <button onClick={() => restart()} title="最初から">
-          ↺<span className="lbl">最初から</span>
-        </button>
         <button onClick={onHelp} title="操作説明">
           ❓
         </button>
       </div>
       {mapMode && (
         <div className="hud-viewhint">
-          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回(Shift で逆順・バブルで移動) / M=戻る
+          ドラッグ=回転 / Space+ドラッグ=移動 / TAB=部屋巡回(Shift で逆順・バブルで移動) / M・ESC=戻る
         </div>
       )}
     </>
@@ -372,9 +368,10 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             <tr><td>左ドラッグ / ホイール</td><td>視点の回転 / 寄り引き</td></tr>
             <tr><td>青マーカーをクリック</td><td>移動(1歩=1ターン)。ホバーで同じ高さの範囲表示</td></tr>
             <tr><td>敵をクリック</td><td>武器リーチ内なら攻撃(ホバーで情報)</td></tr>
-            <tr><td>バブルをクリック</td><td>ファストトラベル(敵に気づかれると中断)</td></tr>
+            <tr><td>バブルをクリック</td><td>ファストトラベル(敵に気づかれる・画面タップ・ESC で中断)</td></tr>
             <tr><td>TAB / Shift+TAB</td><td>敵・部屋へ視線やフォーカスを巡回 / 逆順</td></tr>
             <tr><td>M</td><td>マップモード切替(ドラッグ=回転 / Space+ドラッグ=移動)</td></tr>
+            <tr><td>ESC</td><td>ファストトラベルの中断 / マップを閉じる</td></tr>
           </tbody>
         </table>
         <h3>タッチ(スマートフォン)</h3>
