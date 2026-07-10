@@ -532,6 +532,48 @@
 .hud-help-links { margin: 12px 0 0; font-size: 12px; }
 .hud-help-links a { color: #93c5fd; }
 
+/* --- rogue-18: 中間幅(ハーフウィンドウ・タブレット横)での重なり防止 ---
+   絶対配置のままだと下中央バーが右下ログと重なる(実測で ~1150px 以下)。
+   スマホ向けと同じ「ログ → バー」の中央縦積みに切り替える。縮小や
+   ラベル省略はしない(それは下のスマホ向けクエリの仕事で、後勝ちで上書きする)。 */
+@media (max-width: 1180px) {
+  .hud-bottomarea {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100vw - 28px);
+    pointer-events: none;
+  }
+  .hud-bottomarea .hud-log {
+    position: static;
+    width: min(64vw, 420px);
+    max-height: 80px;
+  }
+  .hud-bottomarea .hud-log div:nth-last-child(n + 4) { display: none; } /* 直近3行だけ */
+  .hud-bottomarea .hud-actions {
+    position: static;
+    transform: none;
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    pointer-events: auto;
+  }
+  /* 左下の敵情報は縦積みの下部領域より上へ */
+  .hud-unit { bottom: 160px; }
+}
+
+/* 中間幅の狭め: 体力バーを右上ボタン列と同じ段に置かない(フォント差や
+   ズームで列が伸びても重ならないよう、スマホ配置と同じく下の段へ)。 */
+@media (max-width: 900px) {
+  .hud-hp { top: 60px; }
+  .hud-viewhint { top: 104px; } /* 下げた体力バーと重ねない(マップ中) */
+}
+
 /* --- rogue-10: スマートフォン向け縮小・再配置 ---
    説明文(hint/viewhint/ボタンのラベル)を隠し、パネルを小さく・タップしやすく。 */
 @media (max-width: 760px), (max-height: 500px) {
