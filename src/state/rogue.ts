@@ -31,6 +31,7 @@ import {
   type Chamber,
 } from '../model/dungeon';
 import * as persist from './persist';
+import * as history from './history';
 import { BEASTS } from '../model/beasts';
 import {
   ITEMS,
@@ -52,6 +53,7 @@ import {
   REACH_STEPS,
   EXPAND_R,
   STRATUM_DEPTH,
+  GAME_VERSION,
   LIGHT,
   type LightLevel,
   type Beast,
@@ -73,6 +75,8 @@ import {
   weaponSweep,
   placeableCells,
   gazeAngles,
+  isoDate,
+  dailySeed,
 } from '../model/rogue/rules';
 import { discoverInto } from '../model/rogue/visibility';
 import {
@@ -108,6 +112,7 @@ export {
   PLAYER_ID,
   REACH_STEPS,
   STRATUM_DEPTH,
+  GAME_VERSION,
   LIGHT,
 } from '../model/rogue/types';
 export type {
@@ -132,6 +137,8 @@ export {
   placeableCells,
   gazeAngles,
   clearedChambers,
+  isoDate,
+  dailySeed,
 } from '../model/rogue/rules';
 export { parseSeed } from '../model/rogue/rules';
 
@@ -378,6 +385,29 @@ export const useRogue = create<RogueState>((set, get) => {
     return pathFromReach(reach, player.pos, to);
   }
 
+  /**
+   * ローカルスコアボード(rogue-20)へ今回のランを記録する。自己ベスト更新ならログを出す。
+   * endTurn の末尾(ターン数が確定した後)から、死亡直後の1回だけ呼ぶ
+   * — checkDead は beastsTurn の途中(endTurn の turn++ より前)で走るため、
+   * ここで直接呼ぶと死亡画面に表示される turn 数と1つずれる。
+   */
+  function recordRun(): void {
+    const s = get();
+    const prevBest = history.readHistory().reduce((max, r) => Math.max(max, r.maxDepth), 0);
+    history.appendRun({
+      v: GAME_VERSION,
+      seed: s.seed,
+      date: isoDate(new Date()),
+      turns: s.turn,
+      kills: s.kills,
+      maxDepth: s.maxDepth,
+      stratum: s.stratum,
+      deathCause: s.deathCause ?? '不明',
+      daily: s.seed === dailySeed(new Date()),
+    });
+    if (s.maxDepth > prevBest) pushLog('自己ベスト更新!');
+  }
+
   function checkDead(): boolean {
     const { player } = get();
     if (player.hp > 0) return false;
@@ -578,6 +608,8 @@ export const useRogue = create<RogueState>((set, get) => {
     bgm.setBgmDepth(depthOf(player.pos)); // BGM は深度で曲調が変わる
     autoSave();
     checkStratum(); // 層の警告/崩落(移動に限らずすべてのターン消費行動の後で見る)
+    // 死亡直後のこの1回だけ通る(死亡後は phase!=='play' 判定で二度と endTurn まで来ない)。
+    if (get().phase === 'dead') recordRun();
   }
 
   /** place モード: 選んだセル(足元+隣接)へ罠を設置する(1ターン)。 */

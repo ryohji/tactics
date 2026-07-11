@@ -41,6 +41,19 @@ export function irnd(rng: () => number, a: number, b: number): number {
   return a + Math.floor(rng() * (b - a + 1));
 }
 
+/** ローカル日付を 'YYYY-MM-DD' に整形(dailySeed・ラン履歴の日付表示に使う)。 */
+export function isoDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** 「本日の迷宮」(rogue-20)のシード: ローカル日付を parseSeed のハッシュ経路で数値化。 */
+export function dailySeed(date: Date): number {
+  return parseSeed(isoDate(date))!; // 日付文字列は常に非空なので undefined にはならない
+}
+
 export function beastAt(beasts: readonly Beast[], k: CellKey): Beast | undefined {
   return beasts.find((b) => b.alive && cellKey(b.pos) === k);
 }

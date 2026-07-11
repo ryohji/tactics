@@ -478,6 +478,57 @@
   box-shadow: none;
 }
 .hud-title button.discard:hover { color: #fca5a5; border-color: #b45309; transform: none; }
+
+/* --- rogue-20: 本日の迷宮ボタン(共通シード。「潜る」より控えめな2段目) --- */
+.hud-title button.daily {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  padding: 7px 20px;
+  border-color: #4c467e;
+}
+
+/* --- rogue-20: これまでの冒険(ローカル履歴。深度・討伐上位5件) --- */
+.hud-title-history {
+  margin-top: 22px;
+  padding: 12px 16px 6px;
+  width: min(420px, 82vw);
+  background: linear-gradient(160deg, rgba(26, 21, 56, 0.6), rgba(10, 8, 30, 0.7));
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  border: 1px solid rgba(128, 118, 210, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.hud-title-history-head {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #a58ee0;
+  margin-bottom: 6px;
+  text-align: left;
+}
+.hud-title-history table { width: 100%; border-collapse: collapse; }
+.hud-title-history tr {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.hud-title-history tr:hover { background: rgba(80, 72, 150, 0.28); }
+.hud-title-history td {
+  padding: 5px 4px;
+  font-size: 12px;
+  color: #d6dcec;
+  text-align: left;
+  white-space: nowrap;
+  border-top: 1px solid rgba(128, 118, 210, 0.18);
+}
+.hud-title-history td.depth { color: #fde68a; font-variant-numeric: tabular-nums; }
+.hud-title-history td.cause { color: #fca5a5; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
+.hud-title-history td.seed { color: #7d8aa5; font-size: 11px; }
+.hud-title-history td.daily-mark { width: 1.4em; }
+.hud-title-history tr.old-version td { color: #6b7185; }
+.hud-title-history tr.old-version td.depth { color: #8a825f; }
+.hud-title-history tr.old-version td.cause { color: #8a6a6a; }
+
 @keyframes title-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -663,6 +714,13 @@
   .hud-score { font-size: 15px; }
   .hud-score-sub { font-size: 11px; padding: 0 16px; text-align: center; }
   .hud-bubble { font-size: 10px; padding: 4px 9px; }
+
+  .hud-title button.daily { font-size: 11px; padding: 6px 14px; }
+  .hud-title-history { width: min(320px, 90vw); padding: 9px 10px 4px; margin-top: 16px; }
+  .hud-title-history-head { font-size: 10px; }
+  .hud-title-history td { padding: 4px 3px; font-size: 10px; }
+  .hud-title-history td.cause { max-width: 56px; }
+  .hud-title-history td.seed { font-size: 9px; }
 }
 
 /* --- ダメージポップアップ（Effects の Html） --- */

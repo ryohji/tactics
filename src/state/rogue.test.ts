@@ -16,6 +16,7 @@ import {
   type Beast,
 } from './rogue';
 import * as persist from './persist';
+import * as history from './history';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
 
@@ -812,5 +813,73 @@ describe('層リセット(rogue-19b)', () => {
     } finally {
       persist.setStorageForTest(null);
     }
+  });
+});
+
+describe('ローカルスコアボード(rogue-20)', () => {
+  it('死亡すると今回のランが履歴へ記録される', () => {
+    history.setHistoryStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      placeBeastAdjacent('drake');
+      useRogue.setState({ player: { ...player(), hp: 1 } });
+      useRogue.getState().wait();
+      const s = useRogue.getState();
+      expect(s.phase).toBe('dead');
+      const h = history.readHistory();
+      expect(h).toHaveLength(1);
+      expect(h[0].seed).toBe(s.seed);
+      expect(h[0].maxDepth).toBe(s.maxDepth);
+      expect(h[0].kills).toBe(s.kills);
+      expect(h[0].turns).toBe(s.turn);
+      expect(h[0].stratum).toBe(s.stratum);
+      expect(h[0].deathCause).toBe(s.deathCause);
+      expect(h[0].v).toBe('r19');
+    } finally {
+      history.setHistoryStorageForTest(null);
+    }
+  });
+
+  it('自己ベスト(最深到達)を更新するとログに出る', () => {
+    history.setHistoryStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      useRogue.setState({ maxDepth: 3 }); // 履歴が空なので必ず自己ベスト
+      placeBeastAdjacent('drake');
+      useRogue.setState({ player: { ...player(), hp: 1 } });
+      useRogue.getState().wait();
+      expect(useRogue.getState().log.some((m) => m.includes('自己ベスト'))).toBe(true);
+    } finally {
+      history.setHistoryStorageForTest(null);
+    }
+  });
+
+  it('自己ベストに届かなければログに出ない', () => {
+    history.setHistoryStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      history.appendRun({
+        v: 'r19',
+        seed: 999,
+        date: '2026-01-01',
+        turns: 1,
+        kills: 0,
+        maxDepth: 999, // 到底届かない自己ベスト
+        stratum: 0,
+        deathCause: 'テスト',
+        daily: false,
+      });
+      placeBeastAdjacent('drake');
+      useRogue.setState({ player: { ...player(), hp: 1 } });
+      useRogue.getState().wait();
+      expect(useRogue.getState().log.some((m) => m.includes('自己ベスト'))).toBe(false);
+    } finally {
+      history.setHistoryStorageForTest(null);
+    }
+  });
+
+  it('Node 環境相当(storage 未設定)ではシミュレータ経由でも履歴が汚れない', () => {
+    // setHistoryStorageForTest を呼ばない = デフォルトの no-op storage のまま。
+    placeBeastAdjacent('drake');
+    useRogue.setState({ player: { ...player(), hp: 1 } });
+    expect(() => useRogue.getState().wait()).not.toThrow();
+    expect(history.readHistory()).toEqual([]);
   });
 });

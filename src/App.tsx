@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { RogueScene } from './render/RogueScene';
 import { RogueHud } from './ui/RogueHud';
-import { useRogue, parseSeed } from './state/rogue';
+import { useRogue, parseSeed, dailySeed, GAME_VERSION } from './state/rogue';
 import { hasSave, clearSave } from './state/persist';
+import { readHistory } from './state/history';
 import { installKeys } from './input/keys';
 import { installTouchFlag } from './input/touch';
 import { unlock } from './audio/sfx';
@@ -80,6 +81,13 @@ function TitleOverlay() {
     if (useRogue.getState().resume()) setEntered(true);
     else setSaved(false); // 壊れた保存などで再開できなければボタンを引っ込める
   };
+  // 本日の迷宮: 「新しく潜る」と同じ扱い(restart が前の保存を破棄する)。
+  const enterDaily = () => {
+    unlock();
+    startBgm();
+    useRogue.getState().restart(dailySeed(new Date()));
+    setEntered(true);
+  };
   return (
     <div className="hud-title">
       <div className="hud-title-inner">
@@ -109,6 +117,15 @@ function TitleOverlay() {
             {saved ? '新しく潜る' : '潜る'}
           </button>
         </div>
+        <div className="hud-title-buttons">
+          <button
+            className="secondary daily"
+            onClick={enterDaily}
+            title="今日一日だけの共通シード。同じ迷宮でみんなが競える(「新しく潜る」と同じく前の保存は破棄される)"
+          >
+            📅 本日の迷宮
+          </button>
+        </div>
         {saved && (
           <button
             className="discard"
@@ -121,8 +138,45 @@ function TitleOverlay() {
             保存データを破棄
           </button>
         )}
+        <HistoryPanel onPick={(seed) => setSeedInput(String(seed))} />
         <div className="hud-title-hint">ドラッグ=視点 / 青マーカー=移動 / M=マップ / TAB=敵に視線</div>
       </div>
+    </div>
+  );
+}
+
+/** タイトル画面: 「これまでの冒険」— ローカル履歴(rogue-20)から深度・討伐上位5件。
+    行クリックでそのシードをシード入力欄へ流し込む(同じ迷宮に再挑戦できる)。 */
+function HistoryPanel({ onPick }: { onPick: (seed: number) => void }) {
+  const [list] = useState(() => readHistory()); // タイトル表示中は変わらないので初回だけ読む
+  if (list.length === 0) return null;
+  const top5 = [...list].sort((a, b) => b.maxDepth - a.maxDepth || b.kills - a.kills).slice(0, 5);
+  return (
+    <div className="hud-title-history">
+      <div className="hud-title-history-head">これまでの冒険</div>
+      <table>
+        <tbody>
+          {top5.map((r, i) => {
+            const old = r.v !== GAME_VERSION;
+            return (
+              <tr
+                key={i}
+                className={old ? 'old-version' : undefined}
+                title={old ? '旧バージョンの記録(現在のバランスと異なる)' : undefined}
+                onClick={() => onPick(r.seed)}
+              >
+                <td className="depth">深度{r.maxDepth}</td>
+                <td>討伐{r.kills}</td>
+                <td>{r.turns}T</td>
+                <td className="cause">{r.deathCause}</td>
+                <td>{r.date.slice(5).replace('-', '/')}</td>
+                <td className="daily-mark">{r.daily ? '📅' : ''}</td>
+                <td className="seed">#{r.seed}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
