@@ -16,6 +16,8 @@ export const PLAYER_ID = 0;
 export const REACH_STEPS = 2;
 /** スタブ終端がこの距離に入ると次の広間が生成される。 */
 export const EXPAND_R = 5;
+/** 層リセット(rogue-19b)の1層ぶんの深度。この深度ごとに崩落の関門を挟む。 */
+export const STRATUM_DEPTH = 8;
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -44,6 +46,8 @@ export interface Beast {
   awake: boolean;
   alive: boolean;
   status: BeastStatus | null;
+  /** 倒したときに落とす戦利品(湧き時に事前ロール済み。rogue-19b)。無ければ null。 */
+  carry: ItemStack | null;
 }
 
 export interface GroundItem {
@@ -113,17 +117,24 @@ export type GameEvent =
   | { kind: 'exploreRev' };
 
 /**
+ * 行動ログの1エントリ: [発生ターン, 操作コード, ...引数]。将来の再生器(rogue-26)に
+ * 備えた記録のみで、今は誰も読まない。cancelTravel など非同期割り込みの再現に
+ * turn 付きが要るため先頭に turn を入れる。
+ */
+export type ActionLogEntry = [number, string, ...(number | string)[]];
+
+/**
  * localStorage(persist.ts)に置くスナップショット。Set/Map は配列化する。
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 2: rogue-16 スロット式生成(旧 v1 の迷宮とは非互換)。 */
-  v: 2;
+  /** 3: rogue-19b 層リセット(cutLayer・stratum・行動ログ・敵の持ち物事前ロール)。旧 v2 は非互換。 */
+  v: 3;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;
   seqs: { beast: number; item: number; device: number };
-  dungeon: { open: CellKey[]; chambers: Chamber[]; stubs: Stub[]; rev: number };
+  dungeon: { open: CellKey[]; chambers: Chamber[]; stubs: Stub[]; rev: number; cutLayer: number };
   discovered: CellKey[];
   cellChamber: [CellKey, number][];
   visitedChambers: number[];
@@ -137,5 +148,8 @@ export interface SaveData {
   turn: number;
   kills: number;
   maxDepth: number;
+  /** 通過済みの層数(rogue-19b)。 */
+  stratum: number;
+  actionLog: ActionLogEntry[];
   log: string[];
 }

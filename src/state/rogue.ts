@@ -17,7 +17,7 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { cellKey, keyToCell, type Cell, type CellKey } from '../model/fcc';
+import { cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
@@ -26,6 +26,7 @@ import {
   distW,
   adjacent,
   stepDist,
+  collapseAbove,
   type Dungeon,
   type Chamber,
 } from '../model/dungeon';
@@ -33,7 +34,6 @@ import * as persist from './persist';
 import { BEASTS } from '../model/beasts';
 import {
   ITEMS,
-  lootTable,
   itemLabel,
   stackHeal,
   stackDmg,
@@ -51,6 +51,7 @@ import {
   PLAYER_ID,
   REACH_STEPS,
   EXPAND_R,
+  STRATUM_DEPTH,
   LIGHT,
   type LightLevel,
   type Beast,
@@ -61,6 +62,7 @@ import {
   type RogueFx,
   type PlayerState,
   type SaveData,
+  type ActionLogEntry,
 } from '../model/rogue/types';
 import {
   BURN_DMG,
@@ -105,6 +107,7 @@ export {
   ROGUE_S,
   PLAYER_ID,
   REACH_STEPS,
+  STRATUM_DEPTH,
   LIGHT,
 } from '../model/rogue/types';
 export type {
@@ -118,6 +121,7 @@ export type {
   RogueFx,
   PlayerState,
   SaveData,
+  ActionLogEntry,
 } from '../model/rogue/types';
 export {
   depthOf,
@@ -154,6 +158,8 @@ export interface RogueState {
   turn: number;
   kills: number;
   maxDepth: number;
+  /** 通過済みの層数(rogue-19b)。深度 STRATUM_DEPTH*(stratum+1)+2 で次の崩落。 */
+  stratum: number;
   phase: 'play' | 'dead';
   busy: boolean;
   /** walk=移動 / throw=投擲対象選択 / place=罠の設置先選択(足元+隣接)。 */
@@ -250,9 +256,27 @@ let runSeq = 0;
 // ファストトラベル(walkPath)が進行中か。cancelTravel はこのときだけ runSeq を進めて
 // 打ち切る(攻撃演出など他の busy 処理を巻き込まないためのガード)。
 let traveling = false;
+// 現在の層で「もうすぐ崩落する」警告を出したか(層ごとに restart/崩落でリセット)。
+let stratumWarned = false;
+// 行動ログ(rogue-19b)。将来の再生器(rogue-26)向けの記録のみ。restart でリセット。
+let actionLog: ActionLogEntry[] = [];
+
+// 演出待ちの時間スケール(既定1)。シミュレータ(rogue-19a)が待ち時間だけを
+// 詰めて headless 高速実行するためのフック。挙動・乱数列には影響しない。
+let timeScale = 1;
+
+/** テスト/シミュレータ用: 演出待ちの時間スケールを変える。scale=0 で実質即解決。 */
+export function setTimeScaleForTest(scale: number): void {
+  timeScale = scale;
+}
+
+/** テスト用: 現在の行動ログを読む(rogue-19b。actionLog はモジュール変数で外から見えないため)。 */
+export function getActionLogForTest(): readonly ActionLogEntry[] {
+  return actionLog;
+}
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms * timeScale));
 }
 
 // --- ストア本体 -------------------------------------------------------------------
@@ -267,6 +291,11 @@ export const useRogue = create<RogueState>((set, get) => {
 
   function pushLog(msg: string): void {
     set({ log: [...get().log.slice(-7), msg] });
+  }
+
+  /** 状態を変えるアクションの入口で呼ぶ(将来の再生器 rogue-26 向けの記録のみ)。 */
+  function logAction(code: string, ...args: (number | string)[]): void {
+    actionLog.push([get().turn, code, ...args]);
   }
 
   /** model/rogue/combat.ts など純関数が返す GameEvent[] をまとめて実行する。 */
@@ -548,6 +577,7 @@ export const useRogue = create<RogueState>((set, get) => {
     set({ turn });
     bgm.setBgmDepth(depthOf(player.pos)); // BGM は深度で曲調が変わる
     autoSave();
+    checkStratum(); // 層の警告/崩落(移動に限らずすべてのターン消費行動の後で見る)
   }
 
   /** place モード: 選んだセル(足元+隣接)へ罠を設置する(1ターン)。 */
@@ -584,7 +614,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const s = get();
     if (s.phase !== 'play') return;
     const data: SaveData = {
-      v: 2,
+      v: 3,
       seed: s.seed,
       rng: rngState,
       seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
@@ -593,6 +623,7 @@ export const useRogue = create<RogueState>((set, get) => {
         chambers: s.dungeon.chambers,
         stubs: s.dungeon.stubs,
         rev: s.dungeon.rev,
+        cutLayer: s.dungeon.cutLayer,
       },
       discovered: [...s.discovered],
       cellChamber: [...s.cellChamber],
@@ -607,9 +638,60 @@ export const useRogue = create<RogueState>((set, get) => {
       turn: s.turn,
       kills: s.kills,
       maxDepth: s.maxDepth,
+      stratum: s.stratum,
+      actionLog,
       log: s.log.slice(-8),
     };
     persist.writeSave(data);
+  }
+
+  /**
+   * 層の崩落(rogue-19b)を発動する: cutLayer より上を崩落させ、二度と戻れなくする。
+   * dungeon 本体は collapseAbove が刈る。ここでは store 側の他の集合(discovered・
+   * cellChamber・地上アイテム・罠・砲塔・囮・敵)を同じ cutLayer で刈り、stratum を進める。
+   */
+  function triggerCollapse(stratum: number): void {
+    const s = get();
+    const cutLayer = -4 * (STRATUM_DEPTH * (stratum + 1) - 1);
+    collapseAbove(s.dungeon, cutLayer);
+    const alive = (k: CellKey) => layer(keyToCell(k)) <= cutLayer;
+    set({
+      discovered: new Set([...s.discovered].filter(alive)),
+      discoveredRev: s.discoveredRev + 1,
+      cellChamber: new Map([...s.cellChamber].filter(([k]) => alive(k))),
+      items: s.items.filter((i) => layer(i.pos) <= cutLayer),
+      traps: s.traps.filter((t) => layer(t.pos) <= cutLayer),
+      turrets: s.turrets.filter((t) => layer(t.pos) <= cutLayer),
+      decoys: s.decoys.filter((d) => layer(d.pos) <= cutLayer),
+      beasts: s.beasts.filter((b) => layer(b.pos) <= cutLayer),
+      stratum: stratum + 1,
+      exploreRev: s.exploreRev + 1,
+    });
+    pushLog('背後で巣が崩れ落ちた。もう戻れない —');
+    sfx.play('death');
+    stratumWarned = false;
+    refreshReach();
+    autoSave();
+  }
+
+  /**
+   * 層の関門(rogue-19b): 深度が警告ライン(STRATUM_DEPTH*(stratum+1))・
+   * 崩落ライン(その+2)を跨いだかを見る。endTurn(移動に限らずすべてのターン
+   * 消費行動の後)から呼ぶ — wait で足踏みしていても境界を越えていれば発火する。
+   */
+  function checkStratum(): void {
+    const s = get();
+    if (s.phase !== 'play') return;
+    const depth = depthOf(s.player.pos);
+    const warnAt = STRATUM_DEPTH * (s.stratum + 1);
+    if (depth >= warnAt + 2) {
+      triggerCollapse(s.stratum);
+      return;
+    }
+    if (depth >= warnAt && !stratumWarned) {
+      stratumWarned = true;
+      pushLog('頭上の土がきしみ、砂がこぼれ落ちる…(これより深くへ進むと戻れない)');
+    }
   }
 
   /** プレイヤーを隣へ1歩(発見・拡張・拾得・訪問記録込み)。 */
@@ -731,13 +813,10 @@ export const useRogue = create<RogueState>((set, get) => {
       if (get().visitedChambers.has(b.homeChamber)) pushLog('この空間は静かになった…');
       set({ exploreRev: get().exploreRev + 1 });
     }
-    // たまに戦利品を落とす。
-    if (rand() < 0.3) {
-      const drop = lootTable(Math.max(1, depthOf(b.pos)), rand)[0];
-      if (drop) {
-        get().items.push({ id: itemSeq++, stack: drop, pos: b.pos });
-        set({ items: [...get().items] });
-      }
+    // 戦利品は湧き時に前倒し抽選済み(rogue-19b)。倒れたらそれを落とすだけ。
+    if (b.carry) {
+      get().items.push({ id: itemSeq++, stack: b.carry, pos: b.pos });
+      set({ items: [...get().items] });
     }
   }
 
@@ -775,7 +854,7 @@ export const useRogue = create<RogueState>((set, get) => {
     RogueState,
     | 'seed' | 'dungeon' | 'discovered' | 'discoveredRev' | 'player' | 'beasts' | 'items'
     | 'traps' | 'turrets' | 'decoys' | 'lightLevel'
-    | 'turn' | 'kills' | 'maxDepth' | 'phase' | 'busy' | 'uiMode' | 'placeIndex' | 'reach'
+    | 'turn' | 'kills' | 'maxDepth' | 'stratum' | 'phase' | 'busy' | 'uiMode' | 'placeIndex' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'armedKey' | 'focus' | 'log' | 'fx'
     | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
   > {
@@ -824,6 +903,7 @@ export const useRogue = create<RogueState>((set, get) => {
       turn: 0,
       kills: 0,
       maxDepth: 0,
+      stratum: 0,
       phase: 'play',
       busy: false,
       uiMode: 'walk',
@@ -852,6 +932,8 @@ export const useRogue = create<RogueState>((set, get) => {
       resetView();
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
+      stratumWarned = false;
+      actionLog = [];
       if (!opts?.keepSave) persist.clearSave(); // 新しい冒険を始めたら前の保存は破棄
       bgm.setBgmScene('game');
       bgm.setBgmDepth(0);
@@ -867,12 +949,14 @@ export const useRogue = create<RogueState>((set, get) => {
 
     resume: () => {
       const d = persist.readSave<SaveData>();
-      if (!d || d.v !== 2) return false;
+      if (!d || d.v !== 3) return false;
       resetView();
       clearUnitAnims();
       runSeq++; // 進行中の自動歩行などを打ち切る
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
+      stratumWarned = false; // 保存には無い(層の途中で境界近くなら再掲されるだけ)
+      actionLog = d.actionLog;
       beastSeq = d.seqs.beast;
       itemSeq = d.seqs.item;
       deviceSeq = d.seqs.device;
@@ -887,6 +971,7 @@ export const useRogue = create<RogueState>((set, get) => {
         seed: d.seed,
         rng: lcg(d.seed), // 生成はすべて座標導出 rng なのでこの値は使われない
         rev: d.dungeon.rev,
+        cutLayer: d.dungeon.cutLayer,
       };
       set({
         seed: d.seed,
@@ -906,6 +991,7 @@ export const useRogue = create<RogueState>((set, get) => {
         turn: d.turn,
         kills: d.kills,
         maxDepth: d.maxDepth,
+        stratum: d.stratum,
         phase: 'play',
         busy: false,
         uiMode: 'walk',
@@ -926,6 +1012,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     clickCell: (c) => {
+      logAction('C', c[0], c[1], c[2]);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       if (s.uiMode === 'throw') return;
@@ -941,6 +1028,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     clickBeast: (id) => {
+      logAction('B', id);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       const b = s.beasts.find((x) => x.id === id);
@@ -959,6 +1047,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     useItem: (index) => {
+      logAction('U', index);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       const stack = s.player.pack[index];
@@ -1063,6 +1152,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     unequip: (slot) => {
+      logAction('Q', slot);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       const player = s.player;
@@ -1076,6 +1166,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     mergeItem: (index) => {
+      logAction('M', index);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       const a = s.player.pack[index];
@@ -1102,6 +1193,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     cycleLight: () => {
+      logAction('L');
       const s = get();
       if (s.phase !== 'play') return;
       const l = ((s.lightLevel + 1) % 3) as LightLevel;
@@ -1113,6 +1205,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     wait: () => {
+      logAction('W');
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       set({ uiMode: 'walk' });
@@ -1122,6 +1215,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     travelTo: (c) => {
+      logAction('T', c[0], c[1], c[2]);
       const s = get();
       if (s.phase !== 'play' || s.busy || s.uiMode === 'throw') return;
       const path = findPath(c);
@@ -1134,6 +1228,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     travelToChamber: (id) => {
+      logAction('TC', id);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       if (s.mapMode) get().toggleMap(); // ゲーム画面へ戻ってから歩く
@@ -1149,12 +1244,14 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     cancelThrow: () => {
+      logAction('X');
       if (get().uiMode === 'walk') return;
       sfx.play('cancel');
       set({ uiMode: 'walk', placeIndex: null });
     },
 
     cancelTravel: () => {
+      logAction('XT');
       if (!traveling) return; // 歩行中のみ。攻撃演出などの busy は巻き込まない
       runSeq++; // 進行中の walkPath ループを次のチェックで打ち切る
       traveling = false;

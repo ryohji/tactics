@@ -31,6 +31,9 @@ export function spawnChamber(
     const pos = takeSpot();
     if (!pos) break;
     const def = BEASTS[kind];
+    // 持ち物は湧きの時点で前倒し抽選する(rogue-19b)。倒したときの抽選(30%・
+    // lootTable)と同じ確率・同じテーブルだが、rng はこの広間の湧き rng を使う。
+    const carry = rng() < 0.3 ? (lootTable(Math.max(1, depth), rng)[0] ?? null) : null;
     beasts.push({
       id: nextBeastId(),
       kind,
@@ -43,6 +46,7 @@ export function spawnChamber(
       awake: false,
       alive: true,
       status: null,
+      carry,
     });
   }
 

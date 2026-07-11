@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cellKey, layer } from './fcc';
+import { cellKey, keyToCell, layer } from './fcc';
 import {
   createDungeon,
   expandAt,
@@ -8,6 +8,7 @@ import {
   distW,
   stepDist,
   slotKeyOfCell,
+  collapseAbove,
 } from './dungeon';
 
 describe('stepDist(FCC 最短歩数)', () => {
@@ -166,5 +167,66 @@ describe('expandAt / maybeExpand', () => {
         expect(distW(st.mouth, home.center)).toBeLessThanOrEqual(home.r + 3); // 遠端ではない
       }
     }
+  });
+});
+
+describe('collapseAbove(層リセット・rogue-19b)', () => {
+  it('cutLayer より上の open セルが刈られ、rev が進む', () => {
+    const dg = createDungeon(11);
+    for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+    const revBefore = dg.rev;
+    const before = dg.open.size;
+    collapseAbove(dg, -5);
+    expect(dg.rev).toBeGreaterThan(revBefore);
+    expect(dg.open.size).toBeLessThan(before);
+    for (const k of dg.open) expect(layer(keyToCell(k))).toBeLessThanOrEqual(-5);
+  });
+
+  it('cutLayer より上の広間は墓標化(cells=[]・collapsed=true)され、id は配列から抜かれない', () => {
+    const dg = createDungeon(11);
+    for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+    const idsBefore = dg.chambers.map((c) => c.id);
+    collapseAbove(dg, -5);
+    expect(dg.chambers.map((c) => c.id)).toEqual(idsBefore); // 配列から抜かない
+    let sawCollapsed = false;
+    let sawSurvivor = false;
+    for (const ch of dg.chambers) {
+      if (layer(ch.center) > -5) {
+        expect(ch.collapsed).toBe(true);
+        expect(ch.cells).toEqual([]);
+        sawCollapsed = true;
+      } else {
+        expect(ch.collapsed ?? false).toBe(false);
+        sawSurvivor = true;
+      }
+    }
+    expect(sawCollapsed).toBe(true);
+    expect(sawSurvivor).toBe(true);
+  });
+
+  it('崩落面より上のスロットは(明示的に expandAt を呼んでも)二度と実体化しない', () => {
+    const dg = createDungeon(11);
+    for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+    const cutLayer = -5;
+    collapseAbove(dg, cutLayer);
+    const before = dg.chambers.length;
+    const shallowStub = dg.stubs.find((st) => layer(st.exit) > cutLayer - 8);
+    expect(shallowStub).toBeDefined();
+    const ch = expandAt(dg, shallowStub!);
+    expect(ch).toBeNull();
+    expect(dg.chambers.length).toBe(before);
+  });
+
+  it('崩落後も cutLayer より深いスタブは正常に拡張できる', () => {
+    const dg = createDungeon(11);
+    for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+    const cutLayer = -5;
+    collapseAbove(dg, cutLayer);
+    const before = dg.chambers.length;
+    const deepStub = dg.stubs.find((st) => !st.used && layer(st.exit) <= cutLayer - 8);
+    expect(deepStub).toBeDefined();
+    const ch = expandAt(dg, deepStub!);
+    expect(ch).not.toBeNull();
+    expect(dg.chambers.length).toBe(before + 1);
   });
 });

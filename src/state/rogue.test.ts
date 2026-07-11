@@ -4,7 +4,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
 import type { ItemStack } from '../model/loot';
-import { useRogue, seedRogueRng, parseSeed, depthOf, playerAtk, clearedChambers, gazeAngles, type Beast } from './rogue';
+import {
+  useRogue,
+  seedRogueRng,
+  parseSeed,
+  depthOf,
+  playerAtk,
+  clearedChambers,
+  gazeAngles,
+  getActionLogForTest,
+  type Beast,
+} from './rogue';
 import * as persist from './persist';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
@@ -41,6 +51,7 @@ function placeBeastAdjacent(kind: keyof typeof BEASTS, hp?: number): Beast {
     awake: true,
     alive: true,
     status: null,
+    carry: null,
   };
   useRogue.setState({ beasts: [...s.beasts, b] });
   return b;
@@ -372,6 +383,7 @@ describe('設置物(rogue-4)', () => {
       awake: true,
       alive: true,
       status: null,
+      carry: null,
     };
     useRogue.setState({ beasts: [...useRogue.getState().beasts, beast] });
     const traps0 = useRogue.getState().traps.length;
@@ -444,6 +456,7 @@ describe('深層拡張(rogue-9)', () => {
       awake: true,
       alive: true,
       status: null,
+      carry: null,
     };
     useRogue.setState({ beasts: [...useRogue.getState().beasts, b] });
     return b;
@@ -619,6 +632,7 @@ describe('マップモードとターゲット巡回', () => {
       awake: true,
       alive: true,
       status: null,
+      carry: null,
     };
     useRogue.setState({ beasts: [...s.beasts, b2] });
     // 逆順の最初は「距離順の最後」= 遠い方(901)。
@@ -702,5 +716,101 @@ describe('敵の縄張り', () => {
     const after = useRogue.getState().beasts.find((x) => x.id === b.id)!;
     // 何ターン経っても階層下限(層0)より下へは踏み込まない。
     expect(layer(after.pos)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('層リセット(rogue-19b)', () => {
+  // layer=(x+y+z)/2, depthOf=round(-layer/4)。STRATUM_DEPTH=8 なので
+  // 警告ライン=8・崩落ライン=10(層0→1のとき cutLayer=-4*(8*1-1)=-28)。
+  const deep: [number, number, number] = [0, -88, 0]; // layer=-44 → depth=11(崩落ラインを超える)
+  const deepNear: [number, number, number] = [1, -87, 0]; // deep の隣接セル
+  const warnPos: [number, number, number] = [0, -72, 0]; // layer=-36 → depth=9(警告ライン以上・崩落ライン未満)
+
+  function bat(id: number, pos: [number, number, number], carry: ItemStack | null = null): Beast {
+    return {
+      id,
+      kind: 'bat',
+      pos,
+      hp: BEASTS.bat.hp,
+      home: pos,
+      homeChamber: 0,
+      layerFloor: -999,
+      layerCeil: 999,
+      awake: false,
+      alive: true,
+      status: null,
+      carry,
+    };
+  }
+
+  it('崩落ラインを跨ぐと open/discovered が縮み、上層の敵が消え、stratum が増える', () => {
+    const s0 = useRogue.getState();
+    s0.dungeon.open.add(cellKey(deep));
+    s0.dungeon.open.add(cellKey(deepNear));
+    useRogue.setState({
+      discovered: new Set([...s0.discovered, cellKey(deep), cellKey(deepNear)]),
+      beasts: [...s0.beasts, bat(970, [0, 0, 0]), bat(971, deepNear)],
+      player: { ...s0.player, pos: deep },
+    });
+    expect(useRogue.getState().dungeon.open.has('0,0,0')).toBe(true); // 崩落前は入口が開いている
+
+    useRogue.getState().wait();
+
+    const s = useRogue.getState();
+    expect(s.stratum).toBe(1);
+    expect(s.dungeon.cutLayer).toBe(-28);
+    expect(s.dungeon.open.has('0,0,0')).toBe(false); // 入口(layer 0)は崩落
+    expect(s.dungeon.open.has(cellKey(deep))).toBe(true); // 深い側は残る
+    expect(s.discovered.has('0,0,0')).toBe(false);
+    expect(s.discovered.has(cellKey(deep))).toBe(true);
+    expect(s.beasts.some((b) => b.id === 970)).toBe(false); // 上層の敵は消える
+    expect(s.beasts.some((b) => b.id === 971)).toBe(true); // 深い側の敵は残る
+    expect(s.log.at(-1)).toContain('崩れ落ちた');
+    expect(s.dungeon.chambers[0].collapsed).toBe(true); // 入口も墓標化(id は残る)
+  });
+
+  it('警告ラインでは一度だけログが出て、崩落ラインに届くまでは崩落しない', () => {
+    useRogue.setState({ player: { ...player(), pos: warnPos } });
+    useRogue.getState().wait();
+    const s1 = useRogue.getState();
+    expect(s1.stratum).toBe(0);
+    expect(s1.log.some((m) => m.includes('きしみ'))).toBe(true);
+
+    useRogue.getState().wait(); // 同じ深度で足踏みしても警告は繰り返さない
+    const s2 = useRogue.getState();
+    expect(s2.stratum).toBe(0);
+    expect(s2.log.filter((m) => m.includes('きしみ')).length).toBe(1);
+  });
+
+  it('崩落後のセーブ→resume で cutLayer・stratum・敵の持ち物・行動ログが復元される', () => {
+    persist.setStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      const s0 = useRogue.getState();
+      s0.dungeon.open.add(cellKey(deep));
+      useRogue.setState({
+        discovered: new Set([...s0.discovered, cellKey(deep)]),
+        beasts: [...s0.beasts, bat(972, deep, { item: 'potion', q: 1 })],
+        player: { ...s0.player, pos: deep },
+      });
+      useRogue.getState().clickCell(deep); // 行動ログに1件残す(reach 外なので移動自体は起きない)
+      useRogue.getState().wait(); // 崩落発動 + 自動保存
+      expect(useRogue.getState().stratum).toBe(1);
+      const savedLog = getActionLogForTest();
+      expect(savedLog.length).toBeGreaterThan(0);
+
+      const raw = persist.readSave<object>();
+      useRogue.getState().restart(99); // 保存は破棄され、actionLog もリセットされる
+      expect(useRogue.getState().resume()).toBe(false);
+      persist.writeSave(raw); // 「リロード後の再開」を再現
+      expect(useRogue.getState().resume()).toBe(true);
+
+      const s = useRogue.getState();
+      expect(s.stratum).toBe(1);
+      expect(s.dungeon.cutLayer).toBe(-28);
+      expect(s.beasts.find((b) => b.id === 972)?.carry).toEqual({ item: 'potion', q: 1 });
+      expect(getActionLogForTest()).toEqual(savedLog);
+    } finally {
+      persist.setStorageForTest(null);
+    }
   });
 });

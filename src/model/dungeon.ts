@@ -21,7 +21,7 @@
 // 深さ: スロット1段の下降はレイヤ約10に相当するため、ゲーム側の深度表示
 // (rogue.ts depthOf)はレイヤ/4 に換算して従来のペース(1部屋あたり+2〜3)を保つ。
 
-import { OFFSETS, cellKey, keyToCell, latticeAt, nearestFCC, worldPos, type Cell, type CellKey } from './fcc';
+import { OFFSETS, cellKey, keyToCell, latticeAt, layer, nearestFCC, worldPos, type Cell, type CellKey } from './fcc';
 
 export interface Chamber {
   id: number;
@@ -30,6 +30,8 @@ export interface Chamber {
   r: number;
   /** 広間を構成する空洞セル(通路は含まない)。敵・宝の湧き位置に使う。 */
   cells: CellKey[];
+  /** 崩落(rogue-19b)で墓標化(cells=[])されたか。id は配列添字と一致するため抜かない。 */
+  collapsed?: boolean;
 }
 
 /** 掘りかけ通路の終端(=隣接スロットのアンカー)。近づくと広間が実体化する。 */
@@ -55,6 +57,11 @@ export interface Dungeon {
   rng: () => number;
   /** 掘削のたびに増える(描画・テストの変更検知用)。 */
   rev: number;
+  /**
+   * 崩落面(rogue-19b)。この layer より上は崩落済み。初期値は崩落なしを表す
+   * 十分大きい JSON 安全な整数(Infinity は JSON にできないので使わない)。
+   */
+  cutLayer: number;
 }
 
 /** 格子ワールド距離(S=1 の worldPos 間ユークリッド)。 */
@@ -324,6 +331,8 @@ function materializeSlot(dg: Dungeon, s: Slot): Chamber | null {
   const key = slotKey(s);
   if (dg.slots.has(key) || !slotExists(dg.seed, s)) return null;
   const { anchor, r } = profile(dg.seed, s);
+  // 崩落面の近く・上には二度と生成しない(-8 は広間半径ぶんの余白)。
+  if (layer(anchor) > dg.cutLayer - 8) return null;
   const cells = carveChamber(dg, s, anchor, r);
   const ch: Chamber = { id: dg.chambers.length, center: anchor, r, cells };
   dg.chambers.push(ch);
@@ -396,9 +405,35 @@ export function createDungeon(seed: number): Dungeon {
     seed,
     rng: lcg(seed),
     rev: 0,
+    cutLayer: 1e9,
   };
   materializeSlot(dg, [0, 0, 0]);
   return dg;
+}
+
+/**
+ * 層リセット(rogue-19b): cutLayer より上を崩落させ、二度と戻れなくする。
+ * - open からその層より上のセルを削る
+ * - 中心がその層より上の広間は墓標化(cells=[]・collapsed=true。id は配列添字と
+ *   一致する不変条件があるので配列からは抜かない)
+ * - 出口がその層+余白より上のスタブは used に落とす(materializeSlot の
+ *   ガードと合わせて、境界付近が二度と実体化しないようにする)
+ */
+export function collapseAbove(dg: Dungeon, cutLayer: number): void {
+  dg.cutLayer = cutLayer;
+  for (const k of dg.open) {
+    if (layer(keyToCell(k)) > cutLayer) dg.open.delete(k);
+  }
+  for (const ch of dg.chambers) {
+    if (!ch.collapsed && layer(ch.center) > cutLayer) {
+      ch.cells = [];
+      ch.collapsed = true;
+    }
+  }
+  for (const st of dg.stubs) {
+    if (layer(st.exit) > cutLayer - 8) st.used = true;
+  }
+  dg.rev++;
 }
 
 /** 入口から到達可能な空洞セル数(テスト・整合性確認用)。 */
