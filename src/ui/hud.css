@@ -310,6 +310,14 @@
 .equip-slot .slot-name { color: #d9a441; font-size: 10px; flex-shrink: 0; }
 .equip-slot .slot-item { flex: 1; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .equip-slot .slot-item.empty { color: #64748b; }
+.equip-slot .slot-tag {
+  margin-left: 5px;
+  padding: 0 4px;
+  font-size: 9px;
+  color: #c4b5fd;
+  border: 1px solid rgba(196, 181, 253, 0.5);
+  border-radius: 4px;
+}
 .equip-slot .slot-stat { color: #fde68a; font-weight: 600; flex-shrink: 0; }
 .equip-slot .unequip { margin-left: 0; flex-shrink: 0; }
 .hud-pack button {

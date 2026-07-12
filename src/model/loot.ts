@@ -4,12 +4,12 @@
 
 export type ItemId =
   | 'dagger' | 'sword' | 'waraxe' | 'spear' | 'maul'
-  | 'leather' | 'chain' | 'plate'
+  | 'leather' | 'chain' | 'plate' | 'shield'
   | 'potion' | 'barrierPotion' | 'antidote' | 'knife'
   | 'trapSpike' | 'trapFire' | 'trapConfuse' | 'trapFear' | 'trapSleep'
   | 'turret' | 'decoy';
 
-export type ItemKind = 'weapon' | 'armor' | 'potion' | 'thrown' | 'trap' | 'turret' | 'decoy';
+export type ItemKind = 'weapon' | 'armor' | 'shield' | 'potion' | 'thrown' | 'trap' | 'turret' | 'decoy';
 
 /** 罠の効果種別。 */
 export type TrapKind = 'spike' | 'fire' | 'confuse' | 'fear' | 'sleep';
@@ -28,6 +28,10 @@ export interface ItemDef {
   reach?: number;
   /** 武器の薙ぎ払い(リーチ内の敵全員に当たる)。 */
   sweep?: boolean;
+  /** 両手武器か(rogue-22)。装備中は盾を併用できない(装備すると盾は自動で外れる)。 */
+  twoHanded?: boolean;
+  /** 盾の回避率(基礎値。rogue-22)。品質+1ごとに+2(stackEvade)。 */
+  evade?: number;
   trap?: TrapKind;
   /** 障壁の水薬(rogue-21): 飲むと基礎値の障壁を張る(上書き式)。品質+1ごとに+2。 */
   barrier?: number;
@@ -45,11 +49,12 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   dagger: { name: '短剣', kind: 'weapon', atk: 2 },
   sword: { name: '鉄の剣', kind: 'weapon', atk: 4 },
   waraxe: { name: '戦斧', kind: 'weapon', atk: 6 },
-  spear: { name: '長槍', kind: 'weapon', atk: 3, reach: 2 },
-  maul: { name: '大鎚', kind: 'weapon', atk: 5, sweep: true },
+  spear: { name: '長槍', kind: 'weapon', atk: 3, reach: 2, twoHanded: true },
+  maul: { name: '大鎚', kind: 'weapon', atk: 5, sweep: true, twoHanded: true },
   leather: { name: '革鎧', kind: 'armor', def: 1 },
   chain: { name: '鎖帷子', kind: 'armor', def: 2 },
   plate: { name: '板金鎧', kind: 'armor', def: 4 },
+  shield: { name: '盾', kind: 'shield', evade: 10 },
   potion: { name: '癒しの水薬', kind: 'potion', heal: 12 },
   barrierPotion: { name: '障壁の水薬', kind: 'potion', barrier: 8 },
   antidote: { name: '解毒の水薬', kind: 'potion', cure: true },
@@ -90,6 +95,10 @@ export function stackBarrier(s: ItemStack): number {
 export function stackImmune(s: ItemStack): number {
   return s.q;
 }
+/** 盾(rogue-22)の回避%。品質+1ごとに+2。 */
+export function stackEvade(s: ItemStack): number {
+  return (ITEMS[s.item].evade ?? 0) + 2 * s.q;
+}
 /** 砲塔の稼働ターン。 */
 export function turretTurns(s: ItemStack): number {
   return 8 + 2 * s.q;
@@ -114,6 +123,8 @@ export function statLabel(s: ItemStack): string {
       return `攻${stackAtk(s)}${def.reach ? `·射程${def.reach}` : ''}${def.sweep ? '·薙ぎ' : ''}`;
     case 'armor':
       return `防${stackDef(s)}`;
+    case 'shield':
+      return `回避${stackEvade(s)}%`;
     case 'potion':
       if (def.barrier !== undefined) return `障壁${stackBarrier(s)}`;
       if (def.cure) return stackImmune(s) > 0 ? `解毒+予防${stackImmune(s)}T` : `解毒`;
@@ -171,6 +182,7 @@ function potionFor(depth: number, rng: () => number): ItemId {
 
 function armorFor(depth: number, rng: () => number): ItemId {
   const pool: ItemId[] = ['leather'];
+  if (depth >= 2) pool.push('shield'); // 盾(rogue-22)は防具枠の抽選に混ざる
   if (depth >= 3) pool.push('chain');
   if (depth >= 9) pool.push('plate');
   const i = Math.floor(rng() * pool.length);

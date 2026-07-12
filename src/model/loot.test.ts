@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { lcg } from './dungeon';
-import { lootTable } from './loot';
+import { lootTable, stackEvade, statLabel } from './loot';
 import { spawnTable } from './beasts';
 
 describe('lootTable(深度スケーリング)', () => {
@@ -36,6 +36,26 @@ describe('lootTable(深度スケーリング)', () => {
       return xs.reduce((a, s) => a + s.q, 0) / xs.length;
     };
     expect(avg(16)).toBeGreaterThan(avg(6));
+  });
+
+  it('盾(rogue-22)は深度1では出ず、深度2〜で防具枠に混ざる', () => {
+    const rngShallow = lcg(7);
+    const shallow = Array.from({ length: 300 }, () => lootTable(1, rngShallow)).flat();
+    expect(shallow.some((s) => s.item === 'shield')).toBe(false);
+    const rngDeep = lcg(8);
+    const deep = Array.from({ length: 300 }, () => lootTable(2, rngDeep)).flat();
+    expect(deep.some((s) => s.item === 'shield')).toBe(true);
+  });
+});
+
+describe('stackEvade(盾の回避%。rogue-22)', () => {
+  it('基礎10%・品質+1ごとに+2%', () => {
+    expect(stackEvade({ item: 'shield', q: 0 })).toBe(10);
+    expect(stackEvade({ item: 'shield', q: 2 })).toBe(14);
+  });
+
+  it('statLabel は「回避X%」と表示する', () => {
+    expect(statLabel({ item: 'shield', q: 1 })).toBe('回避12%');
   });
 });
 

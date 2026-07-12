@@ -23,7 +23,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r21';
+export const GAME_VERSION = 'r22';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -116,6 +116,8 @@ export interface PlayerState {
   maxHp: number;
   weapon: ItemStack | null;
   armor: ItemStack | null;
+  /** 盾(rogue-22)。両手武器(twoHanded)とは併用不可 — 装備の排他は store 側で保証する。 */
+  shield: ItemStack | null;
   pack: ItemStack[];
   /** 上書き式シールド(rogue-21)。張り直しは加算せず新しい値で置き換える。層の崩落で消える。 */
   barrier: number;
@@ -149,8 +151,8 @@ export type ActionLogEntry = [number, string, ...(number | string)[]];
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 4: rogue-21 障壁・プレイヤー状態異常(player.barrier/status/immune を追加)。旧 v3 は非互換。 */
-  v: 4;
+  /** 5: rogue-22 両手持ち・盾(player.shield を追加)。旧 v4 は非互換。 */
+  v: 5;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;

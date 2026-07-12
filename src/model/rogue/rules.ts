@@ -3,7 +3,7 @@
 
 import { cellKey, layer, neighbors, worldPos, type Cell, type CellKey } from '../fcc';
 import type { Dungeon } from '../dungeon';
-import { ITEMS, stackAtk, stackDef } from '../loot';
+import { ITEMS, stackAtk, stackDef, stackEvade } from '../loot';
 import type { Beast, Decoy, PlacedTrap, PlayerState, Turret } from './types';
 
 /** 素手の攻撃力。 */
@@ -64,6 +64,10 @@ export function playerAtk(p: PlayerState): number {
 }
 export function playerDef(p: PlayerState): number {
   return p.armor ? stackDef(p.armor) : 0;
+}
+/** 盾の回避%(rogue-22)。盾なしは 0(=beastStrike が回避判定の乱数を引かない)。 */
+export function playerEvade(p: PlayerState): number {
+  return p.shield ? stackEvade(p.shield) : 0;
 }
 
 /** 武器の攻撃リーチ(FCC 歩数)。素手・通常武器は 1(隣接)。長槍などは 2。 */

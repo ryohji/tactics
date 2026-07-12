@@ -1019,3 +1019,76 @@ describe('新敵の性質(rogue-21)', () => {
     expect(player().barrier).toBeLessThanOrEqual(12);
   });
 });
+
+describe('両手持ち・盾(rogue-22)', () => {
+  it('盾を装備すると装備枠に入り(ターン消費なし)、外すと pack へ戻る', () => {
+    useRogue.setState({ player: { ...player(), pack: [...player().pack, { item: 'shield', q: 0 }] } });
+    const idx = player().pack.findIndex((x) => x.item === 'shield');
+    useRogue.getState().useItem(idx);
+    expect(player().shield).toEqual({ item: 'shield', q: 0 });
+    expect(useRogue.getState().turn).toBe(0);
+    useRogue.getState().unequip('shield');
+    expect(player().shield).toBeNull();
+    expect(player().pack.some((x) => x.item === 'shield')).toBe(true);
+  });
+
+  it('両手武器(長槍)を装備中は盾を装備できない(ログのみ・ターン消費なし)', () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        weapon: { item: 'spear', q: 0 },
+        pack: [...player().pack, { item: 'shield', q: 0 }],
+      },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'shield');
+    useRogue.getState().useItem(idx);
+    expect(player().shield).toBeNull();
+    expect(useRogue.getState().log.at(-1)).toContain('両手がふさがっている');
+    expect(useRogue.getState().turn).toBe(0);
+  });
+
+  it('盾を装備した状態で両手武器(大鎚)を構えると、盾が自動で外れて pack へ戻る', () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        shield: { item: 'shield', q: 0 },
+        pack: [...player().pack, { item: 'maul', q: 0 }],
+      },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'maul');
+    useRogue.getState().useItem(idx);
+    expect(player().weapon?.item).toBe('maul');
+    expect(player().shield).toBeNull();
+    expect(player().pack.some((x) => x.item === 'shield')).toBe(true);
+    expect(useRogue.getState().log.some((m) => m.includes('盾を背負い直した'))).toBe(true);
+  });
+
+  it('盾装備で敵の攻撃がいずれ回避される(確率10%・シード固定で決定的)', () => {
+    placeBeastAdjacent('bat');
+    useRogue.setState({ player: { ...player(), shield: { item: 'shield', q: 0 }, hp: 24 } });
+    let evaded = false;
+    for (let i = 0; i < 200 && !evaded; i++) {
+      useRogue.setState({ player: { ...player(), hp: 24 } }); // 被弾で死なないよう回復しながら
+      useRogue.getState().wait();
+      evaded = useRogue.getState().log.some((m) => m.includes('受け流した'));
+    }
+    expect(evaded).toBe(true);
+  });
+
+  it('セーブ v5: player.shield が保存・復元される', () => {
+    persist.setStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      useRogue.getState().restart(7);
+      useRogue.setState({ player: { ...player(), shield: { item: 'shield', q: 1 } } });
+      useRogue.getState().wait(); // 自動保存
+      const raw = persist.readSave<{ v: number }>();
+      expect(raw?.v).toBe(5);
+      useRogue.getState().restart(99);
+      persist.writeSave(raw);
+      expect(useRogue.getState().resume()).toBe(true);
+      expect(player().shield).toEqual({ item: 'shield', q: 1 });
+    } finally {
+      persist.setStorageForTest(null);
+    }
+  });
+});

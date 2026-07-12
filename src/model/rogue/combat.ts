@@ -9,7 +9,7 @@ import { distW } from '../dungeon';
 import { BEASTS } from '../beasts';
 import { stackDmg, stackTurns, type ItemStack, type TrapKind } from '../loot';
 import type { Beast, BeastStatus, Decoy, GameEvent, PlayerState, PlayerStatus, Turret } from './types';
-import { irnd, playerDef } from './rules';
+import { irnd, playerDef, playerEvade } from './rules';
 
 /** 毒(rogue-21)の持続ターン(命中時)。 */
 const POISON_HIT_TURNS = 3;
@@ -43,6 +43,10 @@ const PLAYER_STATUS_TEXT: Record<PlayerStatus['kind'], { text: string; color: st
  * 障壁の吸収は呼び出し側(store)が absorbBarrier で行う — ここは生ダメージのみ。
  * 状態異常の抽選(毒/混乱)も rng を共有するのでここで行う(呼び出し順の再現性のため)。
  * player.immune が残っていれば新規の状態異常は付与しない(解毒の水薬の予防)。
+ *
+ * 回避判定(rogue-22): ダメージ計算の前に、盾の回避%だけ判定する。盾なし(evade=0)なら
+ * 乱数を一切引かない(盾を装備していない既存ランの乱数列を守るため)。回避成功は
+ * ダメージ0・状態異常抽選なしで即返す。
  */
 export function beastStrike(
   b: Beast,
@@ -50,6 +54,18 @@ export function beastStrike(
   rng: () => number,
 ): { dmg: number; events: GameEvent[]; status: PlayerStatus | null } {
   const def = BEASTS[b.kind];
+  const evade = playerEvade(player);
+  if (evade > 0 && rng() * 100 < evade) {
+    return {
+      dmg: 0,
+      events: [
+        { kind: 'fx', fx: { kind: 'popup', at: player.pos, text: '回避!', color: '#93c5fd', dur: 900 } },
+        { kind: 'sfx', name: 'cancel' },
+        { kind: 'log', msg: `${def.name} の攻撃を盾で受け流した!` },
+      ],
+      status: player.status,
+    };
+  }
   const dmg = rollAtkDamage(def.atk, playerDef(player), rng);
   const events: GameEvent[] = [
     { kind: 'fx', fx: { kind: 'hit', at: player.pos, dur: 320 } },

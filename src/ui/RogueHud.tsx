@@ -7,7 +7,7 @@
 //   右下: ログ / 死亡: スコアオーバーレイ
 
 import { useState } from 'react';
-import { useRogue, playerAtk, playerDef, depthOf, parseSeed, LIGHT } from '../state/rogue';
+import { useRogue, playerAtk, playerDef, playerEvade, depthOf, parseSeed, LIGHT } from '../state/rogue';
 import { stepDist } from '../model/dungeon';
 import { BEASTS } from '../model/beasts';
 import { ITEMS, itemLabel, statLabel, type ItemStack } from '../model/loot';
@@ -79,24 +79,33 @@ function SystemButtons({ onHelp }: { onHelp: () => void }) {
   );
 }
 
-/** 装備枠1段(所持品パネル最上段)。総攻撃力/防御力をここに表示する。 */
+const SLOT_NAME = { weapon: '武器', armor: '防具', shield: '盾' } as const;
+
+/** 装備枠1段(所持品パネル最上段)。総攻撃力/防御力/回避%をここに表示する。 */
 function EquipSlot({
   slot,
   stack,
   stat,
   locked,
+  tag,
+  emptyHint,
 }: {
-  slot: 'weapon' | 'armor';
+  slot: 'weapon' | 'armor' | 'shield';
   stack: ItemStack | null;
   stat: string;
   locked: boolean;
+  /** 名前の横に小さく出す短いタグ(武器の「両手」など)。 */
+  tag?: string;
+  /** 未装備時の代替表示(盾の「両手がふさがっている」など)。省略時は「(なし)」。 */
+  emptyHint?: string;
 }) {
   const unequip = useRogue((s) => s.unequip);
   return (
     <div className="equip-slot">
-      <span className="slot-name">{slot === 'weapon' ? '武器' : '防具'}</span>
+      <span className="slot-name">{SLOT_NAME[slot]}</span>
       <span className={`slot-item${stack ? '' : ' empty'}`} title={stack ? statLabel(stack) : ''}>
-        {stack ? itemLabel(stack) : '(なし)'}
+        {stack ? itemLabel(stack) : (emptyHint ?? '(なし)')}
+        {tag && <span className="slot-tag">{tag}</span>}
       </span>
       <span className="slot-stat">{stat}</span>
       {stack && (
@@ -144,7 +153,20 @@ function PackPanel() {
       <h4 onClick={() => setOpen(false)} title="たたむ">
         🎒所持品<span className="fold">▾</span>
       </h4>
-      <EquipSlot slot="weapon" stack={player.weapon} stat={`攻${playerAtk(player)}`} locked={locked} />
+      <EquipSlot
+        slot="weapon"
+        stack={player.weapon}
+        stat={`攻${playerAtk(player)}`}
+        locked={locked}
+        tag={player.weapon && ITEMS[player.weapon.item].twoHanded ? '両手' : undefined}
+      />
+      <EquipSlot
+        slot="shield"
+        stack={player.shield}
+        stat={`回避${playerEvade(player)}%`}
+        locked={locked}
+        emptyHint={player.weapon && ITEMS[player.weapon.item].twoHanded ? '(両手がふさがっている)' : undefined}
+      />
       <EquipSlot slot="armor" stack={player.armor} stat={`防${playerDef(player)}`} locked={locked} />
       {groups.length === 0 && <div className="empty">(なし)</div>}
       {groups.map((g) => {
@@ -158,7 +180,7 @@ function PackPanel() {
               ? throwing
                 ? '解除'
                 : '投げる'
-              : def.kind === 'weapon' || def.kind === 'armor'
+              : def.kind === 'weapon' || def.kind === 'armor' || def.kind === 'shield'
                 ? '装備'
                 : placing
                   ? '解除'
@@ -399,6 +421,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
         <table>
           <tbody>
             <tr><td>🔥明かり</td><td>広げるほど視界と回復が増すが、敵に気づかれやすい</td></tr>
+            <tr><td>盾</td><td>回避率+。両手武器(長槍・大鎚)とは併用不可</td></tr>
             <tr><td>合成</td><td>同じアイテム・同じ品質の2つ → 品質+1(1ターン)</td></tr>
             <tr><td>罠</td><td>足元か隣接セルに設置。敵が踏むと発動</td></tr>
             <tr><td>セーブ</td><td>毎ターン自動保存。死ぬと消える(再挑戦のみ)</td></tr>

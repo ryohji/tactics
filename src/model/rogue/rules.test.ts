@@ -1,7 +1,24 @@
 // isoDate・dailySeed(rogue-20「本日の迷宮」)の純関数テスト。
 
 import { describe, it, expect } from 'vitest';
-import { isoDate, dailySeed } from './rules';
+import { isoDate, dailySeed, playerEvade } from './rules';
+import type { PlayerState } from './types';
+
+function basePlayer(overrides: Partial<PlayerState> = {}): PlayerState {
+  return {
+    pos: [0, 0, 0],
+    hp: 24,
+    maxHp: 24,
+    weapon: null,
+    armor: null,
+    shield: null,
+    pack: [],
+    barrier: 0,
+    status: null,
+    immune: 0,
+    ...overrides,
+  };
+}
 
 describe('isoDate', () => {
   it('YYYY-MM-DD 形式に整形する(月・日は0埋め)', () => {
@@ -27,5 +44,13 @@ describe('dailySeed(本日の迷宮)', () => {
     const s = dailySeed(new Date(2026, 6, 12));
     expect(Number.isInteger(s)).toBe(true);
     expect(s).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('playerEvade(盾の回避%。rogue-22)', () => {
+  it('盾なしは0、盾装備で品質込みの回避%が上がる', () => {
+    expect(playerEvade(basePlayer())).toBe(0);
+    expect(playerEvade(basePlayer({ shield: { item: 'shield', q: 0 } }))).toBe(10);
+    expect(playerEvade(basePlayer({ shield: { item: 'shield', q: 2 } }))).toBe(14);
   });
 });

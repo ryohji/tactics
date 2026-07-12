@@ -135,6 +135,7 @@ export {
   depthOf,
   playerAtk,
   playerDef,
+  playerEvade,
   weaponReach,
   weaponSweep,
   placeableCells,
@@ -205,7 +206,7 @@ export interface RogueState {
   /** 同一アイテム・同一品質の2つを合成して品質 +1(1ターン)。 */
   mergeItem: (index: number) => void;
   /** 装備を外して所持品へ戻す(装備と同じくターン消費なし。合成の材料にできる)。 */
-  unequip: (slot: 'weapon' | 'armor') => void;
+  unequip: (slot: 'weapon' | 'armor' | 'shield') => void;
   /** 明かりの段階を巡回(絞る→普通→広げる)。ターンを消費しない。 */
   cycleLight: () => void;
   wait: () => void;
@@ -681,7 +682,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const s = get();
     if (s.phase !== 'play') return;
     const data: SaveData = {
-      v: 4,
+      v: 5,
       seed: s.seed,
       rng: rngState,
       seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
@@ -1002,6 +1003,7 @@ export const useRogue = create<RogueState>((set, get) => {
         maxHp: 24,
         weapon: { item: 'dagger', q: 0 },
         armor: null,
+        shield: null,
         barrier: 0,
         status: null,
         immune: 0,
@@ -1067,7 +1069,7 @@ export const useRogue = create<RogueState>((set, get) => {
 
     resume: () => {
       const d = persist.readSave<SaveData>();
-      if (!d || d.v !== 4) return false;
+      if (!d || d.v !== 5) return false;
       resetView();
       clearUnitAnims();
       runSeq++; // 進行中の自動歩行などを打ち切る
@@ -1217,6 +1219,12 @@ export const useRogue = create<RogueState>((set, get) => {
         player.weapon = stack;
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を構えた`);
+        // 両手武器(rogue-22)は盾と併用できない。装備中の盾は自動で外して pack へ。
+        if (def.twoHanded && player.shield) {
+          player.pack.push(player.shield);
+          player.shield = null;
+          pushLog('盾を背負い直した(両手持ち)');
+        }
         set({ player: { ...player, pack: [...player.pack] } });
         return;
       }
@@ -1226,6 +1234,20 @@ export const useRogue = create<RogueState>((set, get) => {
         player.armor = stack;
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を身につけた`);
+        set({ player: { ...player, pack: [...player.pack] } });
+        return;
+      }
+      if (def.kind === 'shield') {
+        // 両手武器(rogue-22)を装備中は盾を持てない(両手がふさがっている)。
+        if (player.weapon && ITEMS[player.weapon.item].twoHanded) {
+          pushLog('両手がふさがっている(武器を外せば装備できる)');
+          return;
+        }
+        player.pack.splice(index, 1);
+        if (player.shield) player.pack.push(player.shield);
+        player.shield = stack;
+        sfx.play('place');
+        pushLog(`${itemLabel(stack)} を装備した`);
         set({ player: { ...player, pack: [...player.pack] } });
         return;
       }
