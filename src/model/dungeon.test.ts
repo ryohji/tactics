@@ -231,6 +231,31 @@ describe('collapseAbove(層リセット・rogue-19b)', () => {
     expect(ch).not.toBeNull();
     expect(dg.chambers.length).toBe(before + 1);
   });
+
+  it('崩落方向へ向かうスタブは削除されず used=true になるだけで残る(バブル側で cutLayer フィルタが必要)', () => {
+    // seed=2 / cutLayer=-10 は、生存広間(collapsed=false)から崩落側(exit の layer >
+    // cutLayer)へ伸びるスタブが残る組み合わせ(collapseAbove は used 化のみで配列から抜かない)。
+    const dg = createDungeon(2);
+    for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+    const cutLayer = -10;
+    collapseAbove(dg, cutLayer);
+    const survivorIds = new Set(dg.chambers.filter((c) => !c.collapsed).map((c) => c.id));
+    const leftover = dg.stubs.filter(
+      (st) => survivorIds.has(st.from) && layer(st.exit) > cutLayer,
+    );
+    // このスタブ自体は消えない(collapseAbove の仕様どおり)。
+    expect(leftover.length).toBeGreaterThan(0);
+    for (const st of leftover) expect(st.used).toBe(true);
+    // Bubbles.tsx の通路フィルタが使う条件(exit の layer <= cutLayer)なら、
+    // この残留スタブはちょうど除外される側になる。
+    for (const st of leftover) expect(layer(st.exit) <= dg.cutLayer).toBe(false);
+    // 一方、生存側へ伸びる本物の通路は条件を満たしたまま残る。
+    const genuine = dg.stubs.filter(
+      (st) => survivorIds.has(st.from) && layer(st.exit) <= cutLayer,
+    );
+    expect(genuine.length).toBeGreaterThan(0);
+    for (const st of genuine) expect(layer(st.exit) <= dg.cutLayer).toBe(true);
+  });
 });
 
 describe('lineOfSight(rogue-24: 遠隔攻撃の射線)', () => {

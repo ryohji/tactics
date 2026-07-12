@@ -265,6 +265,8 @@
   right: 14px;
   top: 64px;
   width: 190px;
+  max-height: calc(100dvh - 78px);
+  overflow-y: auto;
   background: rgba(15, 12, 40, 0.85);
   border: 1px solid #4c467e;
   border-radius: 10px;

@@ -8,7 +8,7 @@
 import { useEffect, useMemo } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { cellKey, neighbors, worldPos, type Cell } from '../model/fcc';
+import { cellKey, layer, neighbors, worldPos, type Cell } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
 import { itemLabel } from '../model/loot';
 import { BEASTS } from '../model/beasts';
@@ -81,7 +81,10 @@ function GameBubbles() {
     chamberId === undefined
       ? []
       : dungeon.stubs.filter(
-          (st) => st.from === chamberId && discovered.has(cellKey(st.mouth)),
+          (st) =>
+            st.from === chamberId &&
+            discovered.has(cellKey(st.mouth)) &&
+            layer(st.exit) <= dungeon.cutLayer,
         );
 
   return (
@@ -133,7 +136,10 @@ function MapBubbles() {
     chamberId === undefined
       ? []
       : dungeon.stubs.filter(
-          (st) => st.from === chamberId && discovered.has(cellKey(st.mouth)),
+          (st) =>
+            st.from === chamberId &&
+            discovered.has(cellKey(st.mouth)) &&
+            layer(st.exit) <= dungeon.cutLayer,
         );
 
   // 引き出し線(対象のすぐ上 → バブルの足元)をひとつの LineSegments にまとめる。

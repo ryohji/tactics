@@ -755,6 +755,12 @@ describe('層リセット(rogue-19b)', () => {
     useRogue.setState({
       discovered: new Set([...s0.discovered, cellKey(deep), cellKey(deepNear)]),
       beasts: [...s0.beasts, bat(970, [0, 0, 0]), bat(971, deepNear)],
+      // 未発見の(discovered に入っていない)上層アイテムも、崩落で確実に消えるか確認する。
+      items: [
+        ...s0.items,
+        { id: 980, stack: { item: 'potion', q: 1 }, pos: [0, 0, 0] },
+        { id: 981, stack: { item: 'potion', q: 1 }, pos: deepNear },
+      ],
       player: { ...s0.player, pos: deep },
     });
     expect(useRogue.getState().dungeon.open.has('0,0,0')).toBe(true); // 崩落前は入口が開いている
@@ -770,6 +776,10 @@ describe('層リセット(rogue-19b)', () => {
     expect(s.discovered.has(cellKey(deep))).toBe(true);
     expect(s.beasts.some((b) => b.id === 970)).toBe(false); // 上層の敵は消える
     expect(s.beasts.some((b) => b.id === 971)).toBe(true); // 深い側の敵は残る
+    // 未取得アイテムも同様: 崩落済み層のものは items 配列自体から消える
+    // (=discovered になってもバブル候補に上がりようがない)。
+    expect(s.items.some((i) => i.id === 980)).toBe(false);
+    expect(s.items.some((i) => i.id === 981)).toBe(true);
     // 崩落ログの後に実績解除ログ(rogue-25)が続くことがあるため at(-1) では見ない。
     expect(s.log.some((m) => m.includes('崩れ落ちた'))).toBe(true);
     expect(s.dungeon.chambers[0].collapsed).toBe(true); // 入口も墓標化(id は残る)
