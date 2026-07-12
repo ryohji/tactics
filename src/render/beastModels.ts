@@ -26,8 +26,12 @@ const MODEL_BASE = `${import.meta.env.BASE_URL}models/beasts/`;
 
 export const BEAST_MODELS: Partial<Record<BeastKind, BeastModelCfg>> = {
   bat: { url: `${MODEL_BASE}Bat.glb`, h: 0.5, lift: 0.35, idle: ['flying'], move: ['flying'] },
+  rat: { url: `${MODEL_BASE}Rat.glb`, h: 0.35, lift: 0, idle: ['idle'], move: ['run', 'walk'] },
   spider: { url: `${MODEL_BASE}Spider.glb`, h: 0.45, lift: 0, idle: ['idle'], move: ['walk', 'jump'] },
   ghoul: { url: `${MODEL_BASE}Zombie.glb`, h: 0.85, lift: 0, idle: ['idle'], move: ['walk', 'run'] },
+  snake: { url: `${MODEL_BASE}Snake.glb`, h: 0.4, lift: 0, idle: ['idle'], move: ['walk'] },
+  slime: { url: `${MODEL_BASE}Slime.glb`, h: 0.55, lift: 0, idle: ['idle'], move: ['walk'] },
+  mushnub: { url: `${MODEL_BASE}Mushnub.glb`, h: 0.6, lift: 0, idle: ['idle'], move: ['walk'] },
   soldier: { url: `${MODEL_BASE}Ant.glb`, h: 0.5, lift: 0, idle: [], move: [] },
   wisp: { url: `${MODEL_BASE}Planet.glb`, h: 0.42, lift: 0.4, idle: [], move: [], spin: 2.2, glow: '#67d3e0' },
   shade: {

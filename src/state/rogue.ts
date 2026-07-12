@@ -17,7 +17,7 @@
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
 
 import { create } from 'zustand';
-import { cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
+import { OFFSETS, cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
 import {
   createDungeon,
   maybeExpand,
@@ -37,6 +37,8 @@ import {
   ITEMS,
   itemLabel,
   stackHeal,
+  stackBarrier,
+  stackImmune,
   stackDmg,
   turretTurns,
   decoyHp,
@@ -93,6 +95,7 @@ import {
   resolveTrapEffect,
   statusAppliedEvents,
   turretTarget,
+  absorbBarrier,
 } from '../model/rogue/combat';
 import {
   stepCandidates as stepCandidatesPure,
@@ -423,9 +426,18 @@ export const useRogue = create<RogueState>((set, get) => {
   function beastStrike(b: Beast): void {
     const { player } = get();
     const def = BEASTS[b.kind];
-    const { dmg, events } = beastStrikeCalc(b, player, rand);
-    player.hp = Math.max(0, player.hp - dmg);
+    const { dmg, events, status } = beastStrikeCalc(b, player, rand);
+    // 障壁がまず削れ、余りが HP へ(酸は障壁への削りだけ2倍)。
+    const hadBarrier = player.barrier > 0;
+    const { barrier, hpDmg } = absorbBarrier(player.barrier, dmg, !!def.acidBarrier);
+    player.barrier = barrier;
+    player.status = status;
+    player.hp = Math.max(0, player.hp - hpDmg);
     applyEvents(events);
+    if (hadBarrier && barrier === 0) {
+      pushLog('障壁が砕けた!');
+      pushFx({ kind: 'popup', at: player.pos, text: '障壁破壊', color: '#67d3e0', dur: 900 });
+    }
     set({ player: { ...player } });
     if (player.hp <= 0) set({ deathCause: def.name }); // checkDead が使う死因
     checkDead();
@@ -541,13 +553,14 @@ export const useRogue = create<RogueState>((set, get) => {
         if (st.turns <= 0) b.status = null;
         if (st.kind === 'sleep') continue; // 行動不能
         if (st.kind === 'confuse') {
-          const cands = stepCandidates(b);
+          // 不動種(胞子茸)は混乱してもふらつかない(rogue-21)。
+          const cands = def.stationary ? [] : stepCandidates(b);
           if (cands.length > 0) moveBeast(b, cands[irnd(0, cands.length - 1)]);
           continue; // ふらつくだけ
         }
         if (st.kind === 'fear') {
-          // 恐慌: 縄張り・階層を忘れてプレイヤーから遠ざかる。
-          const best = chooseFleeStep(b, stepCandidates(b), player.pos);
+          // 恐慌: 縄張り・階層を忘れてプレイヤーから遠ざかる(不動種は動けない)。
+          const best = def.stationary ? null : chooseFleeStep(b, stepCandidates(b), player.pos);
           if (best) moveBeast(b, best);
           continue;
         }
@@ -588,6 +601,8 @@ export const useRogue = create<RogueState>((set, get) => {
       }
 
       // 追跡: 縄張り・階層制限内でターゲットへ最も近づく空洞セルへ1歩。
+      // 不動種(胞子茸)はその場から動かない(rogue-21)。
+      if (def.stationary) continue;
       const best = chooseChaseStep(b, def, stepCandidates(b), tgtPos);
       if (best) moveBeast(b, best);
     }
@@ -602,6 +617,26 @@ export const useRogue = create<RogueState>((set, get) => {
     const { player, lightLevel } = get();
     if (turn % LIGHT[lightLevel].regenEvery === 0 && player.hp > 0 && player.hp < player.maxHp) {
       player.hp += 1;
+      set({ player: { ...player } });
+    }
+    // プレイヤーの状態異常(rogue-21)。毒は障壁を素通りして HP 直撃。
+    if (player.status && player.hp > 0) {
+      if (player.status.kind === 'poison') {
+        player.hp = Math.max(0, player.hp - 1);
+        pushFx({ kind: 'popup', at: player.pos, text: '1', color: '#a78bfa', dur: 700 });
+        if (player.hp <= 0) set({ deathCause: '毒' });
+      }
+      player.status = { ...player.status, turns: player.status.turns - 1 };
+      if (player.status.turns <= 0) {
+        pushLog(player.status.kind === 'poison' ? '毒が抜けた。' : '頭がはっきりした。');
+        player.status = null;
+      }
+      set({ player: { ...player } });
+      checkDead();
+    }
+    // 解毒の水薬の予防(rogue-21)は毎ターン1ずつ減る。
+    if (player.immune > 0) {
+      player.immune -= 1;
       set({ player: { ...player } });
     }
     set({ turn });
@@ -646,7 +681,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const s = get();
     if (s.phase !== 'play') return;
     const data: SaveData = {
-      v: 3,
+      v: 4,
       seed: s.seed,
       rng: rngState,
       seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
@@ -700,6 +735,13 @@ export const useRogue = create<RogueState>((set, get) => {
       exploreRev: s.exploreRev + 1,
     });
     pushLog('背後で巣が崩れ落ちた。もう戻れない —');
+    // 崩落の衝撃で障壁は剥がれる(rogue-21。層を跨いだ持ち越しをさせない)。
+    const p = get().player;
+    if (p.barrier > 0) {
+      p.barrier = 0;
+      set({ player: { ...p } });
+      pushLog('崩落の衝撃で障壁が剥がれた。');
+    }
     sfx.play('death');
     stratumWarned = false;
     refreshReach();
@@ -724,6 +766,31 @@ export const useRogue = create<RogueState>((set, get) => {
       stratumWarned = true;
       pushLog('頭上の土がきしみ、砂がこぼれ落ちる…(これより深くへ進むと戻れない)');
     }
+  }
+
+  /**
+   * 混乱(rogue-21)による移動ずれ: 50% で意図と違う「隣接する空セル」へ逸れる。
+   * 逸れ先候補は open かつ敵の居ないセル(意図した先も候補に含む素朴な抽選 —
+   * 結果的に意図どおりのこともある)。候補ゼロなら意図どおり。
+   */
+  function confusedStep(intended: Cell): Cell {
+    const s = get();
+    if (s.player.status?.kind !== 'confuse') return intended;
+    if (rand() < 0.5) return intended;
+    const from = s.player.pos;
+    const options: Cell[] = [];
+    for (const o of OFFSETS) {
+      const n: Cell = [from[0] + o[0], from[1] + o[1], from[2] + o[2]];
+      const k = cellKey(n);
+      if (s.dungeon.open.has(k) && !beastAt(s.beasts, k)) options.push(n);
+    }
+    if (options.length === 0) return intended;
+    const picked = options[Math.floor(rand() * options.length)];
+    if (cellKey(picked) !== cellKey(intended)) {
+      pushLog('足がもつれて違う方へ…');
+      pushFx({ kind: 'popup', at: from, text: '💫', color: '#f472b6', dur: 700 });
+    }
+    return picked;
   }
 
   /** プレイヤーを隣へ1歩(発見・拡張・拾得・訪問記録込み)。 */
@@ -779,12 +846,14 @@ export const useRogue = create<RogueState>((set, get) => {
         if (runSeq !== run || get().phase !== 'play') break;
         const next = path[i];
         if (beastAt(get().beasts, cellKey(next))) break; // 起きた敵が塞いだ
-        stepPlayer(next);
+        const actual = confusedStep(next); // 混乱中は逸れうる(rogue-21)
+        stepPlayer(actual);
         await sleep(STEP_MS + 40);
         if (runSeq !== run) return; // restart / cancelTravel された
         const interrupted = beastsTurn();
         endTurn();
         if (get().phase !== 'play') break;
+        if (cellKey(actual) !== cellKey(next)) break; // 逸れたら経路は無効 — 歩行中断
         if (interrupted && i < path.length - 1) {
           pushLog('(足を止めた)');
           break;
@@ -840,6 +909,20 @@ export const useRogue = create<RogueState>((set, get) => {
     pushFx({ kind: 'death', at: b.pos, dur: 700 });
     sfx.play('death');
     pushLog(`${BEASTS[b.kind].name} を倒した!`);
+    // 胞子爆発(rogue-21): 死亡時、隣接するプレイヤーに状態異常(予防中は無効)。
+    const burst = BEASTS[b.kind].deathBurst;
+    if (burst) {
+      const p = get().player;
+      if (stepDist(p.pos, b.pos) <= 1 && p.immune <= 0) {
+        p.status =
+          p.status?.kind === burst
+            ? { kind: burst, turns: Math.max(p.status.turns, 2) }
+            : { kind: burst, turns: 2 };
+        set({ player: { ...p } });
+        pushLog('胞子が弾けて視界がゆがむ…');
+        pushFx({ kind: 'popup', at: p.pos, text: '💫', color: '#f472b6', dur: 900 });
+      }
+    }
     // ホーム広間の掃討判定(壁色の明化キー)。
     if (!get().beasts.some((x) => x.alive && x.id !== b.id && x.homeChamber === b.homeChamber)) {
       if (get().visitedChambers.has(b.homeChamber)) pushLog('この空間は静かになった…');
@@ -919,6 +1002,9 @@ export const useRogue = create<RogueState>((set, get) => {
         maxHp: 24,
         weapon: { item: 'dagger', q: 0 },
         armor: null,
+        barrier: 0,
+        status: null,
+        immune: 0,
         pack: [
           { item: 'potion', q: 0 },
           { item: 'knife', q: 0 },
@@ -981,7 +1067,7 @@ export const useRogue = create<RogueState>((set, get) => {
 
     resume: () => {
       const d = persist.readSave<SaveData>();
-      if (!d || d.v !== 3) return false;
+      if (!d || d.v !== 4) return false;
       resetView();
       clearUnitAnims();
       runSeq++; // 進行中の自動歩行などを打ち切る
@@ -1090,13 +1176,33 @@ export const useRogue = create<RogueState>((set, get) => {
       if (s.uiMode === 'place' && def.kind !== 'trap') set({ uiMode: 'walk', placeIndex: null });
 
       if (def.kind === 'potion') {
-        const healed = Math.min(stackHeal(stack), player.maxHp - player.hp);
         player.pack.splice(index, 1);
-        player.hp += healed;
-        pushFx({ kind: 'heal', at: player.pos, dur: 700 });
-        pushFx({ kind: 'popup', at: player.pos, text: `+${healed}`, color: '#86efac', dur: 900 });
-        sfx.play('heal');
-        pushLog(`${itemLabel(stack)} を飲んだ(+${healed})`);
+        if (def.barrier !== undefined) {
+          // 障壁の水薬(rogue-21): 上書き式。今の障壁が多くても新しい値で置き換わる。
+          const b = stackBarrier(stack);
+          player.barrier = b;
+          pushFx({ kind: 'popup', at: player.pos, text: `障壁${b}`, color: '#67d3e0', dur: 900 });
+          sfx.play('place');
+          pushLog(`${itemLabel(stack)} を飲んだ(障壁${b}を張り直した)`);
+        } else if (def.cure) {
+          // 解毒の水薬(rogue-21): 状態異常を治し、品質ぶんの予防を付ける。
+          const immune = stackImmune(stack);
+          const had = player.status;
+          player.status = null;
+          player.immune = Math.max(player.immune, immune);
+          pushFx({ kind: 'heal', at: player.pos, dur: 700 });
+          sfx.play('heal');
+          pushLog(
+            `${itemLabel(stack)} を飲んだ(${had ? '身体が軽くなった' : '異常なし'}${immune > 0 ? `・${immune}ターン予防` : ''})`,
+          );
+        } else {
+          const healed = Math.min(stackHeal(stack), player.maxHp - player.hp);
+          player.hp += healed;
+          pushFx({ kind: 'heal', at: player.pos, dur: 700 });
+          pushFx({ kind: 'popup', at: player.pos, text: `+${healed}`, color: '#86efac', dur: 900 });
+          sfx.play('heal');
+          pushLog(`${itemLabel(stack)} を飲んだ(+${healed})`);
+        }
         set({ player: { ...player, pack: [...player.pack] }, uiMode: 'walk' });
         // 飲むのも1ターン。
         beastsTurn();

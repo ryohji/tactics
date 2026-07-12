@@ -23,7 +23,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r19';
+export const GAME_VERSION = 'r21';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -36,6 +36,16 @@ export type LightLevel = 0 | 1 | 2;
 /** 状態異常(罠で誘発)。burn=延焼DoT / confuse=混乱 / fear=恐慌 / sleep=昏睡。 */
 export interface BeastStatus {
   kind: 'burn' | 'confuse' | 'fear' | 'sleep';
+  turns: number;
+}
+
+/**
+ * プレイヤーの状態異常(rogue-21)。poison=毎ターンHP−1(障壁を素通り)・
+ * confuse=移動先が50%でずれる。同種の再付与は turns を長い方で上書き、
+ * 別種は新しい方で置き換える(スロットはひとつだけ)。
+ */
+export interface PlayerStatus {
+  kind: 'poison' | 'confuse';
   turns: number;
 }
 
@@ -107,6 +117,11 @@ export interface PlayerState {
   weapon: ItemStack | null;
   armor: ItemStack | null;
   pack: ItemStack[];
+  /** 上書き式シールド(rogue-21)。張り直しは加算せず新しい値で置き換える。層の崩落で消える。 */
+  barrier: number;
+  status: PlayerStatus | null;
+  /** 解毒の水薬の予防効果(rogue-21)。残りターン、毒・混乱を新たに受けない。 */
+  immune: number;
 }
 
 /**
@@ -134,8 +149,8 @@ export type ActionLogEntry = [number, string, ...(number | string)[]];
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 3: rogue-19b 層リセット(cutLayer・stratum・行動ログ・敵の持ち物事前ロール)。旧 v2 は非互換。 */
-  v: 3;
+  /** 4: rogue-21 障壁・プレイヤー状態異常(player.barrier/status/immune を追加)。旧 v3 は非互換。 */
+  v: 4;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;

@@ -5,7 +5,7 @@
 export type ItemId =
   | 'dagger' | 'sword' | 'waraxe' | 'spear' | 'maul'
   | 'leather' | 'chain' | 'plate'
-  | 'potion' | 'knife'
+  | 'potion' | 'barrierPotion' | 'antidote' | 'knife'
   | 'trapSpike' | 'trapFire' | 'trapConfuse' | 'trapFear' | 'trapSleep'
   | 'turret' | 'decoy';
 
@@ -29,6 +29,10 @@ export interface ItemDef {
   /** 武器の薙ぎ払い(リーチ内の敵全員に当たる)。 */
   sweep?: boolean;
   trap?: TrapKind;
+  /** 障壁の水薬(rogue-21): 飲むと基礎値の障壁を張る(上書き式)。品質+1ごとに+2。 */
+  barrier?: number;
+  /** 解毒の水薬(rogue-21): 毒・混乱を治し、以後 q ターンの予防を付与する。 */
+  cure?: boolean;
 }
 
 /** アイテムの実体(品質つき)。 */
@@ -47,6 +51,8 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   chain: { name: '鎖帷子', kind: 'armor', def: 2 },
   plate: { name: '板金鎧', kind: 'armor', def: 4 },
   potion: { name: '癒しの水薬', kind: 'potion', heal: 12 },
+  barrierPotion: { name: '障壁の水薬', kind: 'potion', barrier: 8 },
+  antidote: { name: '解毒の水薬', kind: 'potion', cure: true },
   knife: { name: '投げナイフ', kind: 'thrown', dmg: 5, range: 8 },
   trapSpike: { name: '棘の罠', kind: 'trap', trap: 'spike', dmg: 8 },
   trapFire: { name: '火炎の罠', kind: 'trap', trap: 'fire', dmg: 2 },
@@ -76,6 +82,14 @@ export function stackDmg(s: ItemStack): number {
 export function stackTurns(s: ItemStack): number {
   return 4 + s.q;
 }
+/** 障壁の水薬(rogue-21)が張る障壁量。品質+1ごとに+2。 */
+export function stackBarrier(s: ItemStack): number {
+  return (ITEMS[s.item].barrier ?? 0) + 2 * s.q;
+}
+/** 解毒の水薬(rogue-21)の予防ターン数(品質そのもの。品質0=治すだけ)。 */
+export function stackImmune(s: ItemStack): number {
+  return s.q;
+}
 /** 砲塔の稼働ターン。 */
 export function turretTurns(s: ItemStack): number {
   return 8 + 2 * s.q;
@@ -101,6 +115,8 @@ export function statLabel(s: ItemStack): string {
     case 'armor':
       return `防${stackDef(s)}`;
     case 'potion':
+      if (def.barrier !== undefined) return `障壁${stackBarrier(s)}`;
+      if (def.cure) return stackImmune(s) > 0 ? `解毒+予防${stackImmune(s)}T` : `解毒`;
       return `回復${stackHeal(s)}`;
     case 'thrown':
       return `威力${stackDmg(s)}·射程${def.range}`;
@@ -142,6 +158,17 @@ function weaponFor(depth: number, rng: () => number): ItemId {
   return pool[Math.max(i, j)];
 }
 
+/**
+ * 深度で解禁される水薬プール(rogue-21)。障壁の水薬=深度3〜、解毒の水薬=深度4〜
+ * (毒ヘビ=深度7より先に手に入る「対抗手段が先」の原則)。
+ */
+function potionFor(depth: number, rng: () => number): ItemId {
+  const pool: ItemId[] = ['potion'];
+  if (depth >= 3) pool.push('barrierPotion');
+  if (depth >= 4) pool.push('antidote');
+  return pool[Math.floor(rng() * pool.length)];
+}
+
 function armorFor(depth: number, rng: () => number): ItemId {
   const pool: ItemId[] = ['leather'];
   if (depth >= 3) pool.push('chain');
@@ -170,7 +197,7 @@ export function lootTable(depth: number, rng: () => number): ItemStack[] {
     if (rng() > 0.68) continue;
     const r = rng();
     let item: ItemId;
-    if (r < 0.3) item = 'potion';
+    if (r < 0.3) item = potionFor(depth, rng);
     else if (r < 0.5) item = 'knife';
     else if (r < 0.65) item = weaponFor(depth, rng);
     else if (r < 0.8) item = armorFor(depth, rng);

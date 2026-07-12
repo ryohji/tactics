@@ -15,6 +15,7 @@ import {
   getActionLogForTest,
   type Beast,
 } from './rogue';
+import { GAME_VERSION } from '../model/rogue/types';
 import * as persist from './persist';
 import * as history from './history';
 import { view } from './view';
@@ -833,7 +834,7 @@ describe('ローカルスコアボード(rogue-20)', () => {
       expect(h[0].turns).toBe(s.turn);
       expect(h[0].stratum).toBe(s.stratum);
       expect(h[0].deathCause).toBe(s.deathCause);
-      expect(h[0].v).toBe('r19');
+      expect(h[0].v).toBe(GAME_VERSION);
     } finally {
       history.setHistoryStorageForTest(null);
     }
@@ -881,5 +882,140 @@ describe('ローカルスコアボード(rogue-20)', () => {
     useRogue.setState({ player: { ...player(), hp: 1 } });
     expect(() => useRogue.getState().wait()).not.toThrow();
     expect(history.readHistory()).toEqual([]);
+  });
+});
+
+describe('障壁と状態異常(rogue-21)', () => {
+  it('障壁の水薬は上書き式(加算せず、下方上書きもされる)', () => {
+    const p = player();
+    useRogue.setState({ player: { ...p, pack: [{ item: 'barrierPotion', q: 1 }] } });
+    useRogue.getState().useItem(0); // 品質1 = 障壁10
+    expect(player().barrier).toBe(10);
+    useRogue.setState({ player: { ...player(), pack: [{ item: 'barrierPotion', q: 0 }] } });
+    useRogue.getState().useItem(0); // 品質0 = 障壁8(10 から下方上書き)
+    expect(player().barrier).toBe(8);
+  });
+
+  it('被弾はまず障壁が受け、HP は無傷(割れたらログ)', () => {
+    placeBeastAdjacent('bat'); // 攻2 → ダメージ 1..3
+    useRogue.setState({ player: { ...player(), barrier: 8 } });
+    const hp0 = player().hp;
+    useRogue.getState().wait();
+    expect(player().hp).toBe(hp0);
+    expect(player().barrier).toBeGreaterThanOrEqual(5);
+    expect(player().barrier).toBeLessThan(8);
+  });
+
+  it('毒は障壁を素通りして HP に直撃し、切れるとログが出る', () => {
+    useRogue.setState({ player: { ...player(), barrier: 8, status: { kind: 'poison', turns: 2 } } });
+    const hp0 = player().hp;
+    useRogue.getState().wait();
+    expect(player().hp).toBe(hp0 - 1);
+    expect(player().barrier).toBe(8); // 障壁は削れない
+    useRogue.getState().wait();
+    expect(player().hp).toBe(hp0 - 2);
+    expect(player().status).toBeNull();
+    expect(useRogue.getState().log.some((m) => m.includes('毒が抜けた'))).toBe(true);
+  });
+
+  it('毒死は死因「毒」で記録される', () => {
+    useRogue.setState({ player: { ...player(), hp: 1, status: { kind: 'poison', turns: 3 } } });
+    useRogue.getState().wait();
+    const s = useRogue.getState();
+    expect(s.phase).toBe('dead');
+    expect(s.deathCause).toBe('毒');
+  });
+
+  it('解毒の水薬は状態異常を治し、品質ぶんの予防が毎ターン減る', () => {
+    useRogue.setState({
+      player: { ...player(), status: { kind: 'confuse', turns: 5 }, pack: [{ item: 'antidote', q: 2 }] },
+    });
+    useRogue.getState().useItem(0);
+    expect(player().status).toBeNull();
+    expect(player().immune).toBe(1); // 飲むのも1ターンなので直後に1減っている
+    useRogue.getState().wait();
+    expect(player().immune).toBe(0);
+  });
+
+  it('層の崩落で障壁が剥がれる', () => {
+    const deep: [number, number, number] = [0, -88, 0]; // depth=11 → 崩落ライン超え
+    useRogue.getState().dungeon.open.add('0,-88,0');
+    useRogue.setState({ player: { ...player(), pos: deep, barrier: 16 } });
+    useRogue.getState().wait();
+    expect(useRogue.getState().stratum).toBe(1);
+    expect(player().barrier).toBe(0);
+    expect(useRogue.getState().log.some((m) => m.includes('障壁が剥がれた'))).toBe(true);
+  });
+
+  it('混乱中の歩行は決定的で、1歩ぶんだけ進む(逸れても隣接セル)', async () => {
+    const walkOnce = async () => {
+      useRogue.getState().restart(12345);
+      seedRogueRng(5);
+      useRogue.setState({ player: { ...player(), status: { kind: 'confuse', turns: 99 } } });
+      const from = player().pos;
+      const target = freeNeighbor();
+      useRogue.getState().clickCell(target);
+      await run(3000);
+      return { from, to: player().pos };
+    };
+    const a = await walkOnce();
+    const b = await walkOnce();
+    expect(a.to).toEqual(b.to); // 同じシード・同じ乱数 → 同じ結果(決定性)
+    expect(stepDist(a.from, a.to)).toBe(1); // どこへ逸れても1歩
+  });
+});
+
+describe('新敵の性質(rogue-21)', () => {
+  it('胞子茸は起きていても動かない', () => {
+    const b = placeBeastAdjacent('mushnub');
+    // 隣接だと攻撃してしまうので2歩離す: プレイヤー側を動かして距離を作る…の代わりに
+    // 敵を遠くの空洞セルへ置き直す(縄張り中心も揃える)。
+    const far = useRogue.getState().reach.cells.find((c) => stepDist(c, player().pos) === 2);
+    if (far) {
+      b.pos = far;
+      b.home = far;
+    }
+    b.awake = true;
+    const pos0 = [...b.pos];
+    useRogue.getState().wait();
+    useRogue.getState().wait();
+    expect(useRogue.getState().beasts.find((x) => x.id === b.id)!.pos).toEqual(pos0);
+  });
+
+  it('胞子爆発: 隣接して倒すと混乱を受ける(予防中は無効)', async () => {
+    const b = placeBeastAdjacent('mushnub', 1); // hp1 = 一撃で死ぬ
+    useRogue.getState().clickBeast(b.id);
+    await run(3000);
+    expect(useRogue.getState().beasts.find((x) => x.id === b.id)!.alive).toBe(false);
+    expect(player().status?.kind).toBe('confuse');
+
+    // 予防があれば胞子は効かない。
+    useRogue.getState().restart(7);
+    seedRogueRng(42);
+    const b2 = placeBeastAdjacent('mushnub', 1);
+    useRogue.setState({ player: { ...player(), status: null, immune: 5 } });
+    useRogue.getState().clickBeast(b2.id);
+    await run(3000);
+    expect(player().status).toBeNull();
+  });
+
+  it('毒ヘビの攻撃はいずれ毒を付与する(確率50%・シード固定で決定的)', () => {
+    placeBeastAdjacent('snake', 999);
+    useRogue.setState({ player: { ...player(), hp: 24 } });
+    for (let i = 0; i < 10 && player().status?.kind !== 'poison'; i++) {
+      useRogue.setState({ player: { ...player(), hp: 24 } }); // 毒死しないよう回復しながら
+      useRogue.getState().wait();
+    }
+    expect(player().status?.kind).toBe('poison');
+  });
+
+  it('酸粘体の攻撃は障壁への削りだけ2倍', () => {
+    placeBeastAdjacent('slime');
+    useRogue.setState({ player: { ...player(), barrier: 20, hp: 24 } });
+    useRogue.getState().wait();
+    // dmg は 4..6(攻5・防0・±1)→ 酸で 2倍削り → 障壁は 20-2*dmg = 8..12。HP は無傷。
+    expect(player().hp).toBe(24);
+    expect(player().barrier).toBeGreaterThanOrEqual(8);
+    expect(player().barrier).toBeLessThanOrEqual(12);
   });
 });

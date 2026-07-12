@@ -48,12 +48,19 @@ describe('spawnTable(深層の種族)', () => {
     }
   });
 
-  it('深度18は直近解禁の3種(影・地竜・巨人)から湧き、弱種は混ざらない', () => {
+  it('深度18は直近解禁の4種(酸粘体・胞子茸・影・地竜)から湧き、弱種と未解禁種は混ざらない', () => {
+    // rogue-21 の出現帯: slime11 / mushnub12 / shade13 / drake17。colossus は21〜。
     const rng = lcg(5);
-    const kinds = new Set(Array.from({ length: 200 }, () => spawnTable(18, rng)).flat());
+    const kinds = new Set(Array.from({ length: 300 }, () => spawnTable(18, rng)).flat());
     expect(kinds.has('shade')).toBe(true);
     expect(kinds.has('drake')).toBe(true);
-    expect(kinds.has('colossus')).toBe(true);
+    expect(kinds.has('colossus')).toBe(false); // 深度21で解禁
     expect(kinds.has('bat')).toBe(false);
+  });
+
+  it('深度22で巨人が解禁される', () => {
+    const rng = lcg(6);
+    const kinds = new Set(Array.from({ length: 300 }, () => spawnTable(22, rng)).flat());
+    expect(kinds.has('colossus')).toBe(true);
   });
 });
