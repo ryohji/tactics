@@ -4,7 +4,7 @@
 import { cellKey, layer, neighbors, worldPos, type Cell, type CellKey } from '../fcc';
 import type { Dungeon } from '../dungeon';
 import { ITEMS, stackAtk, stackDef, stackEvade } from '../loot';
-import type { Beast, Decoy, PlacedTrap, PlayerState, Turret } from './types';
+import { isDimLight, type Beast, type Decoy, type LightLevel, type PlacedTrap, type PlayerState, type Turret } from './types';
 import type { NodeId } from './mastery';
 
 /** 素手の攻撃力。 */
@@ -67,11 +67,20 @@ export function beastAt(beasts: readonly Beast[], k: CellKey): Beast | undefined
  * - katate(片手扱い): 両手武器+盾の同時装備中、攻撃−2
  *   (命中制はまだ無いので攻撃減で代替。将来、命中率を導入したら命中−へ置換する)
  */
-export function playerAtk(p: PlayerState, skills: readonly NodeId[] = []): number {
+export function playerAtk(
+  p: PlayerState,
+  skills: readonly NodeId[] = [],
+  lightLevel?: LightLevel,
+): number {
   let atk = BASE_ATK + (p.weapon ? stackAtk(p.weapon) : 0);
   if (p.weapon && skills.includes('kensan')) atk += 1;
   if (p.weapon && !ITEMS[p.weapon.item].twoHanded && !p.shield && skills.includes('ryote')) atk += 2;
   if (p.weapon && ITEMS[p.weapon.item].twoHanded && p.shield && skills.includes('katate')) atk -= 2;
+  // rogue-24: 拳闘・灯火の補正。
+  if (!p.weapon && skills.includes('kenPunch')) atk += 3; // 拳打(素手)
+  if (p.hp === p.maxHp && skills.includes('kenMuku')) atk += 2; // 無傷の型
+  if (p.hp * 4 <= p.maxHp && p.barrier === 0 && skills.includes('kenHaisui')) atk += 3; // 背水
+  if (lightLevel !== undefined && isDimLight(lightLevel) && skills.includes('hiShibori')) atk += 2; // 絞り撃ち
   return atk;
 }
 export function playerDef(p: PlayerState): number {
@@ -81,9 +90,17 @@ export function playerDef(p: PlayerState): number {
  * 盾の回避%(rogue-22)。盾なしは 0(=beastStrike が回避判定の乱数を引かない)。
  * jutsu(盾術・rogue-23): 盾装備中、回避+5%。
  */
-export function playerEvade(p: PlayerState, skills: readonly NodeId[] = []): number {
+export function playerEvade(
+  p: PlayerState,
+  skills: readonly NodeId[] = [],
+  ranged = false,
+): number {
   let evade = p.shield ? stackEvade(p.shield) : 0;
   if (p.shield && skills.includes('jutsu')) evade += 5;
+  // rogue-24: 拳闘・盾の補正。
+  if (!p.weapon && skills.includes('kenMigaru')) evade += 10; // 身軽(素手・盾不要)
+  if (p.hp * 4 <= p.maxHp && p.barrier === 0 && skills.includes('kenHaisui')) evade += 25; // 背水
+  if (ranged && p.shield && skills.includes('tateKakage')) evade += 20; // 掲盾(遠隔のみ)
   return evade;
 }
 

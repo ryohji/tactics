@@ -24,15 +24,23 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r23';
+export const GAME_VERSION = 'r24';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
   { name: '絞る', see: 4.5, regenEvery: 10, aggro: 0.7 },
   { name: '普通', see: 6, regenEvery: 6, aggro: 1.0 },
   { name: '広げる', see: 8, regenEvery: 4, aggro: 1.35 },
+  // 4段階目「消す」(rogue-24)。灯火スキル hiShobo 装着中のみ cycleLight の循環に現れる。
+  // regenEvery は「実質回復なし」を表す大きな整数(Infinity は JSON にできない)。
+  { name: '消す', see: 2, regenEvery: 9999, aggro: 0.35 },
 ] as const;
-export type LightLevel = 0 | 1 | 2;
+export type LightLevel = 0 | 1 | 2 | 3;
+
+/** 「絞る」以下の暗さか(rogue-24: 絞り撃ち・灯火マスタリーの判定。見える距離で判定する)。 */
+export function isDimLight(l: LightLevel): boolean {
+  return LIGHT[l].see <= LIGHT[0].see;
+}
 
 /** 状態異常(罠で誘発)。burn=延焼DoT / confuse=混乱 / fear=恐慌 / sleep=昏睡。 */
 export interface BeastStatus {
@@ -63,6 +71,9 @@ export interface Beast {
   awake: boolean;
   alive: boolean;
   status: BeastStatus | null;
+  /** 深度係数・門番スケール(rogue-24)による個体別の上書き値(無ければ種の既定)。 */
+  atkOverride?: number;
+  defOverride?: number;
   /** 倒したときに落とす戦利品(湧き時に事前ロール済み。rogue-19b)。無ければ null。 */
   carry: ItemStack | null;
 }

@@ -29,16 +29,20 @@ export function stepCandidates(
   return out;
 }
 
-/** 気づき判定: 明かりを広げているほど遠くから気づかれる。 */
+/**
+ * 気づき判定: 明かりを広げているほど遠くから気づかれる。
+ * aggroFactor は隠密スキル(忍び足=0.8)などの距離係数(rogue-24)。
+ */
 export function checkAggro(
   b: Beast,
   def: BeastDef,
   playerPos: Cell,
   lightLevel: LightLevel,
+  aggroFactor = 1,
 ): boolean {
   const dW = distW(b.pos, playerPos);
   const dL = Math.abs(layer(b.pos) - layer(playerPos));
-  return dW <= def.aggroR * LIGHT[lightLevel].aggro && dL <= def.vAggro;
+  return dW <= def.aggroR * LIGHT[lightLevel].aggro * aggroFactor && dL <= def.vAggro;
 }
 
 /** ターゲット: プレイヤーと囮のうち最も近いもの。 */
@@ -72,9 +76,12 @@ export function chooseFleeStep(b: Beast, candidates: readonly Cell[], awayFrom: 
   return best;
 }
 
-/** 縄張りから離れすぎたか(ターゲット基準。追跡を諦める条件)。 */
-export function outOfTerritory(b: Beast, def: BeastDef, target: Cell): boolean {
-  return distW(b.pos, target) > def.territoryR + def.aggroR;
+/**
+ * 縄張りから離れすぎたか(ターゲット基準。追跡を諦める条件)。
+ * territoryFactor は隠密スキル(気配遮断=0.75)などの距離係数(rogue-24)。
+ */
+export function outOfTerritory(b: Beast, def: BeastDef, target: Cell, territoryFactor = 1): boolean {
+  return distW(b.pos, target) > (def.territoryR + def.aggroR) * territoryFactor;
 }
 
 /** 追跡: 縄張り・階層制限内でターゲットへ最も近づく候補(なければ null)。 */

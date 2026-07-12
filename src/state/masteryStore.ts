@@ -30,13 +30,17 @@ function isMasteryCounters(v: unknown): v is MasteryCounters {
   );
 }
 
-/** 破損した JSON や形の合わないデータは初期値(全カウンタ0)として扱う。 */
+/**
+ * 破損した JSON や形の合わないデータは初期値(全カウンタ0)として扱う。
+ * 系統追加(rogue-24)で保存済みデータに無いカウンタは 0 で補完する
+ * (マスタリーは永続資産なので、版が上がっても破棄しない)。
+ */
 export function readMastery(): MasteryCounters {
   try {
     const raw = storage?.getItem(KEY);
     if (!raw) return { ...INITIAL_MASTERY };
     const parsed: unknown = JSON.parse(raw);
-    return isMasteryCounters(parsed) ? parsed : { ...INITIAL_MASTERY };
+    return isMasteryCounters(parsed) ? { ...INITIAL_MASTERY, ...parsed } : { ...INITIAL_MASTERY };
   } catch {
     return { ...INITIAL_MASTERY };
   }

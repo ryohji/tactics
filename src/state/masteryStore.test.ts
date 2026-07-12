@@ -1,6 +1,7 @@
 // マスタリー(永続メタ)保存の単体テスト(rogue-23)。history.test.ts と同型。
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { INITIAL_MASTERY } from '../model/rogue/mastery';
 import { readMastery, writeMastery, clearMasteryForTest, setMasteryStorageForTest } from './masteryStore';
 
 /** localStorage 互換のインメモリ実装(history/rogue のテストと同じ手法)。 */
@@ -25,40 +26,40 @@ afterEach(() => {
 describe('masteryStore(永続カウンタの保存)', () => {
   it('初期状態は全カウンタ0', () => {
     setMasteryStorageForTest(memStorage());
-    expect(readMastery()).toEqual({ weaponKills: 0, evades: 0, absorbed: 0 });
+    expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
   it('書き込んだ値がそのまま読み戻る', () => {
     setMasteryStorageForTest(memStorage());
-    writeMastery({ weaponKills: 12, evades: 3, absorbed: 40 });
-    expect(readMastery()).toEqual({ weaponKills: 12, evades: 3, absorbed: 40 });
+    writeMastery({ ...INITIAL_MASTERY, weaponKills: 12, evades: 3, absorbed: 40 });
+    expect(readMastery()).toEqual({ ...INITIAL_MASTERY, weaponKills: 12, evades: 3, absorbed: 40 });
   });
 
   it('clearMasteryForTest で初期値に戻る', () => {
     setMasteryStorageForTest(memStorage());
-    writeMastery({ weaponKills: 12, evades: 3, absorbed: 40 });
+    writeMastery({ ...INITIAL_MASTERY, weaponKills: 12, evades: 3, absorbed: 40 });
     clearMasteryForTest();
-    expect(readMastery()).toEqual({ weaponKills: 0, evades: 0, absorbed: 0 });
+    expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
   it('壊れた JSON でも初期値を返す(例外を投げない)', () => {
     const s = memStorage();
     s.setItem('fcc-rogue-mastery-v1', '{not json');
     setMasteryStorageForTest(s);
-    expect(readMastery()).toEqual({ weaponKills: 0, evades: 0, absorbed: 0 });
+    expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
   it('形の合わないデータでも初期値を返す', () => {
     const s = memStorage();
     s.setItem('fcc-rogue-mastery-v1', '{"foo":"bar"}');
     setMasteryStorageForTest(s);
-    expect(readMastery()).toEqual({ weaponKills: 0, evades: 0, absorbed: 0 });
+    expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
   it('storage が無い(Node 環境相当)なら no-op で例外を投げない', () => {
     setMasteryStorageForTest(null);
-    expect(() => writeMastery({ weaponKills: 1, evades: 1, absorbed: 1 })).not.toThrow();
-    expect(readMastery()).toEqual({ weaponKills: 0, evades: 0, absorbed: 0 });
+    expect(() => writeMastery({ ...INITIAL_MASTERY, weaponKills: 1, evades: 1, absorbed: 1 })).not.toThrow();
+    expect(readMastery()).toEqual(INITIAL_MASTERY);
     expect(() => clearMasteryForTest()).not.toThrow();
   });
 });

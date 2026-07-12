@@ -56,21 +56,23 @@ export function beastStrike(
   player: PlayerState,
   rng: () => number,
   skills: readonly NodeId[] = [],
+  ranged = false,
 ): { dmg: number; events: GameEvent[]; status: PlayerStatus | null } {
   const def = BEASTS[b.kind];
-  const evade = playerEvade(player, skills);
+  // ranged(rogue-24): 遠隔攻撃なら掲盾(tateKakage)の回避が上乗せされる。
+  const evade = playerEvade(player, skills, ranged);
   if (evade > 0 && rng() * 100 < evade) {
     return {
       dmg: 0,
       events: [
         { kind: 'fx', fx: { kind: 'popup', at: player.pos, text: '回避!', color: '#93c5fd', dur: 900 } },
         { kind: 'sfx', name: 'cancel' },
-        { kind: 'log', msg: `${def.name} の攻撃を盾で受け流した!` },
+        { kind: 'log', msg: `${def.name} の攻撃を${player.shield ? '盾で受け流した' : 'かわした'}!` },
       ],
       status: player.status,
     };
   }
-  const dmg = rollAtkDamage(def.atk, playerDef(player), rng);
+  const dmg = rollAtkDamage(b.atkOverride ?? def.atk, playerDef(player), rng);
   const events: GameEvent[] = [
     { kind: 'fx', fx: { kind: 'hit', at: player.pos, dur: 320 } },
     { kind: 'fx', fx: { kind: 'popup', at: player.pos, text: `${dmg}`, color: '#fca5a5', dur: 900 } },

@@ -142,6 +142,7 @@ function PackPanel() {
   const busy = useRogue((s) => s.busy);
   const mapMode = useRogue((s) => s.mapMode);
   const skillEquipped = useRogue((s) => s.skillEquipped);
+  const lightLevel = useRogue((s) => s.lightLevel);
   const [open, setOpen] = useState(true);
   if (mapMode) return null;
   const pack = player.pack;
@@ -172,7 +173,7 @@ function PackPanel() {
       <EquipSlot
         slot="weapon"
         stack={player.weapon}
-        stat={`攻${playerAtk(player, skillEquipped)}`}
+        stat={`攻${playerAtk(player, skillEquipped, lightLevel)}`}
         locked={locked}
         tag={player.weapon && ITEMS[player.weapon.item].twoHanded ? '両手' : undefined}
       />
@@ -243,6 +244,7 @@ function BeastPanel() {
   const hoverBeastId = useRogue((s) => s.hoverBeastId);
   const beasts = useRogue((s) => s.beasts);
   const playerPos = useRogue((s) => s.player.pos);
+  const skillEquipped = useRogue((s) => s.skillEquipped);
   const b = beasts.find((x) => x.id === hoverBeastId && x.alive);
   if (!b) return null;
   const def = BEASTS[b.kind];
@@ -250,17 +252,27 @@ function BeastPanel() {
     <div className="hud-unit">
       <h3>
         <span className="side-enemy">{def.name}</span>
-        <span className="tag">{b.awake ? '警戒' : 'まどろみ'}</span>
+        <span className="tag">
+          {def.gatekeeper ? '門番・' : ''}
+          {def.senses ? '気配感知・' : ''}
+          {b.awake ? '警戒' : 'まどろみ'}
+        </span>
       </h3>
       <div className="hud-hpbar">
         <div style={{ width: `${(b.hp / def.hp) * 100}%`, background: '#ef4444' }} />
       </div>
       <div className="hud-stats">
-        <span>HP<b>{b.hp}/{def.hp}</b></span>
-        <span>攻<b>{def.atk}</b></span>
-        <span>防<b>{def.def}</b></span>
+        <span>HP<b>{b.hp}/{Math.max(def.hp, b.hp)}</b></span>
+        <span>攻<b>{b.atkOverride ?? def.atk}</b></span>
+        <span>防<b>{b.defOverride ?? def.def}</b></span>
         <span>距離<b>{stepDist(playerPos, b.pos)}歩</b></span>
       </div>
+      {/* 目利き(rogue-24: shinMekiki): 持ち物は湧き時に事前ロール済みなので表示だけ。 */}
+      {skillEquipped.includes('shinMekiki') && (
+        <div className="beast-carry">
+          持ち物: {b.carry ? `${itemLabel(b.carry)}(${statLabel(b.carry)})` : 'なし'}
+        </div>
+      )}
     </div>
   );
 }
@@ -573,7 +585,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             <tr>
               <td>スキル</td>
               <td>
-                関門を越えるとスロットが増え、3択から1つ選ぶ。マスタリー(武技=討伐・盾=回避・甲殻=吸収)を育てると候補が増える。死んでもマスタリーは残る
+                関門を越えるとスロットが増え、3択から1つ選ぶ。マスタリー(武技=武器討伐・盾=回避・甲殻=吸収・拳闘=素手討伐・隠密=不意打ち討伐・罠師=罠討伐・灯火=暗がりでの関門通過)を育てると候補が増える。死んでもマスタリーは残る
               </td>
             </tr>
             <tr><td>セーブ</td><td>毎ターン自動保存。死ぬと消える(再挑戦のみ)</td></tr>

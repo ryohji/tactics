@@ -45,17 +45,22 @@ describe('masteryLevels(離散式の閾値)', () => {
 
   it('系統は互いに独立している', () => {
     const levels = masteryLevels(counters({ weaponKills: 80, evades: 0, absorbed: 0 }));
-    expect(levels).toEqual({ arms: 3, guard: 0, carapace: 0 });
+    expect(levels).toEqual({ arms: 3, guard: 0, carapace: 0, fist: 0, stealth: 0, trapper: 0, light: 0 });
   });
 });
 
+/** 全系統0を基準に一部だけ上書きするレベル表(rogue-24 で系統が7本に増えたため)。 */
+function levels(over: Partial<Record<import('./mastery').MasterySystem, number>> = {}) {
+  return { arms: 0, guard: 0, carapace: 0, fist: 0, stealth: 0, trapper: 0, light: 0, ...over };
+}
+
 describe('unlockedNodes', () => {
   it('レベル0では何も解禁されない', () => {
-    expect(unlockedNodes({ arms: 0, guard: 0, carapace: 0 })).toEqual([]);
+    expect(unlockedNodes(levels())).toEqual([]);
   });
 
   it('系統ごとのレベルに応じてノードが解禁される', () => {
-    const ids = unlockedNodes({ arms: 2, guard: 1, carapace: 1 });
+    const ids = unlockedNodes(levels({ arms: 2, guard: 1, carapace: 1 }));
     expect(ids).toContain('kensan'); // arms lv1
     expect(ids).toContain('ryote'); // arms lv2
     expect(ids).not.toContain('katate'); // arms lv3(未達)
@@ -65,7 +70,7 @@ describe('unlockedNodes', () => {
   });
 
   it('全系統レベル3で全ノードが解禁される', () => {
-    expect(unlockedNodes({ arms: 3, guard: 3, carapace: 3 })).toEqual(NODE_IDS);
+    expect(unlockedNodes(levels({ arms: 3, guard: 3, carapace: 3, fist: 3, stealth: 3, trapper: 3, light: 3 }))).toEqual(NODE_IDS);
   });
 });
 

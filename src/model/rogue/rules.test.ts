@@ -97,3 +97,60 @@ describe('スキルノードの効果(rogue-23)', () => {
     expect(playerEvade(withoutShield, skills('jutsu'))).toBe(0);
   });
 });
+
+describe('rogue-24 のノード補正(playerAtk / playerEvade)', () => {
+  const base = (over: Partial<PlayerState> = {}): PlayerState => ({
+    pos: [0, 0, 0],
+    hp: 24,
+    maxHp: 24,
+    weapon: null,
+    armor: null,
+    shield: null,
+    pack: [],
+    barrier: 0,
+    status: null,
+    immune: 0,
+    ...over,
+  });
+
+  it('拳打: 素手のときだけ攻撃+3', () => {
+    expect(playerAtk(base(), ['kenPunch']) - playerAtk(base())).toBe(3);
+    const armed = base({ weapon: { item: 'dagger', q: 0 } });
+    expect(playerAtk(armed, ['kenPunch'])).toBe(playerAtk(armed));
+  });
+
+  it('無傷の型: HP満タンのときだけ攻撃+2', () => {
+    expect(playerAtk(base(), ['kenMuku']) - playerAtk(base())).toBe(2);
+    const hurt = base({ hp: 23 });
+    expect(playerAtk(hurt, ['kenMuku'])).toBe(playerAtk(hurt));
+  });
+
+  it('背水: HP25%以下かつ障壁0のとき攻撃+3・回避+25', () => {
+    const low = base({ hp: 6 });
+    expect(playerAtk(low, ['kenHaisui']) - playerAtk(low)).toBe(3);
+    expect(playerEvade(low, ['kenHaisui']) - playerEvade(low)).toBe(25);
+    const withBarrier = base({ hp: 6, barrier: 8 });
+    expect(playerAtk(withBarrier, ['kenHaisui'])).toBe(playerAtk(withBarrier));
+    expect(playerEvade(withBarrier, ['kenHaisui'])).toBe(playerEvade(withBarrier));
+  });
+
+  it('身軽: 素手なら盾なしでも回避+10', () => {
+    expect(playerEvade(base(), ['kenMigaru'])).toBe(10);
+    const armed = base({ weapon: { item: 'dagger', q: 0 } });
+    expect(playerEvade(armed, ['kenMigaru'])).toBe(0);
+  });
+
+  it('絞り撃ち: 「絞る」以下の明かりでのみ攻撃+2(消灯でも効く)', () => {
+    expect(playerAtk(base(), ['hiShibori'], 0) - playerAtk(base())).toBe(2);
+    expect(playerAtk(base(), ['hiShibori'], 3) - playerAtk(base())).toBe(2);
+    expect(playerAtk(base(), ['hiShibori'], 1)).toBe(playerAtk(base()));
+    expect(playerAtk(base(), ['hiShibori'], 2)).toBe(playerAtk(base()));
+  });
+
+  it('掲盾: 盾装備中の遠隔攻撃に対してのみ回避+20', () => {
+    const shielded = base({ shield: { item: 'shield', q: 0 } });
+    expect(playerEvade(shielded, ['tateKakage'], true) - playerEvade(shielded)).toBe(20);
+    expect(playerEvade(shielded, ['tateKakage'], false)).toBe(playerEvade(shielded));
+    expect(playerEvade(base(), ['tateKakage'], true)).toBe(0); // 盾なしは対象外
+  });
+});

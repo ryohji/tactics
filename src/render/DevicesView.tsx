@@ -21,8 +21,21 @@ const TRAP_COLOR: Record<TrapKind, string> = {
 function TrapMesh({ t }: { t: PlacedTrap }) {
   const w = worldPos(t.pos[0], t.pos[1], t.pos[2], S);
   const color = TRAP_COLOR[t.kind];
+  // 遠隔回収(rogue-24: wanaKaishu)。装着中のみクリックで回収(判定は store 側でも二重に守る)。
+  const recoverTrap = useRogue((s) => s.recoverTrap);
+  const canRecover = useRogue((s) => s.skillEquipped.includes('wanaKaishu'));
   return (
-    <group position={[w.x, w.y - 0.3 * S, w.z]}>
+    <group
+      position={[w.x, w.y - 0.3 * S, w.z]}
+      onClick={
+        canRecover
+          ? (e) => {
+              e.stopPropagation();
+              recoverTrap(t.id);
+            }
+          : undefined
+      }
+    >
       <mesh>
         <cylinderGeometry args={[0.32 * S, 0.36 * S, 0.06 * S, 6]} />
         <meshStandardMaterial color="#3f3a33" roughness={0.9} />

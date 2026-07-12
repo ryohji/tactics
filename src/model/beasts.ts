@@ -6,7 +6,8 @@ import type { PlayerStatus } from './rogue/types';
 export type BeastKind =
   | 'bat' | 'rat' | 'spider' | 'ghoul' | 'snake'
   | 'soldier' | 'wisp' | 'slime' | 'mushnub' | 'shade'
-  | 'drake' | 'colossus';
+  | 'mage' | 'drake' | 'scorpion' | 'colossus'
+  | 'kingMush' | 'giant' | 'yeti';
 
 export interface BeastDef {
   name: string;
@@ -36,6 +37,12 @@ export interface BeastDef {
   stationary?: boolean;
   /** 死亡時、隣接1セル内のプレイヤーに与える状態異常(rogue-21。胞子茸の胞子爆発)。 */
   deathBurst?: PlayerStatus['kind'];
+  /** 気配感知(rogue-24)。目に頼らない知覚 — 背討ち(将来は掏摸も)が効かない。鬼火・影。 */
+  senses?: boolean;
+  /** 遠隔攻撃(rogue-24)。射線(lineOfSight)が通り range 以内なら離れて撃つ。 */
+  ranged?: { range: number };
+  /** 門番(rogue-24)。層境界の広間に湧く層ボス。spawnTable のプール外。撃破でスロット+1。 */
+  gatekeeper?: boolean;
 }
 
 // 出現帯(rogue-21 再配置): 層1(0〜8)=教育の層(脅威が1つずつ順に出る)/
@@ -83,6 +90,7 @@ export const BEASTS: Record<BeastKind, BeastDef> = {
     hp: 9, atk: 6, def: 0,
     aggroR: 9, vAggro: 6, territoryR: 12, vBelow: 6, vAbove: 6,
     minDepth: 10, color: '#67d3e0',
+    senses: true,
   },
   slime: {
     name: '酸粘体',
@@ -105,6 +113,14 @@ export const BEASTS: Record<BeastKind, BeastDef> = {
     hp: 12, atk: 9, def: 0,
     aggroR: 8, vAggro: 5, territoryR: 12, vBelow: 5, vAbove: 5,
     minDepth: 13, color: '#6b5b9e',
+    senses: true,
+  },
+  mage: {
+    name: '洞穴の術師',
+    hp: 10, atk: 7, def: 0,
+    aggroR: 8, vAggro: 3, territoryR: 10, vBelow: 3, vAbove: 3,
+    minDepth: 15, color: '#c084fc',
+    ranged: { range: 6 },
   },
   drake: {
     name: '地竜',
@@ -112,18 +128,62 @@ export const BEASTS: Record<BeastKind, BeastDef> = {
     aggroR: 6, vAggro: 2, territoryR: 8, vBelow: 2, vAbove: 2,
     minDepth: 17, color: '#d0684a',
   },
+  scorpion: {
+    name: '洞穴サソリ',
+    hp: 22, atk: 9, def: 4,
+    aggroR: 4, vAggro: 1, territoryR: 6, vBelow: 1, vAbove: 1,
+    minDepth: 19, color: '#d9a441',
+  },
   colossus: {
     name: '岩窟の巨人',
     hp: 30, atk: 11, def: 5,
     aggroR: 5, vAggro: 1, territoryR: 7, vBelow: 1, vAbove: 1,
     minDepth: 21, color: '#8a8578',
   },
+  // --- 門番(rogue-24)。spawnTable のプール外(minDepth=999 の番兵値)。層番号で
+  // ステータスがスケールするため、ここの hp/atk/def は基準値(gatekeeperStats 参照)。
+  kingMush: {
+    name: '茸の王',
+    hp: 44, atk: 9, def: 3,
+    aggroR: 6, vAggro: 2, territoryR: 8, vBelow: 2, vAbove: 2,
+    minDepth: 999, color: '#e879ad',
+    gatekeeper: true, confuseChance: 0.35,
+  },
+  giant: {
+    name: '巨人王',
+    hp: 44, atk: 9, def: 3,
+    aggroR: 6, vAggro: 2, territoryR: 8, vBelow: 2, vAbove: 2,
+    minDepth: 999, color: '#9aa285',
+    gatekeeper: true,
+  },
+  yeti: {
+    name: '白き主',
+    hp: 44, atk: 9, def: 3,
+    aggroR: 6, vAggro: 2, territoryR: 8, vBelow: 2, vAbove: 2,
+    minDepth: 999, color: '#dbeafe',
+    gatekeeper: true,
+  },
 };
+
+/** 層番号 k(1〜)の門番の種類(バイオーム巡回)とステータス。 */
+export function gatekeeperFor(k: number): { kind: BeastKind; hp: number; atk: number; def: number } {
+  const kinds: BeastKind[] = ['kingMush', 'giant', 'yeti'];
+  return { kind: kinds[(k - 1) % 3], hp: 36 + 8 * k, atk: 7 + 2 * k, def: 2 + k };
+}
+
+/**
+ * 深度係数(rogue-24)。深度24を超えると敵の hp/atk が伸び続ける —
+ * プレイヤーの強さは構造的に上限がある(HP24・スロット6・品質上限)ため、
+ * これで「死は深さの必然」を保証する。乱数不要の決定論。
+ */
+export function depthScale(depth: number): number {
+  return depth > 24 ? 1 + (0.15 * (depth - 24)) / 8 : 1;
+}
 
 /** 出現最低深度の昇順(spawnTable は「直近に解禁された4種」から引く)。 */
 const KINDS: BeastKind[] = [
   'bat', 'rat', 'spider', 'ghoul', 'snake', 'soldier',
-  'wisp', 'slime', 'mushnub', 'shade', 'drake', 'colossus',
+  'wisp', 'slime', 'mushnub', 'shade', 'mage', 'drake', 'scorpion', 'colossus',
 ];
 
 /** ネズミ(rogue-21)は群れで湧く。深いほど群れが大きい。 */

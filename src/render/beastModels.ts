@@ -44,6 +44,12 @@ export const BEAST_MODELS: Partial<Record<BeastKind, BeastModelCfg>> = {
   },
   drake: { url: `${MODEL_BASE}Dragon.glb`, h: 0.9, lift: 0.15, idle: ['flying_idle', 'idle'], move: ['fast_flying', 'flying'] },
   colossus: { url: `${MODEL_BASE}Golem.glb`, h: 1.15, lift: 0, idle: ['flying_idle', 'idle'], move: ['fast_flying', 'walk'] },
+  // --- rogue-24: 遠隔・深層・門番 -----------------------------------------------
+  mage: { url: `${MODEL_BASE}Wizard.glb`, h: 0.85, lift: 0, idle: ['idle_weapon', 'idle'], move: ['run', 'walk'] },
+  scorpion: { url: `${MODEL_BASE}Scorpion.glb`, h: 0.4, lift: 0, idle: [], move: [] }, // アニメなし(蟻と同じ手続き補完)
+  kingMush: { url: `${MODEL_BASE}MushroomKing.glb`, h: 1.3, lift: 0, idle: ['idle'], move: ['walk', 'run'] },
+  giant: { url: `${MODEL_BASE}Giant.glb`, h: 1.5, lift: 0, idle: ['idle'], move: ['walk', 'run'] },
+  yeti: { url: `${MODEL_BASE}Yeti.glb`, h: 1.4, lift: 0, idle: ['idle'], move: ['walk', 'run'] },
 };
 
 for (const cfg of Object.values(BEAST_MODELS)) useGLTF.preload(cfg.url);

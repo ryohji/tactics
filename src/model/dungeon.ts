@@ -436,6 +436,28 @@ export function collapseAbove(dg: Dungeon, cutLayer: number): void {
   dg.rev++;
 }
 
+/**
+ * 射線が通るか(rogue-24: 遠隔攻撃)。両セル中心を結ぶ線分を 0.5 刻みでサンプリングし、
+ * 最寄りセルがすべて空洞なら true。壁越し射撃を防ぐ。
+ */
+export function lineOfSight(open: ReadonlySet<CellKey>, a: Cell, b: Cell): boolean {
+  const pa = worldPos(a[0], a[1], a[2], 1);
+  const pb = worldPos(b[0], b[1], b[2], 1);
+  const len = Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+  const steps = Math.max(1, Math.ceil(len / 0.5));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const [lx, ly, lz] = latticeAt(
+      pa.x + (pb.x - pa.x) * t,
+      pa.y + (pb.y - pa.y) * t,
+      pa.z + (pb.z - pa.z) * t,
+    );
+    const c = nearestFCC(lx, ly, lz);
+    if (!open.has(cellKey(c))) return false;
+  }
+  return true;
+}
+
 /** 入口から到達可能な空洞セル数(テスト・整合性確認用)。 */
 export function reachableCount(dg: Dungeon, from: Cell = [0, 0, 0]): number {
   const start = cellKey(from);

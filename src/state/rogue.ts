@@ -27,6 +27,7 @@ import {
   adjacent,
   stepDist,
   collapseAbove,
+  lineOfSight,
   type Dungeon,
   type Chamber,
 } from '../model/dungeon';
@@ -58,6 +59,7 @@ import {
   STRATUM_DEPTH,
   GAME_VERSION,
   LIGHT,
+  isDimLight,
   type LightLevel,
   type Beast,
   type GroundItem,
@@ -84,6 +86,7 @@ import {
 import {
   MASTERY_NAME,
   SKILL_NODES,
+  COUNTER_NODES,
   masteryLevels,
   unlockedNodes,
   equippedCost,
@@ -246,6 +249,8 @@ export interface RogueState {
   equipSkill: (id: NodeId) => void;
   /** 装着中のスキルノードを外す(「支度」中/ドラフト中のみ。組み替えの自由枠)。 */
   unequipSkill: (id: NodeId) => void;
+  /** 遠隔回収(rogue-24: 罠師 wanaKaishu)。設置済みの自分の罠をクリックで回収(1ターン)。 */
+  recoverTrap: (id: number) => void;
   /** 「支度」を終えてそのまま潜る。 */
   finishOutfitting: () => void;
   /** 関門のドラフトを見送る(何も選ばず閉じる)。 */
@@ -440,6 +445,10 @@ export const useRogue = create<RogueState>((set, get) => {
       weaponKills: cur.weaponKills + (delta.weaponKills ?? 0),
       evades: cur.evades + (delta.evades ?? 0),
       absorbed: cur.absorbed + (delta.absorbed ?? 0),
+      fistKills: cur.fistKills + (delta.fistKills ?? 0),
+      stealthKills: cur.stealthKills + (delta.stealthKills ?? 0),
+      trapKills: cur.trapKills + (delta.trapKills ?? 0),
+      dimCollapses: cur.dimCollapses + (delta.dimCollapses ?? 0),
     };
     masteryStore.writeMastery(next);
     const after = masteryLevels(next);
@@ -512,18 +521,21 @@ export const useRogue = create<RogueState>((set, get) => {
     return true;
   }
 
-  /** 敵→プレイヤーの一撃。 */
-  function beastStrike(b: Beast): void {
+  /** 敵→プレイヤーの一撃(ranged=true は遠隔攻撃。掲盾の回避対象)。 */
+  function beastStrike(b: Beast, ranged = false): void {
     const { player, skillEquipped } = get();
     const def = BEASTS[b.kind];
-    const { dmg: rawDmg, events, status } = beastStrikeCalc(b, player, rand, skillEquipped);
+    const { dmg: rawDmg, events, status } = beastStrikeCalc(b, player, rand, skillEquipped, ranged);
     if (rawDmg === 0) {
       // 盾の回避成功(rogue-22)。マスタリー(盾=回避)を積む(rogue-23)。
       incrementMastery({ evades: 1 });
       applyEvents(events);
-      // 受け反撃(ukekaeshi・rogue-23): 固定値の反撃(乱数は引かない)。
-      if (skillEquipped.includes('ukekaeshi')) {
-        const counter = Math.floor(playerAtk(player, skillEquipped) / 2);
+      // 受け反撃(ukekaeshi・rogue-23)/ 見切り(kenMikiri・rogue-24: 素手時): 固定値の反撃。
+      if (
+        skillEquipped.includes('ukekaeshi') ||
+        (skillEquipped.includes('kenMikiri') && player.weapon === null)
+      ) {
+        const counter = Math.floor(playerAtk(player, skillEquipped, get().lightLevel) / 2);
         if (counter > 0) {
           pushLog('受け流しざま反撃した!');
           damageBeast(b, counter, '#93c5fd'); // 武技(討伐)マスタリーの対象外(近接/薙ぎ/投擲のみ)
@@ -568,26 +580,37 @@ export const useRogue = create<RogueState>((set, get) => {
     }
   }
 
+  /**
+   * 討伐コンテキスト(rogue-24)。マスタリー加算の判定材料。
+   * preAwake は「攻撃を仕掛ける直前の覚醒状態」— 近接/投擲は攻撃時に敵を起こすため、
+   * 呼び出し元が事前に捕捉して渡す(背討ちの倍率判定も同じ値を使う)。
+   */
+  interface KillCtx {
+    unarmed?: boolean;
+    preAwake?: boolean;
+    viaTrap?: boolean;
+    weapon?: boolean;
+  }
+
   /** ダメージ適用(死亡処理込み)。生存していれば false。 */
-  function damageBeast(b: Beast, dmg: number, color = '#fecaca'): boolean {
+  function damageBeast(b: Beast, dmg: number, color = '#fecaca', kill?: KillCtx): boolean {
     b.hp = Math.max(0, b.hp - dmg);
     applyEvents(damageEvents(b.pos, dmg, color));
     if (b.hp === 0) {
-      killBeast(b);
+      killBeast(b, kill);
       return true;
     }
     return false;
   }
 
-  /** b が今のセルの罠を踏んだら発動(罠は消費)。 */
-  function triggerTrap(b: Beast): void {
-    const { traps } = get();
-    const k = cellKey(b.pos);
-    const t = traps.find((x) => cellKey(x.pos) === k);
-    if (!t) return;
-    set({ traps: traps.filter((x) => x.id !== t.id) });
+  /**
+   * 罠1つを b に対して発動する(rogue-24 で triggerTrap から分離)。
+   * wanaTsuyoka(罠強化)装着中は品質+1相当で効く。
+   */
+  function fireTrap(t: PlacedTrap, b: Beast): void {
     const name = BEASTS[b.kind].name;
-    const stack: ItemStack = { item: t.item, q: t.q };
+    const qBonus = get().skillEquipped.includes('wanaTsuyoka') ? 1 : 0;
+    const stack: ItemStack = { item: t.item, q: t.q + qBonus };
     sfx.play('hit');
     const effect = resolveTrapEffect(t.kind, stack);
     if (effect.kind === 'damage') {
@@ -596,13 +619,38 @@ export const useRogue = create<RogueState>((set, get) => {
           ? `${name} が棘の罠を踏んだ!`
           : `${name} が火炎の罠を踏んだ! 延焼した`,
       );
-      if (!damageBeast(b, effect.dmg, effect.color) && effect.burnOnSurvive) {
+      if (!damageBeast(b, effect.dmg, effect.color, { viaTrap: true }) && effect.burnOnSurvive) {
         b.status = effect.burnOnSurvive;
       }
     } else {
       b.status = effect.status;
       if (effect.awaken) b.awake = true;
       applyEvents(statusAppliedEvents(name, b.pos, effect.status));
+    }
+  }
+
+  /** b が今のセルの罠を踏んだら発動(罠は消費)。連鎖(wanaRensa)は隣接罠を1ホップ誘爆。 */
+  function triggerTrap(b: Beast): void {
+    const { traps } = get();
+    const k = cellKey(b.pos);
+    const t = traps.find((x) => cellKey(x.pos) === k);
+    if (!t) return;
+    // 連鎖の誘爆対象は「発動前に隣接していた自分の罠」を先に確定する(1ホップ限定)。
+    const chained = get().skillEquipped.includes('wanaRensa')
+      ? traps.filter((x) => x.id !== t.id && adjacent(x.pos, t.pos))
+      : [];
+    set({ traps: traps.filter((x) => x.id !== t.id && !chained.some((c) => c.id === x.id)) });
+    fireTrap(t, b);
+    for (const c of chained) {
+      // 誘爆はその罠のセルに居る敵へ。誰も踏んでいなければ空振り(消費のみ)。
+      const victim = get().beasts.find((x) => x.alive && cellKey(x.pos) === cellKey(c.pos));
+      pushFx({ kind: 'hit', at: c.pos, dur: 320 });
+      if (victim) {
+        pushLog('罠が誘爆した!');
+        fireTrap(c, victim);
+      } else {
+        pushLog('罠が誘爆した(空振り)');
+      }
     }
   }
 
@@ -679,7 +727,8 @@ export const useRogue = create<RogueState>((set, get) => {
       }
 
       // 気づき: 明かりを広げているほど遠くから気づかれる。
-      if (!b.awake && checkAggro(b, def, player.pos, lightLevel)) {
+      const aggroFactor = get().skillEquipped.includes('shinShinobi') ? 0.8 : 1; // 忍び足
+      if (!b.awake && checkAggro(b, def, player.pos, lightLevel, aggroFactor)) {
         b.awake = true;
         interrupted = true;
         pushLog(`${def.name} がこちらに気づいた!`);
@@ -705,7 +754,21 @@ export const useRogue = create<RogueState>((set, get) => {
       }
 
       // 縄張りから離れすぎたら追跡を諦める(ターゲット基準)。
-      if (outOfTerritory(b, def, tgtPos)) {
+      // 遠隔攻撃(rogue-24): 射程内かつ射線が通れば、離れたまま撃つ。
+      if (def.ranged && distW(b.pos, tgtPos) <= def.ranged.range && lineOfSight(get().dungeon.open, b.pos, tgtPos)) {
+        pushFx({ kind: 'bolt', from: b.pos, to: tgtPos, dur: 240 });
+        sfx.play('magic');
+        if (tgtDecoy) {
+          hitDecoy(b, tgtDecoy);
+        } else {
+          beastStrike(b, true);
+          interrupted = true;
+        }
+        continue;
+      }
+
+      const territoryFactor = get().skillEquipped.includes('shinKehai') ? 0.75 : 1; // 気配遮断
+      if (outOfTerritory(b, def, tgtPos, territoryFactor)) {
         b.awake = false;
         pushLog(`${def.name} は追跡を諦めた`);
         continue;
@@ -726,7 +789,12 @@ export const useRogue = create<RogueState>((set, get) => {
   function endTurn(): void {
     const turn = get().turn + 1;
     const { player, lightLevel, skillEquipped } = get();
-    if (turn % LIGHT[lightLevel].regenEvery === 0 && player.hp > 0) {
+    // 篝火(hiKagari・rogue-24): 「広げる」中は回復間隔−1(最低2)。
+    const regenEvery =
+      lightLevel === 2 && get().skillEquipped.includes('hiKagari')
+        ? Math.max(2, LIGHT[lightLevel].regenEvery - 1)
+        : LIGHT[lightLevel].regenEvery;
+    if (turn % regenEvery === 0 && player.hp > 0) {
       if (player.hp < player.maxHp) {
         player.hp += 1;
         set({ player: { ...player } });
@@ -856,6 +924,8 @@ export const useRogue = create<RogueState>((set, get) => {
       exploreRev: s.exploreRev + 1,
     });
     pushLog('背後で巣が崩れ落ちた。もう戻れない —');
+    // 灯火マスタリー(rogue-24): 「絞る」以下の暗さで関門を通過した実績。
+    if (isDimLight(get().lightLevel)) incrementMastery({ dimCollapses: 1 });
     // 崩落の衝撃で障壁は剥がれる(rogue-21。層を跨いだ持ち越しをさせない)。
     const p = get().player;
     if (p.barrier > 0) {
@@ -1018,10 +1088,24 @@ export const useRogue = create<RogueState>((set, get) => {
     if (runSeq !== run) return;
     for (const b of targets) {
       const def = BEASTS[b.kind];
-      const dmg = Math.max(1, playerAtk(player, get().skillEquipped) - def.def + irnd(-1, 1));
+      const skills = get().skillEquipped;
+      // 攻撃前の覚醒状態を捕捉(rogue-24)— 背討ちの倍率と隠密マスタリーの両方がこの値を使う。
+      const preAwake = b.awake;
+      let dmg = Math.max(1, playerAtk(player, skills, get().lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
+      // 背討ち(shinSegiri): 未覚醒の敵へは×2。ただし気配感知(senses)の敵には無効。
+      if (!preAwake && !def.senses && skills.includes('shinSegiri')) {
+        dmg *= 2;
+        pushLog('背後から急所を突いた!');
+      }
       b.awake = true;
       pushLog(`${def.name} に ${dmg}ダメージ`);
-      if (damageBeast(b, dmg)) incrementMastery({ weaponKills: 1 }); // 武技マスタリー(近接・薙ぎ)
+      const unarmed = player.weapon === null;
+      const died = damageBeast(b, dmg, '#fecaca', { weapon: !unarmed, unarmed, preAwake });
+      // 延焼の刃(hiEnjin): 装着中のみ乱数を引く(30%で延焼2ターン)。倒した敵には不要。
+      if (!died && skills.includes('hiEnjin') && rand() < 0.3) {
+        b.status = { kind: 'burn', turns: 2 };
+        pushLog(`${def.name} に火が移った!`);
+      }
     }
     sfx.play('hit');
     set({ beasts: [...get().beasts] });
@@ -1032,12 +1116,28 @@ export const useRogue = create<RogueState>((set, get) => {
     settleAfterAction();
   }
 
-  function killBeast(b: Beast): void {
+  function killBeast(b: Beast, ctx?: KillCtx): void {
     b.alive = false;
     set({ kills: get().kills + 1 });
     pushFx({ kind: 'death', at: b.pos, dur: 700 });
     sfx.play('death');
     pushLog(`${BEASTS[b.kind].name} を倒した!`);
+    // 門番討伐(rogue-24): 心得の器(スキルスロット)が広がる。
+    if (BEASTS[b.kind].gatekeeper && get().skillSlots < 6) {
+      set({ skillSlots: get().skillSlots + 1 });
+      pushLog('門番を討った — 心得の器が広がる(スロット+1)');
+      sfx.play('pickup');
+    }
+    // マスタリー加算(rogue-24)。1回の討伐で複数系統に同時加算されうる
+    // (例: 素手で未覚醒の敵を倒す → 拳闘+隠密)。
+    if (ctx) {
+      const delta: Partial<MasteryCounters> = {};
+      if (ctx.weapon) delta.weaponKills = 1;
+      if (ctx.unarmed) delta.fistKills = 1;
+      if (ctx.preAwake === false) delta.stealthKills = 1;
+      if (ctx.viaTrap) delta.trapKills = 1;
+      if (Object.keys(delta).length > 0) incrementMastery(delta);
+    }
     // 胞子爆発(rogue-21): 死亡時、隣接するプレイヤーに状態異常(予防中は無効)。
     const burst = BEASTS[b.kind].deathBurst;
     if (burst) {
@@ -1080,11 +1180,28 @@ export const useRogue = create<RogueState>((set, get) => {
     await sleep(280);
     if (runSeq !== run) return;
     const def = BEASTS[b.kind];
-    const dmg = Math.max(1, stackDmg(knife) - Math.floor(def.def / 2) + irnd(-1, 1));
+    const dmg = Math.max(1, stackDmg(knife) - Math.floor((b.defOverride ?? def.def) / 2) + irnd(-1, 1));
     b.awake = true;
     sfx.play('hit');
     pushLog(`投げナイフが ${def.name} に ${dmg}ダメージ`);
-    if (damageBeast(b, dmg)) incrementMastery({ weaponKills: 1 }); // 武技マスタリー(投げナイフ)
+    const preAwakeKnife = b.awake;
+    const diedByKnife = damageBeast(b, dmg, '#fecaca', { weapon: true, preAwake: preAwakeKnife });
+    // 跳弾(knifeRico): 命中時、対象に隣接する敵1体(最小id)へ半分ダメージ(乱数なし)。
+    if (get().skillEquipped.includes('knifeRico')) {
+      const near = get()
+        .beasts.filter((x) => x.alive && x.id !== b.id && adjacent(x.pos, b.pos))
+        .sort((a, z) => a.id - z.id)[0];
+      if (near) {
+        const rico = Math.floor(dmg / 2);
+        if (rico > 0) {
+          pushLog(`ナイフが跳ねて ${BEASTS[near.kind].name} へ!`);
+          const preAwakeNear = near.awake;
+          near.awake = true;
+          damageBeast(near, rico, '#fecaca', { weapon: true, preAwake: preAwakeNear });
+        }
+      }
+    }
+    void diedByKnife;
     set({ beasts: [...get().beasts] });
     await sleep(200);
     if (runSeq !== run) return;
@@ -1486,6 +1603,14 @@ export const useRogue = create<RogueState>((set, get) => {
         return;
       }
       if (s.skillEquipped.includes(id)) return;
+      // 反撃系(受け反撃/見切り)は同時装着不可(rogue-24 の横断ルール)。
+      if (
+        COUNTER_NODES.includes(id) &&
+        s.skillEquipped.some((x) => COUNTER_NODES.includes(x) && x !== id)
+      ) {
+        pushLog('反撃の技はひとつしか身につけられない');
+        return;
+      }
       if (equippedCost(s.skillEquipped) + SKILL_NODES[id].cost > s.skillSlots) {
         pushLog('スロットが足りない(外して組み替える)');
         return;
@@ -1512,9 +1637,33 @@ export const useRogue = create<RogueState>((set, get) => {
         pushLog('盾を背負い直した(片手扱いを解除)');
         set({ player: { ...player, pack: [...player.pack] } });
       }
+      // 消灯(hiShobo)を外したとき消灯状態なら「絞る」へ戻す(rogue-24)。
+      if (id === 'hiShobo' && s.lightLevel === 3) {
+        set({ lightLevel: 0 });
+        pushLog('たいまつに火を戻した(絞る)');
+        discover();
+      }
       set({ skillEquipped: get().skillEquipped.filter((x) => x !== id) });
       pushLog(`${SKILL_NODES[id].name} を外した`);
       sfx.play('cancel');
+    },
+
+    recoverTrap: (id) => {
+      logAction('RT', id);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (!s.skillEquipped.includes('wanaKaishu')) return;
+      const t = s.traps.find((x) => x.id === id);
+      if (!t) return;
+      const player = s.player;
+      player.pack.push({ item: t.item, q: t.q });
+      set({ traps: s.traps.filter((x) => x.id !== id), player: { ...player, pack: [...player.pack] } });
+      sfx.play('pickup');
+      pushLog(`${ITEMS[t.item].name} を回収した`);
+      // 回収も1ターン。
+      beastsTurn();
+      endTurn();
+      settleAfterAction();
     },
 
     finishOutfitting: () => {
@@ -1564,7 +1713,9 @@ export const useRogue = create<RogueState>((set, get) => {
       logAction('L');
       const s = get();
       if (s.phase !== 'play') return;
-      const l = ((s.lightLevel + 1) % 3) as LightLevel;
+      // 消灯(rogue-24): hiShobo 装着中のみ 0→1→2→3→0 の4循環。未装着は従来の3循環。
+      const cycle = s.skillEquipped.includes('hiShobo') ? 4 : 3;
+      const l = ((s.lightLevel + 1) % cycle) as LightLevel;
       set({ lightLevel: l });
       sfx.play('select');
       pushLog(`明かりを${LIGHT[l].name}(視界と回復が変わり、敵の気づきやすさも変わる)`);

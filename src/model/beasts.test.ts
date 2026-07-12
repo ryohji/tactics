@@ -1,7 +1,7 @@
 // 敵ロスター(rogue-21)の湧きテーブルのテスト。
 import { describe, it, expect } from 'vitest';
 import { lcg } from './dungeon';
-import { BEASTS, spawnTable, ratPackSize, type BeastKind } from './beasts';
+import { BEASTS, spawnTable, ratPackSize, gatekeeperFor, depthScale, type BeastKind } from './beasts';
 
 describe('spawnTable(rogue-21)', () => {
   it('minDepth は出現帯の設計どおり昇順', () => {
@@ -42,5 +42,32 @@ describe('spawnTable(rogue-21)', () => {
         expect(BEASTS[k].acidBarrier ?? false).toBe(false);
       }
     }
+  });
+});
+
+describe('rogue-24: 門番と深度係数', () => {
+  it('門番は層番号でバイオーム巡回し、ステータスが層でスケールする', () => {
+    expect(gatekeeperFor(1).kind).toBe('kingMush');
+    expect(gatekeeperFor(2).kind).toBe('giant');
+    expect(gatekeeperFor(3).kind).toBe('yeti');
+    expect(gatekeeperFor(4).kind).toBe('kingMush');
+    expect(gatekeeperFor(2).hp).toBeGreaterThan(gatekeeperFor(1).hp);
+    expect(gatekeeperFor(3).atk).toBeGreaterThan(gatekeeperFor(1).atk);
+  });
+
+  it('門番は spawnTable のプールに現れない', () => {
+    const rng = lcg(9);
+    for (let i = 0; i < 200; i++) {
+      for (const k of spawnTable(30, rng)) {
+        expect(BEASTS[k].gatekeeper ?? false).toBe(false);
+      }
+    }
+  });
+
+  it('深度係数は24以下で1、以深で単調増加', () => {
+    expect(depthScale(8)).toBe(1);
+    expect(depthScale(24)).toBe(1);
+    expect(depthScale(32)).toBeCloseTo(1.15);
+    expect(depthScale(40)).toBeGreaterThan(depthScale(32));
   });
 });

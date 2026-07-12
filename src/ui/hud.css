@@ -112,6 +112,14 @@
   color: #cbd5e1;
 }
 .hud-stats span b { color: #f1f5f9; font-weight: 600; margin-left: 4px; }
+/* 目利き(rogue-24): 敵情報パネルの持ち物行 */
+.hud-unit .beast-carry {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(120, 110, 200, 0.25);
+  font-size: 11px;
+  color: #fde68a;
+}
 
 /* --- 下部中央: 行動メニュー / 対象選択 --- */
 .hud-actions {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cellKey, keyToCell, layer } from './fcc';
+import { cellKey, keyToCell, layer, type Cell } from './fcc';
 import {
   createDungeon,
   expandAt,
@@ -9,6 +9,8 @@ import {
   stepDist,
   slotKeyOfCell,
   collapseAbove,
+  lineOfSight,
+  adjacent,
 } from './dungeon';
 
 describe('stepDist(FCC 最短歩数)', () => {
@@ -228,5 +230,26 @@ describe('collapseAbove(層リセット・rogue-19b)', () => {
     const ch = expandAt(dg, deepStub!);
     expect(ch).not.toBeNull();
     expect(dg.chambers.length).toBe(before + 1);
+  });
+});
+
+describe('lineOfSight(rogue-24: 遠隔攻撃の射線)', () => {
+  it('同じ広間の中なら射線が通り、壁(open に無いセル)を挟むと通らない', () => {
+    const dg = createDungeon(12345);
+    const cells = dg.chambers[0].cells.map((k) => keyToCell(k));
+    // 広間内の2セル(凸に近い胞塊なので、中心を挟む2点は概ね通る)。
+    const center: Cell = dg.chambers[0].center;
+    const far = cells.reduce((a, b) => (distW(center, b) > distW(center, a) ? b : a));
+    expect(lineOfSight(dg.open, center, far)).toBe(true);
+    // 壁の向こう(open から十分離れた未掘削セル)へは通らない。
+    const outside: Cell = [center[0] + 40, center[1] + 40, center[2]];
+    expect(lineOfSight(dg.open, center, outside)).toBe(false);
+  });
+
+  it('隣接セル同士は常に通る(間にサンプル点が無い)', () => {
+    const dg = createDungeon(7);
+    const c = dg.chambers[0].center;
+    const n = keyToCell(dg.chambers[0].cells.find((k) => adjacent(keyToCell(k), c))!);
+    expect(lineOfSight(dg.open, c, n)).toBe(true);
   });
 });
