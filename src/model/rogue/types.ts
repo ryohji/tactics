@@ -7,6 +7,7 @@ import type { Chamber, Stub } from '../dungeon';
 import type { BeastKind } from '../beasts';
 import type { ItemId, ItemStack, TrapKind } from '../loot';
 import type { SfxName } from '../../audio/sfx';
+import type { NodeId } from './mastery';
 
 /** rogue の表示倍率(固定)。 */
 export const ROGUE_S = 2;
@@ -23,7 +24,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r22';
+export const GAME_VERSION = 'r23';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -151,8 +152,8 @@ export type ActionLogEntry = [number, string, ...(number | string)[]];
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 5: rogue-22 両手持ち・盾(player.shield を追加)。旧 v4 は非互換。 */
-  v: 5;
+  /** 6: rogue-23 マスタリー×スロット(skillSlots/skillEquipped/skillDraft を追加)。旧 v5 は非互換。 */
+  v: 6;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;
@@ -173,6 +174,12 @@ export interface SaveData {
   maxDepth: number;
   /** 通過済みの層数(rogue-19b)。 */
   stratum: number;
+  /** スキルスロット数(rogue-23。初期2・関門+1・上限6)。 */
+  skillSlots: number;
+  /** 装着中のスキルノード id 列。 */
+  skillEquipped: NodeId[];
+  /** 提示中の関門ドラフト候補(null=非表示)。 */
+  skillDraft: NodeId[] | null;
   actionLog: ActionLogEntry[];
   log: string[];
 }

@@ -92,4 +92,14 @@ describe('beastStrike の回避判定(rogue-22)', () => {
     const { dmg } = beastStrike(bat(), player, rng);
     expect(dmg).toBeGreaterThan(0);
   });
+
+  it('jutsu(盾術・rogue-23)を渡すと回避%が底上げされる(盾10%+5%=15%の境目で判定が変わる)', () => {
+    // rng*100=12 は素の盾10%には掛からず失敗するが、jutsu込みの15%には掛かって回避成功する。
+    const rng = () => 0.12;
+    const player = basePlayer({ shield: { item: 'shield', q: 0 } });
+    const withoutJutsu = beastStrike(bat(), player, rng);
+    expect(withoutJutsu.dmg).toBeGreaterThan(0);
+    const withJutsu = beastStrike(bat(), player, rng, ['jutsu']);
+    expect(withJutsu.dmg).toBe(0);
+  });
 });

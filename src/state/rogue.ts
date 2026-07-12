@@ -32,6 +32,7 @@ import {
 } from '../model/dungeon';
 import * as persist from './persist';
 import * as history from './history';
+import * as masteryStore from './masteryStore';
 import { BEASTS } from '../model/beasts';
 import {
   ITEMS,
@@ -80,6 +81,17 @@ import {
   isoDate,
   dailySeed,
 } from '../model/rogue/rules';
+import {
+  MASTERY_NAME,
+  SKILL_NODES,
+  masteryLevels,
+  unlockedNodes,
+  equippedCost,
+  draftCandidates,
+  type MasterySystem,
+  type MasteryCounters,
+  type NodeId,
+} from '../model/rogue/mastery';
 import { discoverInto } from '../model/rogue/visibility';
 import {
   computeReach as computeReachPure,
@@ -145,6 +157,17 @@ export {
   dailySeed,
 } from '../model/rogue/rules';
 export { parseSeed } from '../model/rogue/rules';
+// マスタリー・スキルノード(rogue-23)は HUD が直接参照するのでここから再輸出する。
+export {
+  MASTERY_NAME,
+  SKILL_NODES,
+  NODE_IDS,
+  masteryLevels,
+  unlockedNodes,
+  equippedCost,
+} from '../model/rogue/mastery';
+export type { MasterySystem, MasteryCounters, NodeId, SkillNode } from '../model/rogue/mastery';
+export { readMastery } from './masteryStore';
 
 export interface RogueState {
   seed: number;
@@ -171,6 +194,14 @@ export interface RogueState {
   maxDepth: number;
   /** 通過済みの層数(rogue-19b)。深度 STRATUM_DEPTH*(stratum+1)+2 で次の崩落。 */
   stratum: number;
+  /** スキルスロット数(rogue-23。初期2・関門+1・上限6)。 */
+  skillSlots: number;
+  /** 装着中のスキルノード id 列(コスト合計 ≤ skillSlots)。 */
+  skillEquipped: NodeId[];
+  /** 関門で提示中のドラフト候補(null=非表示)。 */
+  skillDraft: NodeId[] | null;
+  /** ラン開始直後の「支度」(自由装着)モード中か。 */
+  skillOutfitting: boolean;
   phase: 'play' | 'dead';
   busy: boolean;
   /** walk=移動 / throw=投擲対象選択 / place=罠の設置先選択(足元+隣接)。 */
@@ -207,6 +238,18 @@ export interface RogueState {
   mergeItem: (index: number) => void;
   /** 装備を外して所持品へ戻す(装備と同じくターン消費なし。合成の材料にできる)。 */
   unequip: (slot: 'weapon' | 'armor' | 'shield') => void;
+  /**
+   * スキルノードを装着する(rogue-23)。「支度」中は解禁済みノードから、関門の
+   * ドラフト中は提示された3候補から。コストが空きスロットを超える場合は無視する。
+   * ドラフト中に選ぶと、その場で skillDraft を閉じる(1つ選んだら終わり)。
+   */
+  equipSkill: (id: NodeId) => void;
+  /** 装着中のスキルノードを外す(「支度」中/ドラフト中のみ。組み替えの自由枠)。 */
+  unequipSkill: (id: NodeId) => void;
+  /** 「支度」を終えてそのまま潜る。 */
+  finishOutfitting: () => void;
+  /** 関門のドラフトを見送る(何も選ばず閉じる)。 */
+  skipDraft: () => void;
   /** 明かりの段階を巡回(絞る→普通→広げる)。ターンを消費しない。 */
   cycleLight: () => void;
   wait: () => void;
@@ -364,9 +407,54 @@ export const useRogue = create<RogueState>((set, get) => {
     return computeReachPure(dungeon, discovered, occupied, player.pos, REACH_STEPS);
   }
 
+  /** 「支度」パネルか関門ドラフトが開いている(rogue-23。ゲーム操作をブロックする)。 */
+  function skillModalOpen(): boolean {
+    const s = get();
+    return s.skillOutfitting || s.skillDraft !== null;
+  }
+
   function refreshReach(): void {
     // 到達範囲が変わる=状況が動いた。タッチの2段階選択(armedKey)も解除する。
-    set({ reach: computeReach(), armedKey: null });
+    // スキルモーダル表示中は移動マーカーを出さない(操作ブロック)。
+    set({ reach: skillModalOpen() ? { cells: [], parent: new Map() } : computeReach(), armedKey: null });
+  }
+
+  /**
+   * 1ターン分のアクション末尾で busy/reach を締めくくる共通処理。スキルモーダルが
+   * 開いていれば busy を true のまま維持し(ゲーム操作をブロック)、そうでなければ
+   * false に戻す。
+   */
+  function settleAfterAction(): void {
+    set({ busy: skillModalOpen() });
+    refreshReach();
+  }
+
+  /**
+   * マスタリー(永続カウンタ)を加算し、レベルアップしたらログを出す(rogue-23)。
+   * カウンタは死んでも残る(masteryStore.ts が localStorage に保存)。
+   */
+  function incrementMastery(delta: Partial<MasteryCounters>): void {
+    const cur = masteryStore.readMastery();
+    const before = masteryLevels(cur);
+    const next: MasteryCounters = {
+      weaponKills: cur.weaponKills + (delta.weaponKills ?? 0),
+      evades: cur.evades + (delta.evades ?? 0),
+      absorbed: cur.absorbed + (delta.absorbed ?? 0),
+    };
+    masteryStore.writeMastery(next);
+    const after = masteryLevels(next);
+    (Object.keys(after) as MasterySystem[]).forEach((sys) => {
+      if (after[sys] > before[sys]) {
+        pushLog(`${MASTERY_NAME[sys]}の心得が深まった(Lv${after[sys]})`);
+      }
+    });
+  }
+
+  /** 現在のマスタリーで解禁済みかつ未装着のノード id 列。 */
+  function undraftedUnlockedNodes(): NodeId[] {
+    const levels = masteryLevels(masteryStore.readMastery());
+    const equipped = get().skillEquipped;
+    return unlockedNodes(levels).filter((id) => !equipped.includes(id));
   }
 
   /** 発見済み空洞を通る任意長の最短経路(生きた敵のセルは避ける)を述語で探す。 */
@@ -408,6 +496,7 @@ export const useRogue = create<RogueState>((set, get) => {
       stratum: s.stratum,
       deathCause: s.deathCause ?? '不明',
       daily: s.seed === dailySeed(new Date()),
+      skills: s.skillEquipped,
     });
     if (s.maxDepth > prevBest) pushLog('自己ベスト更新!');
   }
@@ -425,17 +514,38 @@ export const useRogue = create<RogueState>((set, get) => {
 
   /** 敵→プレイヤーの一撃。 */
   function beastStrike(b: Beast): void {
-    const { player } = get();
+    const { player, skillEquipped } = get();
     const def = BEASTS[b.kind];
-    const { dmg, events, status } = beastStrikeCalc(b, player, rand);
+    const { dmg: rawDmg, events, status } = beastStrikeCalc(b, player, rand, skillEquipped);
+    if (rawDmg === 0) {
+      // 盾の回避成功(rogue-22)。マスタリー(盾=回避)を積む(rogue-23)。
+      incrementMastery({ evades: 1 });
+      applyEvents(events);
+      // 受け反撃(ukekaeshi・rogue-23): 固定値の反撃(乱数は引かない)。
+      if (skillEquipped.includes('ukekaeshi')) {
+        const counter = Math.floor(playerAtk(player, skillEquipped) / 2);
+        if (counter > 0) {
+          pushLog('受け流しざま反撃した!');
+          damageBeast(b, counter, '#93c5fd'); // 武技(討伐)マスタリーの対象外(近接/薙ぎ/投擲のみ)
+          set({ beasts: [...get().beasts] });
+        }
+      }
+      set({ player: { ...player } });
+      checkDead();
+      return;
+    }
+    // 硬化(kouka・rogue-23): 障壁が1以上ある間、被ダメージ−1(最低1。absorbBarrier前)。
+    let dmg = rawDmg;
+    if (player.barrier > 0 && skillEquipped.includes('kouka')) dmg = Math.max(1, dmg - 1);
     // 障壁がまず削れ、余りが HP へ(酸は障壁への削りだけ2倍)。
-    const hadBarrier = player.barrier > 0;
-    const { barrier, hpDmg } = absorbBarrier(player.barrier, dmg, !!def.acidBarrier);
+    const hadBarrierAmt = player.barrier;
+    const { barrier, hpDmg } = absorbBarrier(hadBarrierAmt, dmg, !!def.acidBarrier);
+    if (hadBarrierAmt - barrier > 0) incrementMastery({ absorbed: hadBarrierAmt - barrier }); // 甲殻マスタリー
     player.barrier = barrier;
     player.status = status;
     player.hp = Math.max(0, player.hp - hpDmg);
     applyEvents(events);
-    if (hadBarrier && barrier === 0) {
+    if (hadBarrierAmt > 0 && barrier === 0) {
       pushLog('障壁が砕けた!');
       pushFx({ kind: 'popup', at: player.pos, text: '障壁破壊', color: '#67d3e0', dur: 900 });
     }
@@ -615,10 +725,17 @@ export const useRogue = create<RogueState>((set, get) => {
   /** ターン経過の帳尻(ターン数・自然回復)。明かりが強いほど回復が早い。 */
   function endTurn(): void {
     const turn = get().turn + 1;
-    const { player, lightLevel } = get();
-    if (turn % LIGHT[lightLevel].regenEvery === 0 && player.hp > 0 && player.hp < player.maxHp) {
-      player.hp += 1;
-      set({ player: { ...player } });
+    const { player, lightLevel, skillEquipped } = get();
+    if (turn % LIGHT[lightLevel].regenEvery === 0 && player.hp > 0) {
+      if (player.hp < player.maxHp) {
+        player.hp += 1;
+        set({ player: { ...player } });
+      } else if (skillEquipped.includes('tenka') && player.barrier < 24) {
+        // 転化(rogue-23): HP満タン時の自然回復ティックが障壁+1に変わる(上限24)。
+        player.barrier = Math.min(24, player.barrier + 1);
+        pushFx({ kind: 'popup', at: player.pos, text: '障壁+1', color: '#67d3e0', dur: 700 });
+        set({ player: { ...player } });
+      }
     }
     // プレイヤーの状態異常(rogue-21)。毒は障壁を素通りして HP 直撃。
     if (player.status && player.hp > 0) {
@@ -674,7 +791,7 @@ export const useRogue = create<RogueState>((set, get) => {
     pushLog(`${itemLabel(stack)} を設置した`);
     beastsTurn();
     endTurn();
-    refreshReach();
+    settleAfterAction();
   }
 
   /** 毎ターン終わりの自動保存(死んでいたら保存しない。死亡時は checkDead が破棄済み)。 */
@@ -682,7 +799,7 @@ export const useRogue = create<RogueState>((set, get) => {
     const s = get();
     if (s.phase !== 'play') return;
     const data: SaveData = {
-      v: 5,
+      v: 6,
       seed: s.seed,
       rng: rngState,
       seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
@@ -707,6 +824,9 @@ export const useRogue = create<RogueState>((set, get) => {
       kills: s.kills,
       maxDepth: s.maxDepth,
       stratum: s.stratum,
+      skillSlots: s.skillSlots,
+      skillEquipped: s.skillEquipped,
+      skillDraft: s.skillDraft,
       actionLog,
       log: s.log.slice(-8),
     };
@@ -745,6 +865,15 @@ export const useRogue = create<RogueState>((set, get) => {
     }
     sfx.play('death');
     stratumWarned = false;
+
+    // 関門(rogue-23): スロット+1(上限6)。解禁済み・未装着のノードから乱数3択
+    // (シード列 rand から引く)。候補ゼロなら乱数を引かず、ドラフトも出さない
+    // — マスタリー未育成のプレイヤーとゴールデンテストの経路で乱数列を守る。
+    const newSlots = Math.min(6, get().skillSlots + 1);
+    const draft = draftCandidates(undraftedUnlockedNodes(), rand, 3);
+    set({ skillSlots: newSlots, skillDraft: draft.length > 0 ? draft : null });
+    if (draft.length > 0) pushLog('関門の先へ進む前に、新たな心得を選べる。');
+
     refreshReach();
     autoSave();
   }
@@ -854,6 +983,7 @@ export const useRogue = create<RogueState>((set, get) => {
         const interrupted = beastsTurn();
         endTurn();
         if (get().phase !== 'play') break;
+        if (get().skillDraft) break; // 関門ドラフトが出た(スキルモーダルで歩行中断)
         if (cellKey(actual) !== cellKey(next)) break; // 逸れたら経路は無効 — 歩行中断
         if (interrupted && i < path.length - 1) {
           pushLog('(足を止めた)');
@@ -861,8 +991,7 @@ export const useRogue = create<RogueState>((set, get) => {
         }
       }
       if (runSeq !== run) return;
-      set({ busy: false });
-      refreshReach();
+      settleAfterAction();
     } finally {
       traveling = false;
     }
@@ -889,10 +1018,10 @@ export const useRogue = create<RogueState>((set, get) => {
     if (runSeq !== run) return;
     for (const b of targets) {
       const def = BEASTS[b.kind];
-      const dmg = Math.max(1, playerAtk(player) - def.def + irnd(-1, 1));
+      const dmg = Math.max(1, playerAtk(player, get().skillEquipped) - def.def + irnd(-1, 1));
       b.awake = true;
       pushLog(`${def.name} に ${dmg}ダメージ`);
-      damageBeast(b, dmg);
+      if (damageBeast(b, dmg)) incrementMastery({ weaponKills: 1 }); // 武技マスタリー(近接・薙ぎ)
     }
     sfx.play('hit');
     set({ beasts: [...get().beasts] });
@@ -900,8 +1029,7 @@ export const useRogue = create<RogueState>((set, get) => {
     if (runSeq !== run) return;
     beastsTurn();
     endTurn();
-    set({ busy: false });
-    refreshReach();
+    settleAfterAction();
   }
 
   function killBeast(b: Beast): void {
@@ -956,14 +1084,13 @@ export const useRogue = create<RogueState>((set, get) => {
     b.awake = true;
     sfx.play('hit');
     pushLog(`投げナイフが ${def.name} に ${dmg}ダメージ`);
-    damageBeast(b, dmg);
+    if (damageBeast(b, dmg)) incrementMastery({ weaponKills: 1 }); // 武技マスタリー(投げナイフ)
     set({ beasts: [...get().beasts] });
     await sleep(200);
     if (runSeq !== run) return;
     beastsTurn();
     endTurn();
-    set({ busy: false });
-    refreshReach();
+    settleAfterAction();
   }
 
   function buildInitial(seed: number): Pick<
@@ -973,12 +1100,17 @@ export const useRogue = create<RogueState>((set, get) => {
     | 'turn' | 'kills' | 'maxDepth' | 'stratum' | 'phase' | 'busy' | 'uiMode' | 'placeIndex' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'armedKey' | 'focus' | 'log' | 'fx'
     | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
+    | 'skillSlots' | 'skillEquipped' | 'skillDraft' | 'skillOutfitting'
   > {
     clearUnitAnims();
     runSeq++;
     beastSeq = 1;
     itemSeq = 1;
     deviceSeq = 1;
+    // 支度(rogue-23): 解禁済みノードが1つ以上あればラン開始直後に自由装着パネルを開く
+    // (マスタリー未育成の初回プレイヤーには出ない)。開いている間はゲーム操作をブロック。
+    // skillEquipped はこの直後に空へリセットするので、ここでは絞り込まず単純に見る。
+    const outfitting = unlockedNodes(masteryLevels(masteryStore.readMastery())).length > 0;
     const dungeon = createDungeon(seed);
     // 入口に水薬をひとつ(手触り確認と「拾える」ことの提示)。
     const entrance = dungeon.chambers[0];
@@ -1024,8 +1156,12 @@ export const useRogue = create<RogueState>((set, get) => {
       kills: 0,
       maxDepth: 0,
       stratum: 0,
+      skillSlots: 2,
+      skillEquipped: [],
+      skillDraft: null,
+      skillOutfitting: outfitting,
       phase: 'play',
-      busy: false,
+      busy: outfitting, // 支度パネルが開いている間はゲーム操作をブロック
       uiMode: 'walk',
       placeIndex: null,
       reach: { cells: [], parent: new Map() },
@@ -1069,7 +1205,7 @@ export const useRogue = create<RogueState>((set, get) => {
 
     resume: () => {
       const d = persist.readSave<SaveData>();
-      if (!d || d.v !== 5) return false;
+      if (!d || d.v !== 6) return false;
       resetView();
       clearUnitAnims();
       runSeq++; // 進行中の自動歩行などを打ち切る
@@ -1112,8 +1248,14 @@ export const useRogue = create<RogueState>((set, get) => {
         kills: d.kills,
         maxDepth: d.maxDepth,
         stratum: d.stratum,
+        // 支度は「続きから」では出さない(そのランの最初に済んでいる)。関門ドラフトが
+        // 保存時点で残っていれば復元し、その分はゲーム操作をブロックし続ける。
+        skillSlots: d.skillSlots,
+        skillEquipped: d.skillEquipped,
+        skillDraft: d.skillDraft,
+        skillOutfitting: false,
         phase: 'play',
-        busy: false,
+        busy: d.skillDraft !== null,
         uiMode: 'walk',
         placeIndex: null,
         reach: { cells: [], parent: new Map() },
@@ -1209,7 +1351,7 @@ export const useRogue = create<RogueState>((set, get) => {
         // 飲むのも1ターン。
         beastsTurn();
         endTurn();
-        refreshReach();
+        settleAfterAction();
         return;
       }
 
@@ -1220,7 +1362,8 @@ export const useRogue = create<RogueState>((set, get) => {
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を構えた`);
         // 両手武器(rogue-22)は盾と併用できない。装備中の盾は自動で外して pack へ。
-        if (def.twoHanded && player.shield) {
+        // ただし片手扱い(katate・rogue-23)を装着中は両手武器+盾の併用が許される。
+        if (def.twoHanded && player.shield && !s.skillEquipped.includes('katate')) {
           player.pack.push(player.shield);
           player.shield = null;
           pushLog('盾を背負い直した(両手持ち)');
@@ -1239,7 +1382,8 @@ export const useRogue = create<RogueState>((set, get) => {
       }
       if (def.kind === 'shield') {
         // 両手武器(rogue-22)を装備中は盾を持てない(両手がふさがっている)。
-        if (player.weapon && ITEMS[player.weapon.item].twoHanded) {
+        // 片手扱い(katate・rogue-23)を装着中はこの制約が外れる。
+        if (player.weapon && ITEMS[player.weapon.item].twoHanded && !s.skillEquipped.includes('katate')) {
           pushLog('両手がふさがっている(武器を外せば装備できる)');
           return;
         }
@@ -1295,7 +1439,7 @@ export const useRogue = create<RogueState>((set, get) => {
         set({ player: { ...player, pack: [...player.pack] }, uiMode: 'walk' });
         beastsTurn();
         endTurn();
-        refreshReach();
+        settleAfterAction();
         return;
       }
 
@@ -1325,6 +1469,70 @@ export const useRogue = create<RogueState>((set, get) => {
       set({ player: { ...player, pack: [...player.pack] } });
     },
 
+    // --- スキル(マスタリー×スロット。rogue-23) ------------------------------------
+    // equipSkill/unequipSkill/finishOutfitting/skipDraft は「支度」「関門ドラフト」の
+    // モーダル表示中だけ動く(busy 相当のゲーム操作ブロック中でも、この4つだけは通す)。
+
+    equipSkill: (id) => {
+      logAction('SE', id);
+      const s = get();
+      const inOutfitting = s.skillOutfitting;
+      const inDraft = s.skillDraft !== null;
+      if (!inOutfitting && !inDraft) return;
+      // 支度中は解禁済み全ノードから、ドラフト中は提示された候補からのみ選べる。
+      if (inOutfitting) {
+        if (!unlockedNodes(masteryLevels(masteryStore.readMastery())).includes(id)) return;
+      } else if (!s.skillDraft!.includes(id)) {
+        return;
+      }
+      if (s.skillEquipped.includes(id)) return;
+      if (equippedCost(s.skillEquipped) + SKILL_NODES[id].cost > s.skillSlots) {
+        pushLog('スロットが足りない(外して組み替える)');
+        return;
+      }
+      set({ skillEquipped: [...s.skillEquipped, id] });
+      pushLog(`${SKILL_NODES[id].name} を装着した`);
+      sfx.play('select');
+      if (inDraft) {
+        set({ skillDraft: null });
+        settleAfterAction();
+      }
+    },
+
+    unequipSkill: (id) => {
+      logAction('SU', id);
+      const s = get();
+      if (!s.skillOutfitting && s.skillDraft === null) return;
+      if (!s.skillEquipped.includes(id)) return;
+      const player = s.player;
+      // 片手扱い(katate)を外すと、両手武器+盾の組み合わせが不整合になる — 盾を pack へ。
+      if (id === 'katate' && player.weapon && ITEMS[player.weapon.item].twoHanded && player.shield) {
+        player.pack.push(player.shield);
+        player.shield = null;
+        pushLog('盾を背負い直した(片手扱いを解除)');
+        set({ player: { ...player, pack: [...player.pack] } });
+      }
+      set({ skillEquipped: get().skillEquipped.filter((x) => x !== id) });
+      pushLog(`${SKILL_NODES[id].name} を外した`);
+      sfx.play('cancel');
+    },
+
+    finishOutfitting: () => {
+      logAction('SF');
+      if (!get().skillOutfitting) return;
+      set({ skillOutfitting: false });
+      pushLog('準備を終えて潜った。');
+      settleAfterAction();
+    },
+
+    skipDraft: () => {
+      logAction('SX');
+      if (get().skillDraft === null) return;
+      set({ skillDraft: null });
+      pushLog('スキルの選択を見送った。');
+      settleAfterAction();
+    },
+
     mergeItem: (index) => {
       logAction('M', index);
       const s = get();
@@ -1349,7 +1557,7 @@ export const useRogue = create<RogueState>((set, get) => {
       // 合成も1ターン。
       beastsTurn();
       endTurn();
-      refreshReach();
+      settleAfterAction();
     },
 
     cycleLight: () => {
@@ -1371,7 +1579,7 @@ export const useRogue = create<RogueState>((set, get) => {
       set({ uiMode: 'walk' });
       beastsTurn();
       endTurn();
-      refreshReach();
+      settleAfterAction();
     },
 
     travelTo: (c) => {

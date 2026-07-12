@@ -21,6 +21,8 @@ export interface RunRecord {
   deathCause: string;
   /** その日の「本日の迷宮」だったか。 */
   daily: boolean;
+  /** 死亡時点の装着スキルノード id 列(rogue-23)。 */
+  skills: string[];
 }
 
 let storage: Storage | null = (() => {

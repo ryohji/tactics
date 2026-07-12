@@ -7,7 +7,22 @@
 //   右下: ログ / 死亡: スコアオーバーレイ
 
 import { useState } from 'react';
-import { useRogue, playerAtk, playerDef, playerEvade, depthOf, parseSeed, LIGHT } from '../state/rogue';
+import {
+  useRogue,
+  playerAtk,
+  playerDef,
+  playerEvade,
+  depthOf,
+  parseSeed,
+  LIGHT,
+  SKILL_NODES,
+  MASTERY_NAME,
+  unlockedNodes,
+  masteryLevels,
+  equippedCost,
+  readMastery,
+  type NodeId,
+} from '../state/rogue';
 import { stepDist } from '../model/dungeon';
 import { BEASTS } from '../model/beasts';
 import { ITEMS, itemLabel, statLabel, type ItemStack } from '../model/loot';
@@ -126,6 +141,7 @@ function PackPanel() {
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const mapMode = useRogue((s) => s.mapMode);
+  const skillEquipped = useRogue((s) => s.skillEquipped);
   const [open, setOpen] = useState(true);
   if (mapMode) return null;
   const pack = player.pack;
@@ -156,18 +172,31 @@ function PackPanel() {
       <EquipSlot
         slot="weapon"
         stack={player.weapon}
-        stat={`攻${playerAtk(player)}`}
+        stat={`攻${playerAtk(player, skillEquipped)}`}
         locked={locked}
         tag={player.weapon && ITEMS[player.weapon.item].twoHanded ? '両手' : undefined}
       />
       <EquipSlot
         slot="shield"
         stack={player.shield}
-        stat={`回避${playerEvade(player)}%`}
+        stat={`回避${playerEvade(player, skillEquipped)}%`}
         locked={locked}
-        emptyHint={player.weapon && ITEMS[player.weapon.item].twoHanded ? '(両手がふさがっている)' : undefined}
+        emptyHint={
+          player.weapon && ITEMS[player.weapon.item].twoHanded && !skillEquipped.includes('katate')
+            ? '(両手がふさがっている)'
+            : undefined
+        }
       />
       <EquipSlot slot="armor" stack={player.armor} stat={`防${playerDef(player)}`} locked={locked} />
+      {skillEquipped.length > 0 && (
+        <div className="skill-row">
+          {skillEquipped.map((id) => (
+            <span key={id} className="skill-chip" title={SKILL_NODES[id].desc}>
+              {SKILL_NODES[id].name}·{SKILL_NODES[id].cost}
+            </span>
+          ))}
+        </div>
+      )}
       {groups.length === 0 && <div className="empty">(なし)</div>}
       {groups.map((g) => {
         const def = ITEMS[g.stack.item];
@@ -390,6 +419,123 @@ function DeadOverlay() {
   );
 }
 
+/** スキルノード1枚のカード(名前・系統・コスト・効果1行・装着中/選択可否)。 */
+function SkillCard({
+  id,
+  equipped,
+  disabled,
+  actionLabel,
+  onToggle,
+}: {
+  id: NodeId;
+  equipped: boolean;
+  disabled: boolean;
+  actionLabel: string;
+  onToggle: () => void;
+}) {
+  const node = SKILL_NODES[id];
+  return (
+    <div className={`skill-card${equipped ? ' equipped' : ''}`}>
+      <div className="skill-card-head">
+        <span className="skill-name">{node.name}</span>
+        <span className="skill-sys">{MASTERY_NAME[node.system]}</span>
+        <span className="skill-cost">コスト{node.cost}</span>
+      </div>
+      <p className="skill-desc">{node.desc}</p>
+      <button className={equipped ? 'active' : ''} disabled={disabled} onClick={onToggle}>
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * スキルのモーダル(rogue-23)。「支度」(ラン開始直後・解禁済み全ノードから自由装着)と
+ * 「関門ドラフト」(3択+既存装着の組み替え)を1コンポーネントで扱う。表示中は
+ * store 側で busy 相当のブロックがかかっている(clickCell 等は素通りしない)。
+ */
+function SkillModal() {
+  const outfitting = useRogue((s) => s.skillOutfitting);
+  const draft = useRogue((s) => s.skillDraft);
+  const skillSlots = useRogue((s) => s.skillSlots);
+  const skillEquipped = useRogue((s) => s.skillEquipped);
+  const equipSkill = useRogue((s) => s.equipSkill);
+  const unequipSkill = useRogue((s) => s.unequipSkill);
+  const finishOutfitting = useRogue((s) => s.finishOutfitting);
+  const skipDraft = useRogue((s) => s.skipDraft);
+  if (!outfitting && !draft) return null;
+  const used = equippedCost(skillEquipped);
+  const unlocked = outfitting ? unlockedNodes(masteryLevels(readMastery())) : [];
+
+  return (
+    <div className="hud-help">
+      {/* 支度/ドラフトは意思決定が確定要素なので、ヘルプと違い背景クリックでは閉じない
+          (誤操作でドラフトを見送ってしまうのを防ぐ)。閉じるのは常に明示ボタンのみ。 */}
+      <div className="hud-help-panel skill-panel">
+        <h2>{outfitting ? '支度' : '関門を越えた — 新たな心得'}</h2>
+        <div className="skill-slots">スロット使用量 {used}/{skillSlots}</div>
+        {outfitting ? (
+          <>
+            <div className="skill-grid">
+              {unlocked.map((id) => {
+                const eq = skillEquipped.includes(id);
+                const disabled = !eq && used + SKILL_NODES[id].cost > skillSlots;
+                return (
+                  <SkillCard
+                    key={id}
+                    id={id}
+                    equipped={eq}
+                    disabled={disabled}
+                    actionLabel={eq ? '外す' : '装着'}
+                    onToggle={() => (eq ? unequipSkill(id) : equipSkill(id))}
+                  />
+                );
+              })}
+            </div>
+            <button className="primary" onClick={finishOutfitting}>
+              そのまま潜る
+            </button>
+          </>
+        ) : (
+          <>
+            <h3>候補から1つ</h3>
+            <div className="skill-grid">
+              {draft!.map((id) => (
+                <SkillCard
+                  key={id}
+                  id={id}
+                  equipped={false}
+                  disabled={used + SKILL_NODES[id].cost > skillSlots}
+                  actionLabel="選ぶ"
+                  onToggle={() => equipSkill(id)}
+                />
+              ))}
+            </div>
+            {skillEquipped.length > 0 && (
+              <>
+                <h3>装着中(外して組み替え可)</h3>
+                <div className="skill-grid">
+                  {skillEquipped.map((id) => (
+                    <SkillCard
+                      key={id}
+                      id={id}
+                      equipped
+                      disabled={false}
+                      actionLabel="外す"
+                      onToggle={() => unequipSkill(id)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+            <button onClick={skipDraft}>見送る</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 操作説明(❓)。PC とタッチの両方をここに集約し、HUD 上の説明文は最小限にする。 */
 function HelpOverlay({ onClose }: { onClose: () => void }) {
   return (
@@ -424,6 +570,12 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             <tr><td>盾</td><td>回避率+。両手武器(長槍・大鎚)とは併用不可</td></tr>
             <tr><td>合成</td><td>同じアイテム・同じ品質の2つ → 品質+1(1ターン)</td></tr>
             <tr><td>罠</td><td>足元か隣接セルに設置。敵が踏むと発動</td></tr>
+            <tr>
+              <td>スキル</td>
+              <td>
+                関門を越えるとスロットが増え、3択から1つ選ぶ。マスタリー(武技=討伐・盾=回避・甲殻=吸収)を育てると候補が増える。死んでもマスタリーは残る
+              </td>
+            </tr>
             <tr><td>セーブ</td><td>毎ターン自動保存。死ぬと消える(再挑戦のみ)</td></tr>
           </tbody>
         </table>
@@ -455,6 +607,7 @@ export function RogueHud() {
         <BottomBar />
       </div>
       <DeadOverlay />
+      <SkillModal />
       {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </div>
   );

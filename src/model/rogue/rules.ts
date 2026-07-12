@@ -5,6 +5,7 @@ import { cellKey, layer, neighbors, worldPos, type Cell, type CellKey } from '..
 import type { Dungeon } from '../dungeon';
 import { ITEMS, stackAtk, stackDef, stackEvade } from '../loot';
 import type { Beast, Decoy, PlacedTrap, PlayerState, Turret } from './types';
+import type { NodeId } from './mastery';
 
 /** 素手の攻撃力。 */
 export const BASE_ATK = 2;
@@ -58,16 +59,32 @@ export function beastAt(beasts: readonly Beast[], k: CellKey): Beast | undefined
   return beasts.find((b) => b.alive && cellKey(b.pos) === k);
 }
 
-/** 装備込みの攻撃力/防御力。 */
-export function playerAtk(p: PlayerState): number {
-  return BASE_ATK + (p.weapon ? stackAtk(p.weapon) : 0);
+/**
+ * 装備込みの攻撃力(rogue-23: 装着スキルの補正込み)。skills 省略時は素の値
+ * (既存の呼び出し元・テストへの後方互換)。
+ * - kensan(研鑽): 武器装備中、攻撃+1
+ * - ryote(両手保持): 片手武器装備・盾スロットが空のとき、攻撃+2
+ * - katate(片手扱い): 両手武器+盾の同時装備中、攻撃−2
+ *   (命中制はまだ無いので攻撃減で代替。将来、命中率を導入したら命中−へ置換する)
+ */
+export function playerAtk(p: PlayerState, skills: readonly NodeId[] = []): number {
+  let atk = BASE_ATK + (p.weapon ? stackAtk(p.weapon) : 0);
+  if (p.weapon && skills.includes('kensan')) atk += 1;
+  if (p.weapon && !ITEMS[p.weapon.item].twoHanded && !p.shield && skills.includes('ryote')) atk += 2;
+  if (p.weapon && ITEMS[p.weapon.item].twoHanded && p.shield && skills.includes('katate')) atk -= 2;
+  return atk;
 }
 export function playerDef(p: PlayerState): number {
   return p.armor ? stackDef(p.armor) : 0;
 }
-/** 盾の回避%(rogue-22)。盾なしは 0(=beastStrike が回避判定の乱数を引かない)。 */
-export function playerEvade(p: PlayerState): number {
-  return p.shield ? stackEvade(p.shield) : 0;
+/**
+ * 盾の回避%(rogue-22)。盾なしは 0(=beastStrike が回避判定の乱数を引かない)。
+ * jutsu(盾術・rogue-23): 盾装備中、回避+5%。
+ */
+export function playerEvade(p: PlayerState, skills: readonly NodeId[] = []): number {
+  let evade = p.shield ? stackEvade(p.shield) : 0;
+  if (p.shield && skills.includes('jutsu')) evade += 5;
+  return evade;
 }
 
 /** 武器の攻撃リーチ(FCC 歩数)。素手・通常武器は 1(隣接)。長槍などは 2。 */

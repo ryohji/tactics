@@ -29,6 +29,7 @@ function record(over: Partial<RunRecord> = {}): RunRecord {
     stratum: 0,
     deathCause: 'グール',
     daily: false,
+    skills: [],
     ...over,
   };
 }

@@ -611,6 +611,55 @@
 .hud-help-links { margin: 12px 0 0; font-size: 12px; }
 .hud-help-links a { color: #93c5fd; }
 
+/* --- rogue-23: スキル(マスタリー×スロット)モーダル。hud-help-panel の流儀を流用 --- */
+.skill-panel { width: min(640px, calc(100vw - 32px)); }
+.skill-panel h3 { margin: 14px 0 6px; font-size: 13px; color: #a5b4fc; }
+.skill-slots {
+  font-size: 12px;
+  color: #fde68a;
+  margin-bottom: 10px;
+  letter-spacing: 0.04em;
+}
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.skill-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(128, 118, 210, 0.4);
+  border-radius: 9px;
+  background: rgba(20, 16, 46, 0.5);
+}
+.skill-card.equipped { border-color: #22d3ee; background: rgba(21, 94, 117, 0.28); }
+.skill-card-head { display: flex; align-items: baseline; gap: 6px; }
+.skill-card .skill-name { font-size: 13px; font-weight: 700; color: #f1f5f9; }
+.skill-card .skill-sys { font-size: 10px; color: #c4b5fd; }
+.skill-card .skill-cost {
+  margin-left: auto;
+  font-size: 11px;
+  color: #fde68a;
+  font-variant-numeric: tabular-nums;
+}
+.skill-card .skill-desc { margin: 0; font-size: 11px; color: #94a3b8; line-height: 1.4; flex: 1; }
+.skill-card > button { width: 100%; padding: 5px 8px; font-size: 12px; }
+.skill-panel > button:not(.skill-card > button) { margin-top: 6px; width: 100%; }
+
+/* --- rogue-23: HUD 常時表示(所持品の装備枠の下に装着スキルの小さな行) --- */
+.skill-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 4px; }
+.skill-chip {
+  font-size: 10px;
+  color: #a5f3fc;
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
 /* --- rogue-18: 中間幅(ハーフウィンドウ・タブレット横)での重なり防止 ---
    絶対配置のままだと下中央バーが右下ログと重なる(実測で ~1150px 以下)。
    スマホ向けと同じ「ログ → バー」の中央縦積みに切り替える。縮小や
@@ -749,6 +798,9 @@
   .hud-title-history td { padding: 4px 3px; font-size: 10px; }
   .hud-title-history td.cause { max-width: 56px; }
   .hud-title-history td.seed { font-size: 9px; }
+
+  /* スキルモーダルは1カラムで縦積み(横スクロールを起こさない)。 */
+  .skill-grid { grid-template-columns: 1fr; }
 }
 
 /* --- ダメージポップアップ（Effects の Html） --- */

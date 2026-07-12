@@ -1,6 +1,6 @@
 // rogue ストアのターン進行テスト。演出の sleep は fake timers で進める(game.test.ts と同型)。
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
 import { stepDist } from '../model/dungeon';
 import type { ItemStack } from '../model/loot';
@@ -18,6 +18,7 @@ import {
 import { GAME_VERSION } from '../model/rogue/types';
 import * as persist from './persist';
 import * as history from './history';
+import * as masteryStore from './masteryStore';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
 
@@ -835,6 +836,7 @@ describe('ローカルスコアボード(rogue-20)', () => {
       expect(h[0].stratum).toBe(s.stratum);
       expect(h[0].deathCause).toBe(s.deathCause);
       expect(h[0].v).toBe(GAME_VERSION);
+      expect(h[0].skills).toEqual(s.skillEquipped);
     } finally {
       history.setHistoryStorageForTest(null);
     }
@@ -866,6 +868,7 @@ describe('ローカルスコアボード(rogue-20)', () => {
         stratum: 0,
         deathCause: 'テスト',
         daily: false,
+        skills: [],
       });
       placeBeastAdjacent('drake');
       useRogue.setState({ player: { ...player(), hp: 1 } });
@@ -1075,18 +1078,323 @@ describe('両手持ち・盾(rogue-22)', () => {
     expect(evaded).toBe(true);
   });
 
-  it('セーブ v5: player.shield が保存・復元される', () => {
+  it('セーブ v6: player.shield が保存・復元される', () => {
     persist.setStorageForTest(new MemStorage() as unknown as Storage);
     try {
       useRogue.getState().restart(7);
       useRogue.setState({ player: { ...player(), shield: { item: 'shield', q: 1 } } });
       useRogue.getState().wait(); // 自動保存
       const raw = persist.readSave<{ v: number }>();
-      expect(raw?.v).toBe(5);
+      expect(raw?.v).toBe(6);
       useRogue.getState().restart(99);
       persist.writeSave(raw);
       expect(useRogue.getState().resume()).toBe(true);
       expect(player().shield).toEqual({ item: 'shield', q: 1 });
+    } finally {
+      persist.setStorageForTest(null);
+    }
+  });
+});
+
+describe('スキル: マスタリー×スロット(rogue-23)', () => {
+  afterEach(() => {
+    masteryStore.setMasteryStorageForTest(null);
+  });
+
+  describe('支度(ラン開始直後の自由装着)', () => {
+    it('解禁済みノードがなければ支度パネルは開かない(既定=マスタリー0)', () => {
+      const s = useRogue.getState();
+      expect(s.skillOutfitting).toBe(false);
+      expect(s.busy).toBe(false);
+      expect(s.skillSlots).toBe(2);
+      expect(s.skillEquipped).toEqual([]);
+    });
+
+    it('解禁済みノードが1つ以上あれば restart 直後に開き、ゲーム操作をブロックする', () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 10, evades: 0, absorbed: 0 }); // arms lv1 → kensan 解禁
+      useRogue.getState().restart(7);
+      const s = useRogue.getState();
+      expect(s.skillOutfitting).toBe(true);
+      expect(s.busy).toBe(true);
+      expect(s.reach.cells).toEqual([]); // モーダル中は移動マーカーが出ない
+      useRogue.getState().wait(); // busy 中は通常操作がブロックされる
+      expect(useRogue.getState().turn).toBe(0);
+    });
+
+    it('装着でき、コスト超過は拒否される。閉じると通常操作に戻る', () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 30, evades: 0, absorbed: 0 }); // arms lv2 → kensan(1)+ryote(2) 解禁
+      useRogue.getState().restart(7);
+      useRogue.getState().equipSkill('kensan'); // コスト1・スロット2
+      expect(useRogue.getState().skillEquipped).toEqual(['kensan']);
+      useRogue.getState().equipSkill('ryote'); // コスト2、残り1では足りない → 拒否
+      expect(useRogue.getState().skillEquipped).toEqual(['kensan']);
+      expect(useRogue.getState().log.at(-1)).toContain('足りない');
+      useRogue.getState().unequipSkill('kensan');
+      useRogue.getState().equipSkill('ryote');
+      expect(useRogue.getState().skillEquipped).toEqual(['ryote']);
+      useRogue.getState().finishOutfitting();
+      const s = useRogue.getState();
+      expect(s.skillOutfitting).toBe(false);
+      expect(s.busy).toBe(false);
+      expect(s.reach.cells.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('関門ドラフト', () => {
+    // layer=(x+y+z)/2, depthOf=round(-layer/4)。STRATUM_DEPTH=8 の崩落ラインを超える位置
+    // (層リセット(rogue-19b)のテストと同じ座標)。
+    const deep: [number, number, number] = [0, -88, 0];
+
+    it('候補ゼロ(マスタリー0)ならスロットだけ+1され、ドラフトは出ない', () => {
+      useRogue.setState({ player: { ...player(), pos: deep } });
+      useRogue.getState().wait();
+      const s = useRogue.getState();
+      expect(s.skillSlots).toBe(3);
+      expect(s.skillDraft).toBeNull();
+      expect(s.busy).toBe(false);
+    });
+
+    it('マスタリーがあれば3択が出て操作をブロックし、同じマスタリー・同じ乱数列なら同じ候補になる(決定性)', () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 80, evades: 40, absorbed: 300 }); // 全系統レベル3(7ノード全解禁)
+
+      useRogue.getState().restart(7);
+      useRogue.getState().finishOutfitting(); // 支度が開いていれば閉じる(マスタリーが乗っているため)
+      seedRogueRng(42);
+      useRogue.setState({ player: { ...player(), pos: deep } });
+      useRogue.getState().wait();
+      const s = useRogue.getState();
+      expect(s.skillSlots).toBe(3);
+      expect(s.skillDraft).not.toBeNull();
+      expect(s.skillDraft).toHaveLength(3);
+      expect(s.busy).toBe(true);
+      expect(s.reach.cells).toEqual([]);
+      const firstDraft = s.skillDraft;
+
+      useRogue.getState().restart(7);
+      useRogue.getState().finishOutfitting();
+      seedRogueRng(42);
+      useRogue.setState({ player: { ...player(), pos: deep } });
+      useRogue.getState().wait();
+      expect(useRogue.getState().skillDraft).toEqual(firstDraft);
+    });
+
+    it('ドラフトを見送ると何も装着されずに閉じる', () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 10, evades: 0, absorbed: 0 });
+      useRogue.getState().restart(7);
+      useRogue.getState().finishOutfitting();
+      seedRogueRng(42);
+      useRogue.setState({ player: { ...player(), pos: deep } });
+      useRogue.getState().wait();
+      expect(useRogue.getState().skillDraft).not.toBeNull();
+      useRogue.getState().skipDraft();
+      const s = useRogue.getState();
+      expect(s.skillDraft).toBeNull();
+      expect(s.skillEquipped).toEqual([]);
+      expect(s.busy).toBe(false);
+    });
+
+    it('ドラフト中は既存装着を外して組み替えられる(コスト不足の候補も、外せば選べる)', () => {
+      useRogue.setState({
+        skillSlots: 3,
+        skillEquipped: ['kensan', 'jutsu'], // コスト計1+1=2、残り1
+        skillDraft: ['ryote'], // コスト2、残り1では足りない
+      });
+      useRogue.getState().equipSkill('ryote');
+      expect(useRogue.getState().skillEquipped).toEqual(['kensan', 'jutsu']); // 拒否
+      expect(useRogue.getState().skillDraft).toEqual(['ryote']); // ドラフトは閉じない
+
+      useRogue.getState().unequipSkill('jutsu');
+      expect(useRogue.getState().skillEquipped).toEqual(['kensan']);
+
+      useRogue.getState().equipSkill('ryote');
+      expect(useRogue.getState().skillEquipped).toEqual(['kensan', 'ryote']);
+      expect(useRogue.getState().skillDraft).toBeNull(); // 選んだのでドラフトは閉じる
+    });
+  });
+
+  describe('ノード効果の配線', () => {
+    it('kouka(硬化): 障壁がある間、被ダメージ−1(最低1)を、同じ乱数列で比較して確認する', () => {
+      let sawReduction = false;
+      // LCG は下位ビットの初期値に偏りが出やすいので大きく散らしたシードを使う。
+      for (let i = 1; i <= 40; i++) {
+        const seed = i * 123457;
+        useRogue.getState().restart(7);
+        seedRogueRng(seed);
+        placeBeastAdjacent('bat');
+        useRogue.setState({ player: { ...player(), hp: 24, barrier: 10 }, skillEquipped: [] });
+        useRogue.getState().wait();
+        const rawDmg = 10 - useRogue.getState().player.barrier;
+
+        useRogue.getState().restart(7);
+        seedRogueRng(seed);
+        placeBeastAdjacent('bat');
+        useRogue.setState({ player: { ...player(), hp: 24, barrier: 10 }, skillEquipped: ['kouka'] });
+        useRogue.getState().wait();
+        const reducedDmg = 10 - useRogue.getState().player.barrier;
+
+        expect(reducedDmg).toBeLessThanOrEqual(rawDmg);
+        expect(reducedDmg).toBeGreaterThanOrEqual(Math.max(1, rawDmg - 1));
+        if (reducedDmg < rawDmg) sawReduction = true;
+      }
+      expect(sawReduction).toBe(true);
+    });
+
+    it('ukekaeshi(受け反撃): 回避成功時、攻撃者へ floor(攻撃力/2) の固定反撃', () => {
+      const b = placeBeastAdjacent('bat'); // hp=5
+      const hp0 = b.hp; // b は store の beasts 配列と同一参照(damageBeast が直接書き換える)ので先に控える
+      useRogue.setState({
+        player: {
+          ...player(),
+          hp: 24,
+          shield: { item: 'shield', q: 45 }, // 回避100%(10+2*45)で判定を決定的にする
+          weapon: { item: 'dagger', q: 0 },
+        },
+        skillEquipped: ['ukekaeshi'],
+      });
+      const atk = playerAtk(useRogue.getState().player, ['ukekaeshi']);
+      useRogue.getState().wait();
+      expect(useRogue.getState().log.some((m) => m.includes('反撃'))).toBe(true);
+      const beast = useRogue.getState().beasts.find((x) => x.id === b.id)!;
+      expect(beast.hp).toBe(hp0 - Math.floor(atk / 2));
+    });
+
+    it('tenka(転化): HP満タン時の自然回復ティックが障壁+1に変わる(上限24)', () => {
+      useRogue.setState({
+        player: { ...player(), hp: player().maxHp, barrier: 0 },
+        skillEquipped: ['tenka'],
+        lightLevel: 1, // regenEvery=6
+      });
+      for (let i = 0; i < 6; i++) useRogue.getState().wait();
+      expect(useRogue.getState().turn).toBe(6);
+      expect(useRogue.getState().player.barrier).toBe(1);
+    });
+
+    it('tenka: 障壁は上限24を超えない', () => {
+      useRogue.setState({
+        player: { ...player(), hp: player().maxHp, barrier: 24 },
+        skillEquipped: ['tenka'],
+        lightLevel: 1,
+      });
+      for (let i = 0; i < 6; i++) useRogue.getState().wait();
+      expect(useRogue.getState().player.barrier).toBe(24);
+    });
+
+    it('katate(片手扱い): 装着中は両手武器+盾を両立でき、外すと盾が自動でpackへ戻る', () => {
+      useRogue.setState({
+        player: {
+          ...player(),
+          weapon: { item: 'spear', q: 0 },
+          pack: [...player().pack, { item: 'shield', q: 0 }],
+        },
+        skillEquipped: ['katate'],
+        skillOutfitting: true, // unequipSkill は支度/ドラフト中のみ動く
+      });
+      const idx = player().pack.findIndex((x) => x.item === 'shield');
+      useRogue.getState().useItem(idx);
+      expect(player().shield).toEqual({ item: 'shield', q: 0 });
+      expect(useRogue.getState().log.at(-1)).not.toContain('ふさがっている');
+
+      useRogue.getState().unequipSkill('katate');
+      expect(useRogue.getState().skillEquipped).toEqual([]);
+      expect(player().shield).toBeNull();
+      expect(player().pack.some((x) => x.item === 'shield')).toBe(true);
+      expect(useRogue.getState().log.some((m) => m.includes('盾を背負い直した'))).toBe(true);
+    });
+
+    it('katate 装着中は両手武器を構えても盾が自動で外れない', () => {
+      useRogue.setState({
+        player: {
+          ...player(),
+          shield: { item: 'shield', q: 0 },
+          pack: [...player().pack, { item: 'maul', q: 0 }],
+        },
+        skillEquipped: ['katate'],
+      });
+      const idx = player().pack.findIndex((x) => x.item === 'maul');
+      useRogue.getState().useItem(idx);
+      expect(player().weapon?.item).toBe('maul');
+      expect(player().shield).toEqual({ item: 'shield', q: 0 }); // 外れない
+    });
+  });
+
+  describe('マスタリー(永続カウンタ)の加算', () => {
+    it('近接討伐で武技マスタリーが加算され、閾値到達でログが出る', async () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 9, evades: 0, absorbed: 0 });
+      const b = placeBeastAdjacent('bat', 1); // hp=1で確実に一撃で倒す
+      useRogue.getState().clickBeast(b.id);
+      await run();
+      expect(masteryStore.readMastery().weaponKills).toBe(10);
+      expect(useRogue.getState().log.some((m) => m.includes('武技の心得が深まった(Lv1)'))).toBe(true);
+    });
+
+    it('投げナイフの討伐でも武技マスタリーが加算される', async () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 0, evades: 0, absorbed: 0 });
+      const b = placeBeastAdjacent('bat', 1);
+      const idx = player().pack.findIndex((x) => x.item === 'knife');
+      useRogue.getState().useItem(idx);
+      useRogue.getState().clickBeast(b.id);
+      await run();
+      expect(masteryStore.readMastery().weaponKills).toBe(1);
+    });
+
+    it('盾の回避成功で盾マスタリーが加算される(回避100%で決定的)', () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 0, evades: 0, absorbed: 0 });
+      placeBeastAdjacent('bat');
+      useRogue.setState({ player: { ...player(), hp: 24, shield: { item: 'shield', q: 45 } } });
+      useRogue.getState().wait();
+      expect(masteryStore.readMastery().evades).toBe(1);
+    });
+
+    it('障壁が実際に削れた量だけ甲殻マスタリーが加算される', () => {
+      masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+      masteryStore.writeMastery({ weaponKills: 0, evades: 0, absorbed: 0 });
+      placeBeastAdjacent('bat');
+      useRogue.setState({ player: { ...player(), hp: 24, barrier: 10 } });
+      useRogue.getState().wait();
+      const absorbedAmt = 10 - useRogue.getState().player.barrier;
+      expect(masteryStore.readMastery().absorbed).toBe(absorbedAmt);
+      expect(absorbedAmt).toBeGreaterThan(0);
+    });
+  });
+
+  it('RunRecord.skills: 死亡時点の装着スキルが履歴に残る', () => {
+    history.setHistoryStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      useRogue.setState({ skillSlots: 3, skillEquipped: ['kensan', 'jutsu'] });
+      placeBeastAdjacent('drake');
+      useRogue.setState({ player: { ...player(), hp: 1 } });
+      useRogue.getState().wait();
+      expect(useRogue.getState().phase).toBe('dead');
+      const h = history.readHistory();
+      expect(h[0].skills).toEqual(['kensan', 'jutsu']);
+    } finally {
+      history.setHistoryStorageForTest(null);
+    }
+  });
+
+  it('セーブ v6: skillSlots/skillEquipped/skillDraft が保存・復元される', () => {
+    persist.setStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      useRogue.getState().restart(7);
+      useRogue.setState({ skillSlots: 4, skillEquipped: ['kensan'], skillDraft: ['jutsu', 'kouka'] });
+      useRogue.getState().wait();
+      const raw = persist.readSave<{ v: number }>();
+      expect(raw?.v).toBe(6);
+      useRogue.getState().restart(99);
+      persist.writeSave(raw);
+      expect(useRogue.getState().resume()).toBe(true);
+      const s = useRogue.getState();
+      expect(s.skillSlots).toBe(4);
+      expect(s.skillEquipped).toEqual(['kensan']);
+      expect(s.skillDraft).toEqual(['jutsu', 'kouka']);
+      expect(s.busy).toBe(true); // ドラフトが残っているのでブロックされたまま
     } finally {
       persist.setStorageForTest(null);
     }

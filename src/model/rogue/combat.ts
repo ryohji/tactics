@@ -10,6 +10,7 @@ import { BEASTS } from '../beasts';
 import { stackDmg, stackTurns, type ItemStack, type TrapKind } from '../loot';
 import type { Beast, BeastStatus, Decoy, GameEvent, PlayerState, PlayerStatus, Turret } from './types';
 import { irnd, playerDef, playerEvade } from './rules';
+import type { NodeId } from './mastery';
 
 /** 毒(rogue-21)の持続ターン(命中時)。 */
 const POISON_HIT_TURNS = 3;
@@ -46,15 +47,18 @@ const PLAYER_STATUS_TEXT: Record<PlayerStatus['kind'], { text: string; color: st
  *
  * 回避判定(rogue-22): ダメージ計算の前に、盾の回避%だけ判定する。盾なし(evade=0)なら
  * 乱数を一切引かない(盾を装備していない既存ランの乱数列を守るため)。回避成功は
- * ダメージ0・状態異常抽選なしで即返す。
+ * ダメージ0・状態異常抽選なしで即返す。skills(rogue-23)は jutsu(盾術)の回避+5%に効く
+ * (省略時は素の回避% — 既存呼び出し元・テストへの後方互換)。硬化(kouka)の被ダメ軽減や
+ * 受け反撃(ukekaeshi)は store 側(state/rogue.ts)がこの返り値を見て配線する。
  */
 export function beastStrike(
   b: Beast,
   player: PlayerState,
   rng: () => number,
+  skills: readonly NodeId[] = [],
 ): { dmg: number; events: GameEvent[]; status: PlayerStatus | null } {
   const def = BEASTS[b.kind];
-  const evade = playerEvade(player);
+  const evade = playerEvade(player, skills);
   if (evade > 0 && rng() * 100 < evade) {
     return {
       dmg: 0,
