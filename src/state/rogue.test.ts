@@ -19,6 +19,7 @@ import { GAME_VERSION } from '../model/rogue/types';
 import * as persist from './persist';
 import * as history from './history';
 import * as masteryStore from './masteryStore';
+import * as codexStore from './codexStore';
 import { INITIAL_MASTERY } from '../model/rogue/mastery';
 import { view } from './view';
 import { BEASTS } from '../model/beasts';
@@ -769,7 +770,8 @@ describe('層リセット(rogue-19b)', () => {
     expect(s.discovered.has(cellKey(deep))).toBe(true);
     expect(s.beasts.some((b) => b.id === 970)).toBe(false); // 上層の敵は消える
     expect(s.beasts.some((b) => b.id === 971)).toBe(true); // 深い側の敵は残る
-    expect(s.log.at(-1)).toContain('崩れ落ちた');
+    // 崩落ログの後に実績解除ログ(rogue-25)が続くことがあるため at(-1) では見ない。
+    expect(s.log.some((m) => m.includes('崩れ落ちた'))).toBe(true);
     expect(s.dungeon.chambers[0].collapsed).toBe(true); // 入口も墓標化(id は残る)
   });
 
@@ -870,6 +872,7 @@ describe('ローカルスコアボード(rogue-20)', () => {
         deathCause: 'テスト',
         daily: false,
         skills: [],
+        escaped: false,
       });
       placeBeastAdjacent('drake');
       useRogue.setState({ player: { ...player(), hp: 1 } });
@@ -1571,5 +1574,240 @@ describe('rogue-24: 遠隔攻撃・気配感知・門番', () => {
     await run(3000);
     const dealt = hp0 - useRogue.getState().beasts.find((x) => x.id === b.id)!.hp;
     expect(dealt).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('図鑑と実績(rogue-25)', () => {
+  afterEach(() => {
+    codexStore.setCodexStorageForTest(null);
+  });
+
+  it('討伐すると討伐図鑑に討伐数と初討伐深度が記録される', async () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    const b = placeBeastAdjacent('bat', 1);
+    useRogue.getState().clickBeast(b.id);
+    await run(3000);
+    const c = codexStore.readCodex();
+    expect(c.beasts.bat?.kills).toBe(1);
+    expect(c.beasts.bat?.firstDepth).toBe(0); // 入口(深度0)での討伐
+  });
+
+  it('地面のアイテムを拾うとアイテム図鑑に記録される', async () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    // 隣接セルに品質2の剣を置いて踏む(水薬は入口の初期配置と紛れるので使わない)。
+    const pos = freeNeighbor();
+    useRogue.setState({
+      items: [...useRogue.getState().items, { id: 990, stack: { item: 'sword', q: 2 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const c = codexStore.readCodex();
+    expect(c.items.sword?.found).toBe(1);
+    expect(c.items.sword?.bestQ).toBe(2);
+  });
+
+  it('門番を撃破すると実績「門番討ち」が解除される(二度目はログが出ない)', async () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    const b = placeBeastAdjacent('giant', 1);
+    b.awake = true;
+    useRogue.getState().clickBeast(b.id);
+    await run(3000);
+    expect(codexStore.readCodex().feats).toContain('gatekeeper');
+    expect(useRogue.getState().log.some((m) => m.includes('実績解除: 門番討ち'))).toBe(true);
+    // 2体目では既達成なのでログは増えない。
+    const before = useRogue.getState().log.filter((m) => m.includes('実績解除: 門番討ち')).length;
+    const b2 = placeBeastAdjacent('giant', 1);
+    b2.awake = true;
+    useRogue.getState().clickBeast(b2.id);
+    await run(3000);
+    const after = useRogue.getState().log.filter((m) => m.includes('実績解除: 門番討ち')).length;
+    expect(after).toBe(before);
+    expect(codexStore.readCodex().feats.filter((f) => f === 'gatekeeper')).toHaveLength(1);
+  });
+
+  it('関門通過で「最初の関門」、HP満タンなら「無傷の関門」、暗ければ「暗闇行」も解除される', () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    const deep: [number, number, number] = [0, -88, 0]; // depth=11 → 崩落ライン超え
+    useRogue.getState().dungeon.open.add(cellKey(deep));
+    useRogue.setState({
+      lightLevel: 0, // 絞る(isDimLight)
+      player: { ...player(), pos: deep, hp: 24 },
+    });
+    useRogue.getState().wait(); // 崩落発動
+    expect(useRogue.getState().stratum).toBe(1);
+    const feats = codexStore.readCodex().feats;
+    expect(feats).toContain('firstGate');
+    expect(feats).toContain('pureGate');
+    expect(feats).toContain('darkGate');
+  });
+
+  it('HP が満タンでなければ「無傷の関門」は解除されない', () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    const deep: [number, number, number] = [0, -88, 0];
+    useRogue.getState().dungeon.open.add(cellKey(deep));
+    useRogue.setState({
+      lightLevel: 1, // 普通(暗くない)
+      player: { ...player(), pos: deep, hp: 10 },
+    });
+    useRogue.getState().wait();
+    const feats = codexStore.readCodex().feats;
+    expect(feats).toContain('firstGate');
+    expect(feats).not.toContain('pureGate');
+    expect(feats).not.toContain('darkGate');
+  });
+
+  it('深度16へ到達すると実績「深淵の一瞥」が解除される', async () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    // 深度16相当のセル(layer=-64)を人工的に掘って1歩踏む。
+    const at: [number, number, number] = [0, -126, 0]; // layer=-63 → depth=16(切り上げ丸め)
+    expect(depthOf(at)).toBeGreaterThanOrEqual(16);
+    const from: [number, number, number] = [1, -127, 0]; // at の隣接セル
+    useRogue.getState().dungeon.open.add(cellKey(at));
+    useRogue.getState().dungeon.open.add(cellKey(from));
+    useRogue.setState({
+      discovered: new Set([...useRogue.getState().discovered, cellKey(at), cellKey(from)]),
+      player: { ...player(), pos: from },
+      stratum: 2, // 崩落ライン(8*(stratum+1)+2=26)に触れない層まで進んでいる想定
+    });
+    useRogue.getState().travelTo(at);
+    await run(3000);
+    expect(useRogue.getState().maxDepth).toBeGreaterThanOrEqual(16);
+    expect(codexStore.readCodex().feats).toContain('deep16');
+  });
+
+  it('罠での討伐が累計5に達すると実績「罠師の誇り」が解除される', () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    masteryStore.setMasteryStorageForTest(new MemStorage() as unknown as Storage);
+    try {
+      masteryStore.writeMastery({ ...INITIAL_MASTERY, trapKills: 4 }); // あと1体
+      // 敵の接近先に棘の罠を敷いて踏ませる(rogue-4 の罠テストと同じ構図)。
+      const trapPos = freeNeighbor();
+      useRogue.setState({
+        traps: [{ id: 900, item: 'trapSpike', kind: 'spike', q: 0, pos: trapPos }],
+      });
+      const far = useRogue.getState().reach.cells.find(
+        (c) => stepDist(useRogue.getState().player.pos, c) === 2 && neighbors(trapPos).some((n) => cellKey(n) === cellKey(c)),
+      );
+      expect(far).toBeTruthy();
+      const beast: Beast = {
+        id: 951,
+        kind: 'bat',
+        pos: far!,
+        hp: 1,
+        home: far!,
+        homeChamber: 0,
+        layerFloor: -999,
+        layerCeil: 999,
+        awake: true,
+        alive: true,
+        status: null,
+        carry: null,
+      };
+      // プレイヤーの全隣接セルに罠を敷き詰めて、どこから来ても罠を踏むようにする。
+      const s = useRogue.getState();
+      const occupied = new Set(s.beasts.filter((x) => x.alive).map((x) => cellKey(x.pos)));
+      const extraTraps = neighbors(s.player.pos)
+        .filter((c) => s.dungeon.open.has(cellKey(c)) && !occupied.has(cellKey(c)) && cellKey(c) !== cellKey(trapPos))
+        .map((c, i) => ({ id: 901 + i, item: 'trapSpike' as const, kind: 'spike' as const, q: 0, pos: c }));
+      useRogue.setState({
+        traps: [...useRogue.getState().traps, ...extraTraps],
+        beasts: [...s.beasts, beast],
+      });
+      useRogue.getState().wait(); // 敵が接近 → 罠発動 → 討伐5体目
+      expect(useRogue.getState().beasts.find((x) => x.id === 951)!.alive).toBe(false);
+      expect(codexStore.readCodex().feats).toContain('trapper5');
+      expect(masteryStore.readMastery().trapKills).toBe(5);
+    } finally {
+      masteryStore.setMasteryStorageForTest(null);
+    }
+  });
+});
+
+describe('遺物と脱出(rogue-25 後半)', () => {
+  afterEach(() => {
+    codexStore.setCodexStorageForTest(null);
+    history.setHistoryStorageForTest(null);
+    persist.setStorageForTest(null);
+  });
+
+  it('巣の琥珀を拾うと実績「初めての琥珀」が解除され、専用ログが出る', async () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    const pos = freeNeighbor();
+    useRogue.setState({
+      items: [...useRogue.getState().items, { id: 995, stack: { item: 'amber', q: 0 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    expect(player().pack.some((x) => x.item === 'amber')).toBe(true);
+    expect(codexStore.readCodex().feats).toContain('relic');
+    expect(useRogue.getState().log.some((m) => m.includes('巣の琥珀を見つけた'))).toBe(true);
+  });
+
+  it('琥珀は使ってもターンを消費せず、専用ログが出るだけ(消費されない)', () => {
+    useRogue.setState({ player: { ...player(), pack: [...player().pack, { item: 'amber', q: 1 }] } });
+    const idx = player().pack.findIndex((x) => x.item === 'amber');
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().useItem(idx);
+    expect(useRogue.getState().turn).toBe(turn0);
+    expect(player().pack.some((x) => x.item === 'amber')).toBe(true);
+    expect(useRogue.getState().log.at(-1)).toContain('大切なものだ');
+  });
+
+  it('琥珀は合成できない(ターン消費なし・所持は変わらない)', () => {
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'amber', q: 1 }, { item: 'amber', q: 1 }] },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'amber');
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().mergeItem(idx);
+    expect(useRogue.getState().turn).toBe(turn0);
+    expect(player().pack.filter((x) => x.item === 'amber')).toHaveLength(2);
+    expect(useRogue.getState().log.at(-1)).toContain('合成できない');
+  });
+
+  it('警告帯の外では脱出できない(phase は play のまま)', () => {
+    expect(depthOf(player().pos)).toBe(0); // 入口(警告帯=深度8〜9より浅い)
+    useRogue.getState().escape();
+    expect(useRogue.getState().phase).toBe('play');
+  });
+
+  it('警告帯で脱出すると phase が escaped になり、琥珀が展示棚へ確定・履歴に生還が記録される', () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    history.setHistoryStorageForTest(new MemStorage() as unknown as Storage);
+    persist.setStorageForTest(new MemStorage() as unknown as Storage);
+    useRogue.getState().wait(); // 自動保存を1回発生させておく(脱出で破棄されることの確認用)
+    expect(persist.hasSave()).toBe(true);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pos: [0, -64, 0], // depthOf=8(stratum0 の警告帯 8〜9)
+        pack: [...player().pack, { item: 'amber', q: 0 }, { item: 'amber', q: 1 }],
+      },
+      stratum: 0,
+    });
+    useRogue.getState().escape();
+    const s = useRogue.getState();
+    expect(s.phase).toBe('escaped');
+    expect(persist.hasSave()).toBe(false);
+    const c = codexStore.readCodex();
+    expect(c.ambers).toBe(2);
+    expect(c.bestStratumEscape).toBe(1);
+    const h = history.readHistory();
+    expect(h).toHaveLength(1);
+    expect(h[0].escaped).toBe(true);
+    expect(h[0].deathCause).toBe('生還');
+    expect(h[0].maxDepth).toBe(s.maxDepth);
+    expect(h[0].v).toBe(GAME_VERSION);
+  });
+
+  it('死亡時は pack の琥珀が失われる(展示棚には加算されない)', () => {
+    codexStore.setCodexStorageForTest(new MemStorage() as unknown as Storage);
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'amber', q: 0 }], hp: 1 },
+    });
+    placeBeastAdjacent('drake');
+    useRogue.getState().wait();
+    expect(useRogue.getState().phase).toBe('dead');
+    expect(codexStore.readCodex().ambers).toBe(0);
   });
 });

@@ -15,6 +15,7 @@ import {
   depthOf,
   parseSeed,
   LIGHT,
+  STRATUM_DEPTH,
   SKILL_NODES,
   MASTERY_NAME,
   unlockedNodes,
@@ -278,7 +279,7 @@ function BeastPanel() {
 }
 
 /** 下中央バー: よく使う操作(マップ・フォーカス巡回・待機)+ 深度/討伐/ターン。 */
-function BottomBar() {
+function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const uiMode = useRogue((s) => s.uiMode);
@@ -341,8 +342,67 @@ function BottomBar() {
           <button onClick={toggleMap} title="マップ(M)">
             🗺
           </button>
+          <EscapeButton busy={busy} onClick={onEscapeClick} />
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * 脱出ボタン(rogue-25・push-your-luck の自発的終点)。警告帯(深度が
+ * 8*(stratum+1) 以上・崩落ライン未満)に居る間だけ表示する。確認モーダルは
+ * ここでは開かない — position:fixed の子孫は hud-bottomarea の transform
+ * (中間幅メディアクエリ)が containing block になり中央寄せが壊れるため、
+ * トップレベル(RogueHud 直下)の EscapeConfirmModal を親から開閉させる。
+ */
+function EscapeButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  const stratum = useRogue((s) => s.stratum);
+  const playerPos = useRogue((s) => s.player.pos);
+  const depth = depthOf(playerPos);
+  const warnAt = STRATUM_DEPTH * (stratum + 1);
+  const canEscape = depth >= warnAt && depth < warnAt + 2;
+  if (!canEscape) return null;
+  return (
+    <button
+      className="escape-btn"
+      disabled={busy}
+      onClick={onClick}
+      title="地表へ戻ってランを終える(持ち物の琥珀を確定して持ち帰る)"
+    >
+      ⛏脱出
+    </button>
+  );
+}
+
+/** 脱出の確認モーダル(rogue-25。スキルパネルの流儀)。トップレベルに置き、
+    hud-bottomarea の transform に巻き込まれず常に画面中央に出るようにする。 */
+function EscapeConfirmModal({ onClose }: { onClose: () => void }) {
+  const pack = useRogue((s) => s.player.pack);
+  const escape = useRogue((s) => s.escape);
+  const amberCount = pack.filter((it) => it.item === 'amber').length;
+  return (
+    <div className="hud-help" onClick={onClose}>
+      <div className="hud-help-panel escape-panel" onClick={(e) => e.stopPropagation()}>
+        <h2>脱出する?</h2>
+        <p>
+          地表へ戻って収集を確定する。今回のランはここで終わる。
+          <br />
+          持ち物の琥珀 {amberCount} 個が展示棚に加わる。
+        </p>
+        <div className="hud-over-buttons">
+          <button
+            className="primary"
+            onClick={() => {
+              escape();
+              onClose();
+            }}
+          >
+            確定
+          </button>
+          <button onClick={onClose}>やめる</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -383,7 +443,9 @@ function DeadOverlay() {
   const seed = useRogue((s) => s.seed);
   const restart = useRogue((s) => s.restart);
   const [seedInput, setSeedInput] = useState('');
-  if (phase !== 'dead') return null;
+  if (phase !== 'dead' && phase !== 'escaped') return null;
+  const escaped = phase === 'escaped';
+  const amberCount = player.pack.filter((it) => it.item === 'amber').length;
   const result = {
     maxDepth,
     kills,
@@ -392,17 +454,22 @@ function DeadOverlay() {
     weapon: player.weapon,
     armor: player.armor,
     seed,
+    escaped,
   };
   const equip = (s: ItemStack | null) => (s ? `${itemLabel(s)}(${statLabel(s)})` : 'なし');
   return (
     <div className="hud-over">
-      <h1 className="lose">力尽きた…</h1>
+      <h1 className={escaped ? 'win' : 'lose'}>{escaped ? '生還した!' : '力尽きた…'}</h1>
       <div className="hud-score">
         最深到達 深度{maxDepth} ／ 討伐 {kills} ／ {turn}ターン
       </div>
-      <div className="hud-score-sub">
-        死因: {deathCause ?? '不明'} ／ 武器: {equip(player.weapon)} ／ 防具: {equip(player.armor)}
-      </div>
+      {escaped ? (
+        <div className="hud-score-sub">琥珀 {amberCount} 個を持ち帰った</div>
+      ) : (
+        <div className="hud-score-sub">
+          死因: {deathCause ?? '不明'} ／ 武器: {equip(player.weapon)} ／ 防具: {equip(player.armor)}
+        </div>
+      )}
       <div className="hud-score-sub">この迷宮のシード: {seed}</div>
       <div className="hud-seed-row">
         <input
@@ -606,6 +673,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
 
 export function RogueHud() {
   const [help, setHelp] = useState(false);
+  const [escapeConfirm, setEscapeConfirm] = useState(false);
   return (
     <div className="hud">
       <HpPanel />
@@ -616,10 +684,11 @@ export function RogueHud() {
           ログ → ステータス/ボタン の縦積みにして重なりを防ぐ。 */}
       <div className="hud-bottomarea">
         <LogPanel />
-        <BottomBar />
+        <BottomBar onEscapeClick={() => setEscapeConfirm(true)} />
       </div>
       <DeadOverlay />
       <SkillModal />
+      {escapeConfirm && <EscapeConfirmModal onClose={() => setEscapeConfirm(false)} />}
       {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </div>
   );

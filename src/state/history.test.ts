@@ -30,6 +30,7 @@ function record(over: Partial<RunRecord> = {}): RunRecord {
     deathCause: 'グール',
     daily: false,
     skills: [],
+    escaped: false,
     ...over,
   };
 }

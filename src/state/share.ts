@@ -18,12 +18,14 @@ export interface RunResult {
   armor: ItemStack | null;
   /** 迷宮生成シード(タイトル/再挑戦の入力欄に入れると同じ迷宮を再現できる)。 */
   seed: number;
+  /** 脱出(生還)で終えたランか(rogue-25。省略時=死亡扱い)。 */
+  escaped?: boolean;
 }
 
 // 本文はハッシュタグ込みで 120 文字程度に収める(URL は別枠)。
 // 装備は名前+品質のみ(性能の括弧書きは画面用に留める)。
 export function shareText(r: RunResult): string {
-  const cause = r.deathCause ? `${r.deathCause} に倒された` : '力尽きた';
+  const cause = r.escaped ? '生還した' : r.deathCause ? `${r.deathCause} に倒された` : '力尽きた';
   const equip = (s: ItemStack | null) => (s ? itemLabel(s) : 'なし');
   return [
     `【蟻巣迷宮】深度${r.maxDepth}で ${cause}…`,

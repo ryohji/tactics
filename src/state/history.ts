@@ -18,11 +18,14 @@ export interface RunRecord {
   maxDepth: number;
   /** 通過済みの層数(rogue-19b)。 */
   stratum: number;
+  /** 死因(deathCause の代わりに脱出成功時は '生還')。 */
   deathCause: string;
   /** その日の「本日の迷宮」だったか。 */
   daily: boolean;
   /** 死亡時点の装着スキルノード id 列(rogue-23)。 */
   skills: string[];
+  /** 脱出(生還)で終えたランか(rogue-25)。死亡なら false。 */
+  escaped: boolean;
 }
 
 let storage: Storage | null = (() => {

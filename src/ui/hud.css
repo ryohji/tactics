@@ -583,6 +583,15 @@
 }
 .hud-actions .mini { font-size: 12px; color: #a5b4fc; }
 
+/* --- rogue-25: 脱出ボタン(警告帯限定。push-your-luck の自発的終点) --- */
+.escape-btn {
+  color: #ffe9c4;
+  border-color: #d9a441;
+  background: linear-gradient(180deg, #7c5a1a, #5c4110);
+}
+.escape-btn:hover { background: linear-gradient(180deg, #9a7326, #6e4d14); }
+.escape-panel p { margin: 0 0 14px; font-size: 13px; line-height: 1.7; color: #cbd5e1; }
+
 /* --- rogue-10: ヘルプ画面(❓。説明文はここへ集約) --- */
 .hud-help {
   position: fixed;
@@ -656,6 +665,44 @@
 .skill-card .skill-desc { margin: 0; font-size: 11px; color: #94a3b8; line-height: 1.4; flex: 1; }
 .skill-card > button { width: 100%; padding: 5px 8px; font-size: 12px; }
 .skill-panel > button:not(.skill-card > button) { margin-top: 6px; width: 100%; }
+
+/* --- rogue-25: 図鑑(討伐/アイテム/実績)。hud-help-panel の流儀を流用 --- */
+.codex-panel { width: min(760px, calc(100vw - 32px)); }
+.codex-panel h3 { margin: 14px 0 6px; font-size: 13px; color: #a5b4fc; }
+.codex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.codex-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid rgba(128, 118, 210, 0.3);
+  border-radius: 7px;
+  background: rgba(20, 16, 46, 0.4);
+  font-size: 11px;
+}
+.codex-name { font-size: 12px; font-weight: 700; color: #f1f5f9; }
+.codex-name.unknown { color: #5c6478; letter-spacing: 0.14em; }
+.codex-stat { color: #94a3b8; }
+.codex-row.codex-feat { border-color: rgba(217, 164, 65, 0.4); }
+.codex-feat .feat-name { font-size: 12px; font-weight: 700; color: #fde68a; }
+.codex-feat .feat-desc { color: #94a3b8; }
+.codex-row.codex-feat.locked { opacity: 0.42; }
+.codex-row.codex-feat.locked .feat-name { color: #cbd5e1; }
+/* --- rogue-25 後半: 展示棚(琥珀・最深生還層) --- */
+.codex-shelf {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  font-size: 13px;
+  color: #e2e8f0;
+  margin-bottom: 4px;
+}
+.codex-shelf .ambers { color: #fde68a; letter-spacing: 0.05em; }
 
 /* --- rogue-23: HUD 常時表示(所持品の装備枠の下に装着スキルの小さな行) --- */
 .skill-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 4px; }
@@ -809,6 +856,9 @@
 
   /* スキルモーダルは1カラムで縦積み(横スクロールを起こさない)。 */
   .skill-grid { grid-template-columns: 1fr; }
+  /* 図鑑(rogue-25)も同様に1カラム。 */
+  .codex-grid { grid-template-columns: 1fr; }
+  .codex-shelf { flex-wrap: wrap; gap: 8px 18px; font-size: 12px; }
 }
 
 /* --- ダメージポップアップ（Effects の Html） --- */

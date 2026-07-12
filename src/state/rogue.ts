@@ -34,6 +34,7 @@ import {
 import * as persist from './persist';
 import * as history from './history';
 import * as masteryStore from './masteryStore';
+import * as codexStore from './codexStore';
 import { BEASTS } from '../model/beasts';
 import {
   ITEMS,
@@ -95,6 +96,7 @@ import {
   type MasteryCounters,
   type NodeId,
 } from '../model/rogue/mastery';
+import { FEATS, type FeatId } from '../model/rogue/feats';
 import { discoverInto } from '../model/rogue/visibility';
 import {
   computeReach as computeReachPure,
@@ -205,7 +207,8 @@ export interface RogueState {
   skillDraft: NodeId[] | null;
   /** ラン開始直後の「支度」(自由装着)モード中か。 */
   skillOutfitting: boolean;
-  phase: 'play' | 'dead';
+  /** escaped(rogue-25): 脱出(生還)で終えたラン。dead と同様に操作停止・セーブ破棄。 */
+  phase: 'play' | 'dead' | 'escaped';
   busy: boolean;
   /** walk=移動 / throw=投擲対象選択 / place=罠の設置先選択(足元+隣接)。 */
   uiMode: 'walk' | 'throw' | 'place';
@@ -258,6 +261,12 @@ export interface RogueState {
   /** 明かりの段階を巡回(絞る→普通→広げる)。ターンを消費しない。 */
   cycleLight: () => void;
   wait: () => void;
+  /**
+   * 脱出(rogue-25・push-your-luck の自発的終点)。警告帯(深度が 8*(stratum+1) 以上・
+   * 崩落ライン未満)に居るときだけ有効。持ち物の琥珀を展示棚(codexStore)へ確定し、
+   * phase を 'escaped' にする(dead と同様に操作停止・セーブ破棄)。
+   */
+  escape: () => void;
   cancelThrow: () => void;
   /** 発見済みセルへのファストトラベル(1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。 */
   travelTo: (c: Cell) => void;
@@ -457,6 +466,19 @@ export const useRogue = create<RogueState>((set, get) => {
         pushLog(`${MASTERY_NAME[sys]}の心得が深まった(Lv${after[sys]})`);
       }
     });
+    // 実績「罠師の誇り」(rogue-25): 罠での討伐が累計5に達した瞬間だけ解除。
+    if (delta.trapKills && cur.trapKills < 5 && next.trapKills >= 5) maybeUnlockFeat('trapper5');
+  }
+
+  /**
+   * 実績(永続。rogue-25)を解除する。既に解除済みなら何もしない(feats 集合で判定)。
+   * 新規解除時のみログ+効果音を出す。
+   */
+  function maybeUnlockFeat(id: FeatId): void {
+    if (codexStore.readCodex().feats.includes(id)) return;
+    codexStore.unlockFeat(id);
+    pushLog(`実績解除: ${FEATS[id].name}`);
+    sfx.play('pickup');
   }
 
   /** 現在のマスタリーで解禁済みかつ未装着のノード id 列。 */
@@ -488,11 +510,12 @@ export const useRogue = create<RogueState>((set, get) => {
 
   /**
    * ローカルスコアボード(rogue-20)へ今回のランを記録する。自己ベスト更新ならログを出す。
-   * endTurn の末尾(ターン数が確定した後)から、死亡直後の1回だけ呼ぶ
+   * 死亡時は endTurn の末尾(ターン数が確定した後)から呼ぶ
    * — checkDead は beastsTurn の途中(endTurn の turn++ より前)で走るため、
    * ここで直接呼ぶと死亡画面に表示される turn 数と1つずれる。
+   * escaped=true(rogue-25): 脱出(生還)での終了。deathCause の代わりに '生還' を記録する。
    */
-  function recordRun(): void {
+  function recordRun(escaped: boolean): void {
     const s = get();
     const prevBest = history.readHistory().reduce((max, r) => Math.max(max, r.maxDepth), 0);
     history.appendRun({
@@ -503,9 +526,10 @@ export const useRogue = create<RogueState>((set, get) => {
       kills: s.kills,
       maxDepth: s.maxDepth,
       stratum: s.stratum,
-      deathCause: s.deathCause ?? '不明',
+      deathCause: escaped ? '生還' : (s.deathCause ?? '不明'),
       daily: s.seed === dailySeed(new Date()),
       skills: s.skillEquipped,
+      escaped,
     });
     if (s.maxDepth > prevBest) pushLog('自己ベスト更新!');
   }
@@ -830,7 +854,7 @@ export const useRogue = create<RogueState>((set, get) => {
     autoSave();
     checkStratum(); // 層の警告/崩落(移動に限らずすべてのターン消費行動の後で見る)
     // 死亡直後のこの1回だけ通る(死亡後は phase!=='play' 判定で二度と endTurn まで来ない)。
-    if (get().phase === 'dead') recordRun();
+    if (get().phase === 'dead') recordRun(false);
   }
 
   /** place モード: 選んだセル(足元+隣接)へ罠を設置する(1ターン)。 */
@@ -924,8 +948,15 @@ export const useRogue = create<RogueState>((set, get) => {
       exploreRev: s.exploreRev + 1,
     });
     pushLog('背後で巣が崩れ落ちた。もう戻れない —');
+    // 実績「最初の関門」(rogue-25): 崩落を1度通過する(毎回呼んでも feats の冪等性で二重解除しない)。
+    maybeUnlockFeat('firstGate');
+    // 実績「無傷の関門」(rogue-25): HP満タンで関門を通過する。
+    if (get().player.hp === get().player.maxHp) maybeUnlockFeat('pureGate');
     // 灯火マスタリー(rogue-24): 「絞る」以下の暗さで関門を通過した実績。
-    if (isDimLight(get().lightLevel)) incrementMastery({ dimCollapses: 1 });
+    if (isDimLight(get().lightLevel)) {
+      incrementMastery({ dimCollapses: 1 });
+      maybeUnlockFeat('darkGate'); // 実績「暗闇行」(rogue-25)
+    }
     // 崩落の衝撃で障壁は剥がれる(rogue-21。層を跨いだ持ち越しをさせない)。
     const p = get().player;
     if (p.barrier > 0) {
@@ -999,11 +1030,14 @@ export const useRogue = create<RogueState>((set, get) => {
     animateUnit(PLAYER_ID, [player.pos, next]);
     player.pos = next;
     sfx.play('step');
+    const newMaxDepth = Math.max(get().maxDepth, depthOf(next));
     set({
       player: { ...player },
       focus: next,
-      maxDepth: Math.max(get().maxDepth, depthOf(next)),
+      maxDepth: newMaxDepth,
     });
+    // 実績「深淵の一瞥」(rogue-25): 深度16へ到達。
+    if (newMaxDepth >= 16) maybeUnlockFeat('deep16');
     discover();
     // 広間の訪問記録(壁色の変化キー)。
     const chId = get().cellChamber.get(cellKey(next));
@@ -1027,6 +1061,13 @@ export const useRogue = create<RogueState>((set, get) => {
         player.pack.push(f.stack);
         pushFx({ kind: 'popup', at: next, text: itemLabel(f.stack), color: '#fde68a', dur: 900 });
         pushLog(`${itemLabel(f.stack)} を拾った`);
+        // アイテム図鑑(rogue-25・永続): 入手数・最高品質。
+        codexStore.recordItemFound(f.stack.item, f.stack.q);
+        // 遺物「巣の琥珀」(rogue-25): 初めて拾うと実績解除+専用ログ。
+        if (f.stack.item === 'amber') {
+          pushLog('巣の琥珀を見つけた! 持ち帰れば宝物になる');
+          maybeUnlockFeat('relic');
+        }
       }
       sfx.play('pickup');
       set({
@@ -1086,6 +1127,7 @@ export const useRogue = create<RogueState>((set, get) => {
     sfx.play('melee');
     await sleep(140);
     if (runSeq !== run) return;
+    let diedCount = 0; // 実績「群れ祓い」(rogue-25): 1回の近接攻撃での撃破数
     for (const b of targets) {
       const def = BEASTS[b.kind];
       const skills = get().skillEquipped;
@@ -1101,12 +1143,14 @@ export const useRogue = create<RogueState>((set, get) => {
       pushLog(`${def.name} に ${dmg}ダメージ`);
       const unarmed = player.weapon === null;
       const died = damageBeast(b, dmg, '#fecaca', { weapon: !unarmed, unarmed, preAwake });
+      if (died) diedCount++;
       // 延焼の刃(hiEnjin): 装着中のみ乱数を引く(30%で延焼2ターン)。倒した敵には不要。
       if (!died && skills.includes('hiEnjin') && rand() < 0.3) {
         b.status = { kind: 'burn', turns: 2 };
         pushLog(`${def.name} に火が移った!`);
       }
     }
+    if (diedCount >= 3) maybeUnlockFeat('sweep3');
     sfx.play('hit');
     set({ beasts: [...get().beasts] });
     await sleep(240);
@@ -1122,11 +1166,17 @@ export const useRogue = create<RogueState>((set, get) => {
     pushFx({ kind: 'death', at: b.pos, dur: 700 });
     sfx.play('death');
     pushLog(`${BEASTS[b.kind].name} を倒した!`);
-    // 門番討伐(rogue-24): 心得の器(スキルスロット)が広がる。
-    if (BEASTS[b.kind].gatekeeper && get().skillSlots < 6) {
-      set({ skillSlots: get().skillSlots + 1 });
-      pushLog('門番を討った — 心得の器が広がる(スロット+1)');
-      sfx.play('pickup');
+    // 討伐図鑑(rogue-25・永続): 種ごとの討伐数・初討伐深度。
+    codexStore.recordBeastKill(b.kind, depthOf(b.pos));
+    // 門番討伐(rogue-24): 心得の器(スキルスロット)が広がる。実績(rogue-25)は
+    // スロット上限に関わらず毎回判定する(feats 集合の冪等性で二重解除は起きない)。
+    if (BEASTS[b.kind].gatekeeper) {
+      maybeUnlockFeat('gatekeeper');
+      if (get().skillSlots < 6) {
+        set({ skillSlots: get().skillSlots + 1 });
+        pushLog('門番を討った — 心得の器が広がる(スロット+1)');
+        sfx.play('pickup');
+      }
     }
     // マスタリー加算(rogue-24)。1回の討伐で複数系統に同時加算されうる
     // (例: 素手で未覚醒の敵を倒す → 拳闘+隠密)。
@@ -1436,6 +1486,12 @@ export const useRogue = create<RogueState>((set, get) => {
       // 設置先選択中に別のアイテムを使ったら選択を解く(pack の index がずれるため)。
       if (s.uiMode === 'place' && def.kind !== 'trap') set({ uiMode: 'walk', placeIndex: null });
 
+      // 遺物(rogue-25): 使用・装備・合成不可。ログのみでターン消費なし。
+      if (def.kind === 'relic') {
+        pushLog('大切なものだ(持ち帰って飾ろう)');
+        return;
+      }
+
       if (def.kind === 'potion') {
         player.pack.splice(index, 1);
         if (def.barrier !== undefined) {
@@ -1478,6 +1534,7 @@ export const useRogue = create<RogueState>((set, get) => {
         player.weapon = stack;
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を構えた`);
+        codexStore.recordItemFound(stack.item, stack.q); // アイテム図鑑(rogue-25)
         // 両手武器(rogue-22)は盾と併用できない。装備中の盾は自動で外して pack へ。
         // ただし片手扱い(katate・rogue-23)を装着中は両手武器+盾の併用が許される。
         if (def.twoHanded && player.shield && !s.skillEquipped.includes('katate')) {
@@ -1494,6 +1551,7 @@ export const useRogue = create<RogueState>((set, get) => {
         player.armor = stack;
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を身につけた`);
+        codexStore.recordItemFound(stack.item, stack.q); // アイテム図鑑(rogue-25)
         set({ player: { ...player, pack: [...player.pack] } });
         return;
       }
@@ -1509,6 +1567,7 @@ export const useRogue = create<RogueState>((set, get) => {
         player.shield = stack;
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を装備した`);
+        codexStore.recordItemFound(stack.item, stack.q); // アイテム図鑑(rogue-25)
         set({ player: { ...player, pack: [...player.pack] } });
         return;
       }
@@ -1688,6 +1747,10 @@ export const useRogue = create<RogueState>((set, get) => {
       if (s.phase !== 'play' || s.busy) return;
       const a = s.player.pack[index];
       if (!a) return;
+      if (ITEMS[a.item].kind === 'relic') {
+        pushLog('遺物は合成できない(そのまま持ち帰ろう)');
+        return;
+      }
       const j = s.player.pack.findIndex((x, i) => i !== index && x.item === a.item && x.q === a.q);
       if (j < 0) {
         pushLog('合成には同じ品質の同じアイテムがもう一つ必要');
@@ -1731,6 +1794,23 @@ export const useRogue = create<RogueState>((set, get) => {
       beastsTurn();
       endTurn();
       settleAfterAction();
+    },
+
+    escape: () => {
+      logAction('ESC');
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      const depth = depthOf(s.player.pos);
+      const warnAt = STRATUM_DEPTH * (s.stratum + 1);
+      if (depth < warnAt || depth >= warnAt + 2) return; // 警告帯限定(HUD のボタンも同条件)
+      const amberCount = s.player.pack.filter((it) => it.item === 'amber').length;
+      codexStore.recordEscape(amberCount, s.stratum + 1); // 展示棚: 琥珀加算・最深生還層更新
+      set({ phase: 'escaped', busy: false, reach: { cells: [], parent: new Map() } });
+      persist.clearSave(); // dead と同じく、ローグライクの掟: 終えた冒険は再開できない
+      bgm.setBgmScene('dead');
+      sfx.play('heal');
+      pushLog(`地表へ生還した。琥珀${amberCount}個が展示棚に加わった。`);
+      recordRun(true);
     },
 
     travelTo: (c) => {

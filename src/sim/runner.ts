@@ -7,7 +7,8 @@ import type { Policy } from './policies';
 export interface RunResult {
   seed: number;
   policy: string;
-  phase: 'play' | 'dead';
+  /** escaped(rogue-25): ボットは脱出を選ばないため、実質 play/dead のみ観測される。 */
+  phase: 'play' | 'dead' | 'escaped';
   turns: number;
   maxDepth: number;
   kills: number;

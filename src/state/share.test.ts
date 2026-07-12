@@ -49,6 +49,12 @@ describe('shareText', () => {
     expect(t).toContain('武器 なし');
     expect(t).toContain('防具 なし');
   });
+
+  it('脱出(生還)時は死因に関わらず「生還した」になる(rogue-25)', () => {
+    const t = shareText({ ...result, escaped: true });
+    expect(t).toContain('生還した');
+    expect(t).not.toContain('倒された');
+  });
 });
 
 describe('shareUrl', () => {

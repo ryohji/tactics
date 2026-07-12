@@ -7,9 +7,10 @@ export type ItemId =
   | 'leather' | 'chain' | 'plate' | 'shield'
   | 'potion' | 'barrierPotion' | 'antidote' | 'knife'
   | 'trapSpike' | 'trapFire' | 'trapConfuse' | 'trapFear' | 'trapSleep'
-  | 'turret' | 'decoy';
+  | 'turret' | 'decoy' | 'amber';
 
-export type ItemKind = 'weapon' | 'armor' | 'shield' | 'potion' | 'thrown' | 'trap' | 'turret' | 'decoy';
+/** relic(rogue-25): 遺物。使用・装備・合成できず、脱出で持ち帰ると展示棚に飾られる。 */
+export type ItemKind = 'weapon' | 'armor' | 'shield' | 'potion' | 'thrown' | 'trap' | 'turret' | 'decoy' | 'relic';
 
 /** 罠の効果種別。 */
 export type TrapKind = 'spike' | 'fire' | 'confuse' | 'fear' | 'sleep';
@@ -66,6 +67,8 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   trapSleep: { name: '眠りの罠', kind: 'trap', trap: 'sleep' },
   turret: { name: '魔導砲塔', kind: 'turret', dmg: 3, range: 8 },
   decoy: { name: '囮人形', kind: 'decoy' },
+  // 遺物(rogue-25)。q は「拾った層番号(0始まり)」を表す — 品質強化の意味ではない。
+  amber: { name: '巣の琥珀', kind: 'relic' },
 };
 
 // --- 品質込みの実効値 -----------------------------------------------------------
@@ -110,8 +113,9 @@ export function decoyHp(s: ItemStack): number {
 
 // --- 表示 -----------------------------------------------------------------------
 
-/** 名前+品質("鉄の剣+1")。 */
+/** 名前+品質("鉄の剣+1")。遺物の q は層番号なので「+q」を付けない。 */
 export function itemLabel(s: ItemStack): string {
+  if (ITEMS[s.item].kind === 'relic') return ITEMS[s.item].name;
   return `${ITEMS[s.item].name}${s.q > 0 ? `+${s.q}` : ''}`;
 }
 
@@ -146,6 +150,8 @@ export function statLabel(s: ItemStack): string {
       }
     case 'turret':
       return `威力${stackDmg(s)}·${turretTurns(s)}T`;
+    case 'relic':
+      return `層${s.q + 1}の遺物`; // q=拾った層番号(0始まり)
     default:
       return `耐久${decoyHp(s)}`;
   }
