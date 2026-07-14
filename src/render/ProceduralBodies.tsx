@@ -23,15 +23,15 @@ function BatBody({ b }: { b: Beast }) {
     <>
       <mesh position={[0, 0.3 * S, 0]}>
         <sphereGeometry args={[0.14 * S, 10, 10]} />
-        <meshStandardMaterial color={def.color} roughness={0.7} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.7} />
       </mesh>
       <mesh ref={wL} position={[0.16 * S, 0.32 * S, 0]} rotation={[0, 0, -0.5]}>
         <coneGeometry args={[0.1 * S, 0.26 * S, 4]} />
-        <meshStandardMaterial color={def.color} roughness={0.8} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.8} />
       </mesh>
       <mesh ref={wR} position={[-0.16 * S, 0.32 * S, 0]} rotation={[0, 0, 0.5]}>
         <coneGeometry args={[0.1 * S, 0.26 * S, 4]} />
-        <meshStandardMaterial color={def.color} roughness={0.8} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.8} />
       </mesh>
     </>
   );
@@ -52,7 +52,7 @@ function SpiderBody({ b }: { b: Beast }) {
     <>
       <mesh ref={body} position={[0, 0.12 * S, 0]} scale={[1.3, 0.6, 1.3]}>
         <sphereGeometry args={[0.18 * S, 10, 10]} />
-        <meshStandardMaterial color={def.color} roughness={0.85} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.85} />
       </mesh>
       <group ref={legs}>
         {[0, 1, 2, 3, 4, 5].map((i) => {
@@ -64,7 +64,7 @@ function SpiderBody({ b }: { b: Beast }) {
               rotation={[Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9]}
             >
               <cylinderGeometry args={[0.012 * S, 0.02 * S, 0.24 * S, 4]} />
-              <meshStandardMaterial color={def.color} roughness={0.9} />
+              <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.9} />
             </mesh>
           );
         })}
@@ -94,15 +94,15 @@ function GhoulBody({ b }: { b: Beast }) {
     <group ref={g}>
       <mesh position={[0, 0.22 * S, 0]}>
         <capsuleGeometry args={[0.15 * S, 0.34 * S, 4, 10]} />
-        <meshStandardMaterial color={def.color} roughness={0.9} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.9} />
       </mesh>
       <mesh ref={aL} position={[0.17 * S, 0.26 * S, 0.02 * S]} rotation={[0.2, 0, 0]}>
         <capsuleGeometry args={[0.04 * S, 0.22 * S, 3, 6]} />
-        <meshStandardMaterial color={def.color} roughness={0.9} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.9} />
       </mesh>
       <mesh ref={aR} position={[-0.17 * S, 0.26 * S, 0.02 * S]} rotation={[0.2, 0, 0]}>
         <capsuleGeometry args={[0.04 * S, 0.22 * S, 3, 6]} />
-        <meshStandardMaterial color={def.color} roughness={0.9} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.9} />
       </mesh>
     </group>
   );
@@ -150,11 +150,11 @@ function SoldierBody({ b }: { b: Beast }) {
     <>
       <mesh position={[0, 0.16 * S, -0.12 * S]} scale={[1, 0.8, 1.3]}>
         <sphereGeometry args={[0.16 * S, 10, 10]} />
-        <meshStandardMaterial color={def.color} roughness={0.75} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.75} />
       </mesh>
       <mesh position={[0, 0.2 * S, 0.16 * S]}>
         <sphereGeometry args={[0.12 * S, 10, 10]} />
-        <meshStandardMaterial color={def.color} roughness={0.7} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.7} />
       </mesh>
       <mesh ref={jL} position={[0.07 * S, 0.18 * S, 0.28 * S]} rotation={[0.4, 0, 0]}>
         <coneGeometry args={[0.03 * S, 0.14 * S, 4]} />
@@ -220,15 +220,15 @@ function DrakeBody({ b }: { b: Beast }) {
     <>
       <mesh ref={body} position={[0, 0.2 * S, 0]} scale={[1, 0.8, 1.5]}>
         <sphereGeometry args={[0.24 * S, 10, 10]} />
-        <meshStandardMaterial color={def.color} roughness={0.7} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.7} />
       </mesh>
       <mesh ref={head} position={[0, 0.42 * S, 0.28 * S]}>
         <coneGeometry args={[0.1 * S, 0.24 * S, 6]} />
-        <meshStandardMaterial color={def.color} roughness={0.7} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.7} />
       </mesh>
       <mesh ref={tail} position={[0, 0.18 * S, -0.42 * S]} rotation={[Math.PI / 2.2, 0, 0]}>
         <coneGeometry args={[0.06 * S, 0.3 * S, 5]} />
-        <meshStandardMaterial color={def.color} roughness={0.75} />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.75} />
       </mesh>
     </>
   );
@@ -249,11 +249,11 @@ function ColossusBody({ b }: { b: Beast }) {
     <>
       <mesh ref={torso} position={[0, 0.28 * S, 0]} scale={[1.2, 1, 1]}>
         <dodecahedronGeometry args={[0.3 * S, 0]} />
-        <meshStandardMaterial color={def.color} roughness={0.95} flatShading />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.95} flatShading />
       </mesh>
       <mesh ref={head} position={[0, 0.62 * S, 0]}>
         <dodecahedronGeometry args={[0.15 * S, 0]} />
-        <meshStandardMaterial color={def.color} roughness={0.95} flatShading />
+        <meshStandardMaterial color={def.color} emissive={def.color} emissiveIntensity={0.15} roughness={0.95} flatShading />
       </mesh>
     </>
   );

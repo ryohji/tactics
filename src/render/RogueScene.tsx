@@ -36,7 +36,7 @@ export function RogueScene() {
       )}
 
       {/* 全暗にはしない(輪郭が読める程度の底上げ)。主光源はたいまつ。 */}
-      <ambientLight intensity={mapMode ? 0.85 : 0.3} color="#8a7fae" />
+      <ambientLight intensity={mapMode ? 0.85 : 0.36} color="#8a7fae" />
       <directionalLight position={[10, 24, 8]} intensity={mapMode ? 0.6 : 0.22} color="#a5b4fc" />
       {mapMode && <directionalLight position={[-14, -10, -8]} intensity={0.3} color="#c9b896" />}
 

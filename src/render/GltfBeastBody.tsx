@@ -9,14 +9,23 @@ import { useGLTF, useAnimations } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { ROGUE_S, type Beast } from '../state/rogue';
+import { BEASTS } from '../model/beasts';
 import { isUnitMoving } from '../state/unitAnim';
 import type { BeastModelCfg } from './beastModels';
 
 const S = ROGUE_S;
 const FOCUS_EMISSIVE = new THREE.Color('#c79215');
+// 視認性対策: 松明圏外でも真っ黒に沈まないよう、全個体に種族色の弱い常時発光を敷く。
+const BASE_EMISSIVE_INTENSITY = 0.15;
+// 影(shade)はホバー中、半透明素材に発光が埋もれないよう不透明度を引き上げる。
+const FOCUS_OPACITY = 0.95;
 
 export function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCfg; focused: boolean }) {
   const { scene, animations } = useGLTF(cfg.url);
+  const baseColor = useMemo(
+    () => new THREE.Color(BEASTS[b.kind].color).multiplyScalar(0.6),
+    [b.kind],
+  );
   const clone = useMemo(() => {
     const c = SkeletonUtils.clone(scene);
     c.traverse((o) => {
@@ -26,10 +35,15 @@ export function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCf
         m.material = Array.isArray(m.material)
           ? m.material.map((x) => x.clone())
           : m.material.clone();
-        // 色調(影: 暗い青紫の半透明へ寄せる)。
-        if (cfg.tint) {
-          for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-            const sm = mat as THREE.MeshStandardMaterial;
+        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+          const sm = mat as THREE.MeshStandardMaterial;
+          // 種族色の常時微発光(松明圏外の視認性対策)。フォーカス/鬼火の発光で上書きされる。
+          if (sm.emissive) {
+            sm.emissive.copy(baseColor);
+            sm.emissiveIntensity = BASE_EMISSIVE_INTENSITY;
+          }
+          // 色調(影: 暗い青紫の半透明へ寄せる)。
+          if (cfg.tint) {
             if (sm.color) sm.color.lerp(new THREE.Color(cfg.tint.color), 0.55);
             sm.transparent = true;
             sm.opacity = cfg.tint.opacity;
@@ -39,7 +53,7 @@ export function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCf
       }
     });
     return c;
-  }, [scene, cfg]);
+  }, [scene, cfg, baseColor]);
   const group = useRef<THREE.Group>(null);
   const { actions, names } = useAnimations(animations, group);
   const cur = useRef('');
@@ -114,9 +128,14 @@ export function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCf
       clone.position.y = moving ? (Math.abs(Math.sin(t * 11 + b.id)) * 0.05 * S) / scale : 0;
       clone.rotation.z = moving ? 0.06 * Math.sin(t * 11 + b.id) : 0;
     }
-    // フォーカス発光(金) > 常時発光(鬼火) > なし。
+    // 影(shade)等の半透明種: フォーカス中は不透明度を引き上げ、輪郭とパルスを埋もれさせない。
+    if (cfg.tint) {
+      const targetOpacity = focused ? FOCUS_OPACITY : cfg.tint.opacity;
+      for (const m of mats) m.opacity = targetOpacity;
+    }
+    // フォーカス発光(金) > 常時発光(鬼火) > 種族色の基礎発光。
     if (focused) {
-      const p = 0.45 + 0.3 * Math.sin(t * 6);
+      const p = 0.5 + 0.3 * Math.sin(t * 6);
       for (const m of mats) {
         m.emissive.copy(FOCUS_EMISSIVE);
         m.emissiveIntensity = p;
@@ -130,7 +149,10 @@ export function GltfBeastBody({ b, cfg, focused }: { b: Beast; cfg: BeastModelCf
       }
       wasFocused.current = false;
     } else if (wasFocused.current) {
-      for (const m of mats) m.emissiveIntensity = 0;
+      for (const m of mats) {
+        m.emissive.copy(baseColor);
+        m.emissiveIntensity = BASE_EMISSIVE_INTENSITY;
+      }
       wasFocused.current = false;
     }
   });

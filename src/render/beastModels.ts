@@ -40,7 +40,7 @@ export const BEAST_MODELS: Partial<Record<BeastKind, BeastModelCfg>> = {
     lift: 0,
     idle: ['idle'],
     move: ['running', 'walk'],
-    tint: { color: '#8a7ddb', opacity: 0.72 },
+    tint: { color: '#8a7ddb', opacity: 0.8 },
   },
   drake: { url: `${MODEL_BASE}Dragon.glb`, h: 0.9, lift: 0.15, idle: ['flying_idle', 'idle'], move: ['fast_flying', 'flying'] },
   colossus: { url: `${MODEL_BASE}Golem.glb`, h: 1.15, lift: 0, idle: ['flying_idle', 'idle'], move: ['fast_flying', 'walk'] },

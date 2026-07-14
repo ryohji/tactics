@@ -24,6 +24,33 @@ import { Silhouette, SIL_RIM, SIL_XRAY } from './Silhouette';
 
 const S = ROGUE_S;
 
+/** 足元リング(視認性対策)。松明圏外でも種族色の細い輪で「そこに居る」を示す。
+    ホバー中は不透明度を上げ、半径をわずかに脈動させて強調する。 */
+function FootRing({ color, focused }: { color: string; focused: boolean }) {
+  const mesh = useRef<THREE.Mesh>(null);
+  const mat = useRef<THREE.MeshBasicMaterial>(null);
+  useFrame(({ clock }) => {
+    if (mat.current) mat.current.opacity = focused ? 0.9 : 0.45;
+    if (mesh.current) {
+      const pulse = focused ? 1 + 0.08 * Math.sin(clock.elapsedTime * 5) : 1;
+      mesh.current.scale.setScalar(pulse);
+    }
+  });
+  return (
+    <mesh ref={mesh} position={[0, 0.015 * S, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.34 * S, 0.42 * S, 24]} />
+      <meshBasicMaterial
+        ref={mat}
+        color={color}
+        transparent
+        opacity={0.45}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
 function Body({ b, focused = false }: { b: Beast; focused?: boolean }) {
   const cfg = BEAST_MODELS[b.kind];
   if (cfg) {
@@ -115,6 +142,7 @@ function BeastItem({ b }: { b: Beast }) {
         <sphereGeometry args={[0.45 * S, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
+      <FootRing color={def.color} focused={focused} />
       <group ref={bodyRef}>
         {/* フォーカス中のシルエット: プロシージャル種は反転ハル(縁取り+壁越しゴースト)。
             glTF 種は骨アニメと同期しないため Body 側の発光パルスで示す。 */}
