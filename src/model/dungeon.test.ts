@@ -11,6 +11,7 @@ import {
   collapseAbove,
   lineOfSight,
   adjacent,
+  stubLeadsSomewhere,
 } from './dungeon';
 
 describe('stepDist(FCC 最短歩数)', () => {
@@ -255,6 +256,49 @@ describe('collapseAbove(層リセット・rogue-19b)', () => {
     );
     expect(genuine.length).toBeGreaterThan(0);
     for (const st of genuine) expect(layer(st.exit) <= dg.cutLayer).toBe(true);
+  });
+});
+
+describe('stubLeadsSomewhere(rogue-25 追補: 崩落境界帯のバブル判定)', () => {
+  it('境界帯 (cutLayer-8, cutLayer] のスタブを、行き先の状態で正しく判定する(seed=1/cutLayer=-5)', () => {
+    // 前回修正(layer(exit) <= cutLayer)は境界帯を素通りさせてしまっていた。
+    // seed=1/cutLayer=-5 は a(未実体化の境界帯) b(実体化済み生存広間) c(墓標化広間)の
+    // 3ケースが同時に揃う組み合わせ。
+    const dg = createDungeon(1);
+    for (const st of [...dg.stubs]) if (!st.used) expandAt(dg, st);
+    const cutLayer = -5;
+    collapseAbove(dg, cutLayer);
+
+    // a. 境界帯にあるが未実体化 → materializeSlot のガードで二度と実体化しない(false)。
+    const unmaterializedInBand = dg.stubs.find(
+      (st) =>
+        layer(st.exit) > cutLayer - 8 &&
+        layer(st.exit) <= cutLayer &&
+        !dg.slots.has(slotKeyOfCell(st.exit)),
+    );
+    expect(unmaterializedInBand).toBeDefined();
+    expect(stubLeadsSomewhere(dg, unmaterializedInBand!)).toBe(false);
+
+    // b. 境界帯にあり、実体化済みの生きた広間 → 通路として正当(true)。
+    const aliveInBand = dg.stubs.find((st) => {
+      const id = dg.slots.get(slotKeyOfCell(st.exit));
+      return (
+        layer(st.exit) > cutLayer - 8 &&
+        layer(st.exit) <= cutLayer &&
+        id !== undefined &&
+        !dg.chambers[id].collapsed
+      );
+    });
+    expect(aliveInBand).toBeDefined();
+    expect(stubLeadsSomewhere(dg, aliveInBand!)).toBe(true);
+
+    // c. 実体化済みでも墓標化(collapsed) → false。
+    const collapsedTarget = dg.stubs.find((st) => {
+      const id = dg.slots.get(slotKeyOfCell(st.exit));
+      return id !== undefined && dg.chambers[id].collapsed;
+    });
+    expect(collapsedTarget).toBeDefined();
+    expect(stubLeadsSomewhere(dg, collapsedTarget!)).toBe(false);
   });
 });
 

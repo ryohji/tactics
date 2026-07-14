@@ -8,8 +8,8 @@
 import { useEffect, useMemo } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { cellKey, layer, neighbors, worldPos, type Cell } from '../model/fcc';
-import { stepDist } from '../model/dungeon';
+import { cellKey, neighbors, worldPos, type Cell } from '../model/fcc';
+import { stepDist, stubLeadsSomewhere } from '../model/dungeon';
 import { itemLabel } from '../model/loot';
 import { BEASTS } from '../model/beasts';
 import { useRogue, ROGUE_S } from '../state/rogue';
@@ -84,7 +84,7 @@ function GameBubbles() {
           (st) =>
             st.from === chamberId &&
             discovered.has(cellKey(st.mouth)) &&
-            layer(st.exit) <= dungeon.cutLayer,
+            stubLeadsSomewhere(dungeon, st),
         );
 
   return (
@@ -121,9 +121,12 @@ function MapBubbles() {
   void discoveredRev;
   const { discovered, dungeon, cellChamber } = useRogue.getState();
 
-  // TAB フォーカス中の部屋: 中央に「入り口へ移動」バブル(自分の部屋には出さない)。
+  // TAB フォーカス中の部屋: 中央に「入り口へ移動」バブル(自分の部屋には出さない・
+  // 崩落済み(墓標化)部屋にも出さない防御ガード)。
   const focusTarget =
-    mapFocusChamber !== null && cellChamber.get(cellKey(playerPos)) !== mapFocusChamber
+    mapFocusChamber !== null &&
+    cellChamber.get(cellKey(playerPos)) !== mapFocusChamber &&
+    !dungeon.chambers[mapFocusChamber].collapsed
       ? dungeon.chambers[mapFocusChamber]
       : null;
 
@@ -139,7 +142,7 @@ function MapBubbles() {
           (st) =>
             st.from === chamberId &&
             discovered.has(cellKey(st.mouth)) &&
-            layer(st.exit) <= dungeon.cutLayer,
+            stubLeadsSomewhere(dungeon, st),
         );
 
   // 引き出し線(対象のすぐ上 → バブルの足元)をひとつの LineSegments にまとめる。

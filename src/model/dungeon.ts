@@ -377,6 +377,18 @@ function materializeSlot(dg: Dungeon, s: Slot): Chamber | null {
   return ch;
 }
 
+/**
+ * スタブの行き先がまだ「存在しうる」か(rogue-25 追補)。崩落(cutLayer)後、
+ * 境界帯のスタブは used 化されるだけで残るため、バブル表示はこれで判定する。
+ * - 行き先スロットが実体化済み → その広間が墓標化(collapsed)していないこと
+ * - 未実体化 → materializeSlot と同じ判定(layer(exit) <= cutLayer - 8)で将来実体化しうること
+ */
+export function stubLeadsSomewhere(dg: Dungeon, st: Stub): boolean {
+  const id = dg.slots.get(slotKeyOfCell(st.exit));
+  if (id !== undefined) return !dg.chambers[id].collapsed;
+  return layer(st.exit) <= dg.cutLayer - 8;
+}
+
 /** スタブ位置(隣接スロットのアンカー)の広間を実体化する。 */
 export function expandAt(dg: Dungeon, stub: Stub): Chamber | null {
   stub.used = true;

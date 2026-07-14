@@ -15,52 +15,52 @@
 //
 // ダンジョンの実体(model/dungeon.ts)は in-place 掘削なので、描画は discoveredRev を
 // 変更検知キーにする。敵・宝は広間の生成時(maybeExpand)に湧く。
+//
+// このファイルは合成ルート(rogue.ts 分割A1〜A5で完了)。zustand ストアは1つのまま
+// (useRogue)、内部の実装は state/rogue/ 配下のファクトリ(createXxx(deps))へ分割し、
+// ここではそれらを生成して deps(set/get・共有ヘルパ・相互のサンク参照)を配線するだけ。
+// 分割の地図:
+//   rng.ts / saveCodec.ts        乱数・セーブの符号化(A1)
+//   skills.ts                    スキル・マスタリー・実績(A2)
+//   combatActions.ts             近接/投擲攻撃・敵の1ターン・罠・砲塔・討伐(A3)
+//   moveActions.ts               歩行・ファストトラベル・発見・拡張・拾得(A4)
+//   stratum.ts                   層の警告/崩落・ターン経過の帳尻(endTurn)(A5)
+//   runEnd.ts                    死亡判定・スコア記録・脱出(escape)(A5)
+// rogue.ts に残るのは: 状態定義(RogueState)・型の再輸出・restart/resume・
+// 上記のいずれにも属さない UI 系アクション・pushLog/pushFx/applyEvents/logAction/
+// autoSave/placeTrapAt などの共有ヘルパ・各ファクトリの生成と配線のみ。
 
 import { create } from 'zustand';
-import { OFFSETS, cellKey, keyToCell, layer, type Cell, type CellKey } from '../model/fcc';
-import {
-  createDungeon,
-  maybeExpand,
-  slotKeyOfCell,
-  lcg,
-  distW,
-  adjacent,
-  stepDist,
-  collapseAbove,
-  lineOfSight,
-  type Dungeon,
-  type Chamber,
-} from '../model/dungeon';
+import { cellKey, keyToCell, type Cell, type CellKey } from '../model/fcc';
+import { createDungeon, distW, stepDist, type Dungeon } from '../model/dungeon';
+import { rand, seedRogueRng, getRngState, setRngState } from './rogue/rng';
+import { encodeSave, decodeSave } from './rogue/saveCodec';
+import { createSkills } from './rogue/skills';
+import { createCombat } from './rogue/combatActions';
+import { createMove, sleep } from './rogue/moveActions';
+import { createStratum, resetStratumWarned } from './rogue/stratum';
+import { createRunEnd } from './rogue/runEnd';
 import * as persist from './persist';
-import * as history from './history';
 import * as masteryStore from './masteryStore';
 import * as codexStore from './codexStore';
-import { BEASTS } from '../model/beasts';
 import {
   ITEMS,
   itemLabel,
   stackHeal,
   stackBarrier,
   stackImmune,
-  stackDmg,
   turretTurns,
   decoyHp,
   type ItemStack,
 } from '../model/loot';
-import { animateUnit, clearUnitAnims, STEP_MS } from './unitAnim';
+import { animateUnit, clearUnitAnims } from './unitAnim';
 import { view, resetView, setGazeGoal, clearGazeGoal } from './view';
 import * as sfx from '../audio/sfx';
 import * as bgm from '../audio/bgm';
 import { triggerPose } from './playerPose';
 import {
   ROGUE_S,
-  PLAYER_ID,
-  REACH_STEPS,
-  EXPAND_R,
-  STRATUM_DEPTH,
-  GAME_VERSION,
   LIGHT,
-  isDimLight,
   type LightLevel,
   type Beast,
   type GroundItem,
@@ -72,57 +72,8 @@ import {
   type SaveData,
   type ActionLogEntry,
 } from '../model/rogue/types';
-import {
-  BURN_DMG,
-  depthOf,
-  beastAt,
-  playerAtk,
-  weaponReach,
-  weaponSweep,
-  placeableCells,
-  gazeAngles,
-  isoDate,
-  dailySeed,
-} from '../model/rogue/rules';
-import {
-  MASTERY_NAME,
-  SKILL_NODES,
-  COUNTER_NODES,
-  masteryLevels,
-  unlockedNodes,
-  equippedCost,
-  draftCandidates,
-  type MasterySystem,
-  type MasteryCounters,
-  type NodeId,
-} from '../model/rogue/mastery';
-import { FEATS, type FeatId } from '../model/rogue/feats';
-import { discoverInto } from '../model/rogue/visibility';
-import {
-  computeReach as computeReachPure,
-  findPath as findPathPure,
-  findPathWhere as findPathWherePure,
-  pathFromReach,
-  type Reach,
-} from '../model/rogue/reach';
-import {
-  beastStrike as beastStrikeCalc,
-  beastStrikeDecoy as beastStrikeDecoyCalc,
-  damageEvents,
-  resolveTrapEffect,
-  statusAppliedEvents,
-  turretTarget,
-  absorbBarrier,
-} from '../model/rogue/combat';
-import {
-  stepCandidates as stepCandidatesPure,
-  checkAggro,
-  chooseTarget,
-  chooseFleeStep,
-  outOfTerritory,
-  chooseChaseStep,
-} from '../model/rogue/beastAI';
-import { spawnChamber } from '../model/rogue/spawn';
+import { depthOf, weaponReach, placeableCells, gazeAngles } from '../model/rogue/rules';
+import { masteryLevels, unlockedNodes, type NodeId } from '../model/rogue/mastery';
 import type { GameEvent } from '../model/rogue/types';
 
 // ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
@@ -291,23 +242,15 @@ export interface RogueState {
 // --- セーブデータ -----------------------------------------------------------------
 
 // --- RNG(戦闘分散用。ダンジョン生成は dungeon.rng) --------------------------------
+// 実体は state/rogue/rng.ts(分割A1)。テスト・シミュレータが './rogue' から
+// import しているため seedRogueRng の再輸出を維持する。
+export { seedRogueRng } from './rogue/rng';
 
-let rngState = (Date.now() ^ 0x2f6e2b1) >>> 0;
-
-/** 戦闘乱数列を固定する(restart がシードから呼ぶ。テストは restart 後に上書き)。 */
-export function seedRogueRng(seed: number): void {
-  rngState = seed >>> 0;
-}
-
-function rand(): number {
-  rngState = (rngState * 1664525 + 1013904223) >>> 0;
-  return rngState / 0x100000000;
-}
-
-/** a..b の整数(両端含む)。 */
-function irnd(a: number, b: number): number {
-  return a + Math.floor(rand() * (b - a + 1));
-}
+// 演出待ち(timeScale込み)・ファストトラベルの traveling フラグは state/rogue/moveActions.ts
+// へ分離(rogue.ts 分割A4)。setTimeScaleForTest はテスト/シミュレータが './rogue' から
+// import しているため再輸出を維持する。sleep は combat の deps にもそのまま渡すため import
+// して使う(上の import 文)。
+export { setTimeScaleForTest } from './rogue/moveActions';
 
 // --- 内部ヘルパ -------------------------------------------------------------------
 
@@ -321,30 +264,12 @@ let chamberCycleIdx = -1;
 // リスタート世代。await を跨ぐ非同期処理(自動歩行・攻撃演出)が、restart 後に
 // 古い経路のまま新しいダンジョンを触らないよう、世代が変わったら打ち切る。
 let runSeq = 0;
-// ファストトラベル(walkPath)が進行中か。cancelTravel はこのときだけ runSeq を進めて
-// 打ち切る(攻撃演出など他の busy 処理を巻き込まないためのガード)。
-let traveling = false;
-// 現在の層で「もうすぐ崩落する」警告を出したか(層ごとに restart/崩落でリセット)。
-let stratumWarned = false;
 // 行動ログ(rogue-19b)。将来の再生器(rogue-26)向けの記録のみ。restart でリセット。
 let actionLog: ActionLogEntry[] = [];
-
-// 演出待ちの時間スケール(既定1)。シミュレータ(rogue-19a)が待ち時間だけを
-// 詰めて headless 高速実行するためのフック。挙動・乱数列には影響しない。
-let timeScale = 1;
-
-/** テスト/シミュレータ用: 演出待ちの時間スケールを変える。scale=0 で実質即解決。 */
-export function setTimeScaleForTest(scale: number): void {
-  timeScale = scale;
-}
 
 /** テスト用: 現在の行動ログを読む(rogue-19b。actionLog はモジュール変数で外から見えないため)。 */
 export function getActionLogForTest(): readonly ActionLogEntry[] {
   return actionLog;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms * timeScale));
 }
 
 // --- ストア本体 -------------------------------------------------------------------
@@ -392,470 +317,119 @@ export const useRogue = create<RogueState>((set, get) => {
     }
   }
 
-  /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
-  /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
-  function discover(): void {
-    const { dungeon, discovered, player, lightLevel } = get();
-    const grew = discoverInto(dungeon, player.pos, LIGHT[lightLevel].see, discovered);
-    if (grew) set({ discoveredRev: get().discoveredRev + 1 });
-  }
+  // discover/populate/computeReach/refreshReach/settleAfterAction・findPathWhere/findPath/
+  // pathTo・confusedStep/stepPlayer/walkPath・clickCell/travelTo/cancelTravel/
+  // travelToChamber/wait は state/rogue/moveActions.ts(move)へ分離(rogue.ts 分割A4)。
 
-  /** 新しく生成された広間に敵と宝を湧かせる(セル→広間対応の登録も担う)。 */
-  function populate(ch: Chamber): void {
-    const { dungeon, beasts, items, cellChamber } = get();
-    for (const k of ch.cells) cellChamber.set(k, ch.id);
-    const spawned = spawnChamber(
-      dungeon,
-      ch,
-      () => beastSeq++,
-      () => itemSeq++,
-    );
-    set({ beasts: [...beasts, ...spawned.beasts], items: [...items, ...spawned.items] });
-  }
+  // checkDead/recordRun/escape は state/rogue/runEnd.ts(runEnd)へ、checkStratum/
+  // triggerCollapse/endTurn は state/rogue/stratum.ts(stratum)へ分離(rogue.ts 分割A5)。
+  // runEnd は他モジュールを呼び返さない(一方向の依存)ため真っ先に作れる。stratum は
+  // runEnd.checkDead/recordRun・skills の一部・move.refreshReach を使うため、
+  // skills の直後・move より前に作る(move/combat の endTurn デップはまだ存在しない
+  // stratum をサンクで指す)。
+  let combat: ReturnType<typeof createCombat>;
+  let move: ReturnType<typeof createMove>;
+  let stratum: ReturnType<typeof createStratum>;
 
-  /** クリック可能な移動先(発見済み空洞・敵なし・BFS≤REACH_STEPS)。 */
-  function computeReach(): Reach {
-    const { dungeon, discovered, beasts, player, phase } = get();
-    if (phase !== 'play') return { cells: [], parent: new Map() };
-    const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
-    return computeReachPure(dungeon, discovered, occupied, player.pos, REACH_STEPS);
-  }
+  const runEnd = createRunEnd({ set, get, pushLog, logAction, sfx });
 
-  /** 「支度」パネルか関門ドラフトが開いている(rogue-23。ゲーム操作をブロックする)。 */
-  function skillModalOpen(): boolean {
-    const s = get();
-    return s.skillOutfitting || s.skillDraft !== null;
-  }
+  // スキル・マスタリー・実績のオーケストレーション(rogue-23〜25)は state/rogue/skills.ts
+  // へ分離(rogue.ts 分割A2)。set/get・pushLog・logAction と、A5 で state/rogue/stratum.ts
+  // へ移った endTurn を共有コンテキストとして渡す。settleAfterAction/discover は A4 で
+  // state/rogue/moveActions.ts(move)へ、beastsTurn は A3 で state/rogue/combatActions.ts
+  // (combat)へ移ったが、どちらもまだ存在しないオブジェクトを指すため、サンク
+  // (() => move.discover() 等)で「後から束縛」して解く。stratum も同様にまだ存在しない。
+  const skills = createSkills({
+    set,
+    get,
+    pushLog,
+    logAction,
+    settleAfterAction: () => move.settleAfterAction(),
+    beastsTurn: () => combat.beastsTurn(),
+    endTurn: () => stratum.endTurn(),
+    discover: () => move.discover(),
+  });
 
-  function refreshReach(): void {
-    // 到達範囲が変わる=状況が動いた。タッチの2段階選択(armedKey)も解除する。
-    // スキルモーダル表示中は移動マーカーを出さない(操作ブロック)。
-    set({ reach: skillModalOpen() ? { cells: [], parent: new Map() } : computeReach(), armedKey: null });
-  }
+  // 層(ストラタム)のオーケストレーション(rogue-19b)は state/rogue/stratum.ts へ分離
+  // (rogue.ts 分割A5)。triggerCollapse が skills.maybeUnlockFeat/incrementMastery/
+  // undraftedUnlockedNodes を呼ぶため直前に作った skills(実体)を渡し、move.refreshReach を
+  // 呼ぶためまだ存在しない move はサンクで渡す。checkDead/recordRun は runEnd(実体)から、
+  // autoSave は rogue.ts 側の関数宣言(hoisted なのでこの時点でも参照可)をそのまま渡す。
+  stratum = createStratum({
+    set,
+    get,
+    pushLog,
+    pushFx,
+    sfx,
+    rand,
+    checkDead: runEnd.checkDead,
+    recordRun: runEnd.recordRun,
+    skills: {
+      maybeUnlockFeat: skills.maybeUnlockFeat,
+      incrementMastery: skills.incrementMastery,
+      undraftedUnlockedNodes: skills.undraftedUnlockedNodes,
+    },
+    refreshReach: () => move.refreshReach(),
+    autoSave,
+  });
 
-  /**
-   * 1ターン分のアクション末尾で busy/reach を締めくくる共通処理。スキルモーダルが
-   * 開いていれば busy を true のまま維持し(ゲーム操作をブロック)、そうでなければ
-   * false に戻す。
-   */
-  function settleAfterAction(): void {
-    set({ busy: skillModalOpen() });
-    refreshReach();
-  }
+  // 移動・探索オーケストレーション(歩行/ファストトラベル・発見・拡張・拾得)は
+  // state/rogue/moveActions.ts へ分離(rogue.ts 分割A4)。stepPlayer が
+  // skills.maybeUnlockFeat を呼ぶため直前に作った skills(実体)を渡し、walkPath/wait が
+  // combat.beastsTurn を呼ぶためまだ存在しない combat はサンクで渡す。beastSeq/itemSeq/
+  // runSeq のアクセサ・placeTrapAt(罠設置。rogue.ts 側に残置)・endTurn(A5 で stratum へ)
+  // もここで共有コンテキストとして渡す。
+  move = createMove({
+    set,
+    get,
+    pushLog,
+    pushFx,
+    logAction,
+    sfx,
+    animateUnit,
+    rand,
+    combat: { beastsTurn: () => combat.beastsTurn() },
+    endTurn: () => stratum.endTurn(),
+    skills: { skillModalOpen: skills.skillModalOpen, maybeUnlockFeat: skills.maybeUnlockFeat },
+    getRunSeq: () => runSeq,
+    bumpRunSeq: () => {
+      runSeq++;
+    },
+    nextBeastSeq: () => beastSeq++,
+    nextItemSeq: () => itemSeq++,
+    placeTrapAt,
+  });
 
-  /**
-   * マスタリー(永続カウンタ)を加算し、レベルアップしたらログを出す(rogue-23)。
-   * カウンタは死んでも残る(masteryStore.ts が localStorage に保存)。
-   */
-  function incrementMastery(delta: Partial<MasteryCounters>): void {
-    const cur = masteryStore.readMastery();
-    const before = masteryLevels(cur);
-    const next: MasteryCounters = {
-      weaponKills: cur.weaponKills + (delta.weaponKills ?? 0),
-      evades: cur.evades + (delta.evades ?? 0),
-      absorbed: cur.absorbed + (delta.absorbed ?? 0),
-      fistKills: cur.fistKills + (delta.fistKills ?? 0),
-      stealthKills: cur.stealthKills + (delta.stealthKills ?? 0),
-      trapKills: cur.trapKills + (delta.trapKills ?? 0),
-      dimCollapses: cur.dimCollapses + (delta.dimCollapses ?? 0),
-    };
-    masteryStore.writeMastery(next);
-    const after = masteryLevels(next);
-    (Object.keys(after) as MasterySystem[]).forEach((sys) => {
-      if (after[sys] > before[sys]) {
-        pushLog(`${MASTERY_NAME[sys]}の心得が深まった(Lv${after[sys]})`);
-      }
-    });
-    // 実績「罠師の誇り」(rogue-25): 罠での討伐が累計5に達した瞬間だけ解除。
-    if (delta.trapKills && cur.trapKills < 5 && next.trapKills >= 5) maybeUnlockFeat('trapper5');
-  }
+  // 戦闘オーケストレーション(近接/投擲攻撃・敵の1ターン・罠・砲塔・討伐処理)は
+  // state/rogue/combatActions.ts へ分離(rogue.ts 分割A3)。killBeast が
+  // skills.incrementMastery/maybeUnlockFeat を呼ぶため、直前に作った skills から
+  // 使う2つだけを渡す。settleAfterAction は A4 で move へ移ったのでその戻り値を渡す。
+  // checkDead は runEnd(実体)から、endTurn は A5 で stratum へ移ったのでその戻り値を渡す。
+  // sleep/sfx/triggerPose/animateUnit/rand・runSeq/itemSeq のアクセサもここで
+  // 共有コンテキストとして渡す。
+  combat = createCombat({
+    set,
+    get,
+    pushLog,
+    pushFx,
+    applyEvents,
+    checkDead: runEnd.checkDead,
+    endTurn: () => stratum.endTurn(),
+    settleAfterAction: () => move.settleAfterAction(),
+    sleep,
+    sfx,
+    triggerPose,
+    animateUnit,
+    rand,
+    getRunSeq: () => runSeq,
+    nextItemSeq: () => itemSeq++,
+    skills: { incrementMastery: skills.incrementMastery, maybeUnlockFeat: skills.maybeUnlockFeat },
+  });
 
-  /**
-   * 実績(永続。rogue-25)を解除する。既に解除済みなら何もしない(feats 集合で判定)。
-   * 新規解除時のみログ+効果音を出す。
-   */
-  function maybeUnlockFeat(id: FeatId): void {
-    if (codexStore.readCodex().feats.includes(id)) return;
-    codexStore.unlockFeat(id);
-    pushLog(`実績解除: ${FEATS[id].name}`);
-    sfx.play('pickup');
-  }
-
-  /** 現在のマスタリーで解禁済みかつ未装着のノード id 列。 */
-  function undraftedUnlockedNodes(): NodeId[] {
-    const levels = masteryLevels(masteryStore.readMastery());
-    const equipped = get().skillEquipped;
-    return unlockedNodes(levels).filter((id) => !equipped.includes(id));
-  }
-
-  /** 発見済み空洞を通る任意長の最短経路(生きた敵のセルは避ける)を述語で探す。 */
-  function findPathWhere(isGoal: (k: CellKey) => boolean): Cell[] | null {
-    const { dungeon, discovered, beasts, player } = get();
-    const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
-    return findPathWherePure(dungeon, discovered, occupied, player.pos, isGoal);
-  }
-
-  /** 指定セルへの最短経路。 */
-  function findPath(to: Cell): Cell[] | null {
-    const { dungeon, discovered, beasts, player } = get();
-    const occupied = new Set(beasts.filter((b) => b.alive).map((b) => cellKey(b.pos)));
-    return findPathPure(dungeon, discovered, occupied, player.pos, to);
-  }
-
-  /** parent 木から経路を復元([現在地, ..., 目的地])。 */
-  function pathTo(to: Cell): Cell[] {
-    const { reach, player } = get();
-    return pathFromReach(reach, player.pos, to);
-  }
-
-  /**
-   * ローカルスコアボード(rogue-20)へ今回のランを記録する。自己ベスト更新ならログを出す。
-   * 死亡時は endTurn の末尾(ターン数が確定した後)から呼ぶ
-   * — checkDead は beastsTurn の途中(endTurn の turn++ より前)で走るため、
-   * ここで直接呼ぶと死亡画面に表示される turn 数と1つずれる。
-   * escaped=true(rogue-25): 脱出(生還)での終了。deathCause の代わりに '生還' を記録する。
-   */
-  function recordRun(escaped: boolean): void {
-    const s = get();
-    const prevBest = history.readHistory().reduce((max, r) => Math.max(max, r.maxDepth), 0);
-    history.appendRun({
-      v: GAME_VERSION,
-      seed: s.seed,
-      date: isoDate(new Date()),
-      turns: s.turn,
-      kills: s.kills,
-      maxDepth: s.maxDepth,
-      stratum: s.stratum,
-      deathCause: escaped ? '生還' : (s.deathCause ?? '不明'),
-      daily: s.seed === dailySeed(new Date()),
-      skills: s.skillEquipped,
-      escaped,
-    });
-    if (s.maxDepth > prevBest) pushLog('自己ベスト更新!');
-  }
-
-  function checkDead(): boolean {
-    const { player } = get();
-    if (player.hp > 0) return false;
-    set({ phase: 'dead', busy: false, reach: { cells: [], parent: new Map() } });
-    persist.clearSave(); // ローグライクの掟: 死んだ冒険は再開できない
-    bgm.setBgmScene('dead');
-    sfx.play('defeat');
-    pushLog('力尽きた…');
-    return true;
-  }
-
-  /** 敵→プレイヤーの一撃(ranged=true は遠隔攻撃。掲盾の回避対象)。 */
-  function beastStrike(b: Beast, ranged = false): void {
-    const { player, skillEquipped } = get();
-    const def = BEASTS[b.kind];
-    const { dmg: rawDmg, events, status } = beastStrikeCalc(b, player, rand, skillEquipped, ranged);
-    if (rawDmg === 0) {
-      // 盾の回避成功(rogue-22)。マスタリー(盾=回避)を積む(rogue-23)。
-      incrementMastery({ evades: 1 });
-      applyEvents(events);
-      // 受け反撃(ukekaeshi・rogue-23)/ 見切り(kenMikiri・rogue-24: 素手時): 固定値の反撃。
-      if (
-        skillEquipped.includes('ukekaeshi') ||
-        (skillEquipped.includes('kenMikiri') && player.weapon === null)
-      ) {
-        const counter = Math.floor(playerAtk(player, skillEquipped, get().lightLevel) / 2);
-        if (counter > 0) {
-          pushLog('受け流しざま反撃した!');
-          damageBeast(b, counter, '#93c5fd'); // 武技(討伐)マスタリーの対象外(近接/薙ぎ/投擲のみ)
-          set({ beasts: [...get().beasts] });
-        }
-      }
-      set({ player: { ...player } });
-      checkDead();
-      return;
-    }
-    // 硬化(kouka・rogue-23): 障壁が1以上ある間、被ダメージ−1(最低1。absorbBarrier前)。
-    let dmg = rawDmg;
-    if (player.barrier > 0 && skillEquipped.includes('kouka')) dmg = Math.max(1, dmg - 1);
-    // 障壁がまず削れ、余りが HP へ(酸は障壁への削りだけ2倍)。
-    const hadBarrierAmt = player.barrier;
-    const { barrier, hpDmg } = absorbBarrier(hadBarrierAmt, dmg, !!def.acidBarrier);
-    if (hadBarrierAmt - barrier > 0) incrementMastery({ absorbed: hadBarrierAmt - barrier }); // 甲殻マスタリー
-    player.barrier = barrier;
-    player.status = status;
-    player.hp = Math.max(0, player.hp - hpDmg);
-    applyEvents(events);
-    if (hadBarrierAmt > 0 && barrier === 0) {
-      pushLog('障壁が砕けた!');
-      pushFx({ kind: 'popup', at: player.pos, text: '障壁破壊', color: '#67d3e0', dur: 900 });
-    }
-    set({ player: { ...player } });
-    if (player.hp <= 0) set({ deathCause: def.name }); // checkDead が使う死因
-    checkDead();
-  }
-
-  /** 敵→囮の一撃。壊れたら除去。 */
-  function hitDecoy(b: Beast, d: Decoy): void {
-    const { dmg, events } = beastStrikeDecoyCalc(b, d, rand);
-    d.hp -= dmg;
-    applyEvents(events);
-    if (d.hp <= 0) {
-      pushFx({ kind: 'death', at: d.pos, dur: 600 });
-      pushLog('囮人形が壊れた');
-      set({ decoys: get().decoys.filter((x) => x.id !== d.id) });
-    } else {
-      set({ decoys: [...get().decoys] });
-    }
-  }
-
-  /**
-   * 討伐コンテキスト(rogue-24)。マスタリー加算の判定材料。
-   * preAwake は「攻撃を仕掛ける直前の覚醒状態」— 近接/投擲は攻撃時に敵を起こすため、
-   * 呼び出し元が事前に捕捉して渡す(背討ちの倍率判定も同じ値を使う)。
-   */
-  interface KillCtx {
-    unarmed?: boolean;
-    preAwake?: boolean;
-    viaTrap?: boolean;
-    weapon?: boolean;
-  }
-
-  /** ダメージ適用(死亡処理込み)。生存していれば false。 */
-  function damageBeast(b: Beast, dmg: number, color = '#fecaca', kill?: KillCtx): boolean {
-    b.hp = Math.max(0, b.hp - dmg);
-    applyEvents(damageEvents(b.pos, dmg, color));
-    if (b.hp === 0) {
-      killBeast(b, kill);
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * 罠1つを b に対して発動する(rogue-24 で triggerTrap から分離)。
-   * wanaTsuyoka(罠強化)装着中は品質+1相当で効く。
-   */
-  function fireTrap(t: PlacedTrap, b: Beast): void {
-    const name = BEASTS[b.kind].name;
-    const qBonus = get().skillEquipped.includes('wanaTsuyoka') ? 1 : 0;
-    const stack: ItemStack = { item: t.item, q: t.q + qBonus };
-    sfx.play('hit');
-    const effect = resolveTrapEffect(t.kind, stack);
-    if (effect.kind === 'damage') {
-      pushLog(
-        t.kind === 'spike'
-          ? `${name} が棘の罠を踏んだ!`
-          : `${name} が火炎の罠を踏んだ! 延焼した`,
-      );
-      if (!damageBeast(b, effect.dmg, effect.color, { viaTrap: true }) && effect.burnOnSurvive) {
-        b.status = effect.burnOnSurvive;
-      }
-    } else {
-      b.status = effect.status;
-      if (effect.awaken) b.awake = true;
-      applyEvents(statusAppliedEvents(name, b.pos, effect.status));
-    }
-  }
-
-  /** b が今のセルの罠を踏んだら発動(罠は消費)。連鎖(wanaRensa)は隣接罠を1ホップ誘爆。 */
-  function triggerTrap(b: Beast): void {
-    const { traps } = get();
-    const k = cellKey(b.pos);
-    const t = traps.find((x) => cellKey(x.pos) === k);
-    if (!t) return;
-    // 連鎖の誘爆対象は「発動前に隣接していた自分の罠」を先に確定する(1ホップ限定)。
-    const chained = get().skillEquipped.includes('wanaRensa')
-      ? traps.filter((x) => x.id !== t.id && adjacent(x.pos, t.pos))
-      : [];
-    set({ traps: traps.filter((x) => x.id !== t.id && !chained.some((c) => c.id === x.id)) });
-    fireTrap(t, b);
-    for (const c of chained) {
-      // 誘爆はその罠のセルに居る敵へ。誰も踏んでいなければ空振り(消費のみ)。
-      const victim = get().beasts.find((x) => x.alive && cellKey(x.pos) === cellKey(c.pos));
-      pushFx({ kind: 'hit', at: c.pos, dur: 320 });
-      if (victim) {
-        pushLog('罠が誘爆した!');
-        fireTrap(c, victim);
-      } else {
-        pushLog('罠が誘爆した(空振り)');
-      }
-    }
-  }
-
-  /** b の移動先候補(空洞・他の敵/プレイヤー/囮が居ない)。 */
-  function stepCandidates(b: Beast): Cell[] {
-    const s = get();
-    return stepCandidatesPure(s.dungeon, b, s.beasts, s.player.pos, s.decoys);
-  }
-
-  function moveBeast(b: Beast, to: Cell): void {
-    animateUnit(b.id, [b.pos, to]);
-    b.pos = to;
-    triggerTrap(b);
-  }
-
-  /** 砲塔の斉射(敵ターンの最後)。 */
-  function turretsFire(): void {
-    const s = get();
-    if (s.turrets.length === 0) return;
-    const range = ITEMS.turret.range ?? 8;
-    const remaining: Turret[] = [];
-    for (const t of s.turrets) {
-      const target = turretTarget(t, s.beasts, range);
-      if (target) {
-        pushFx({ kind: 'bolt', from: t.pos, to: target.pos, dur: 240 });
-        sfx.play('magic');
-        target.awake = true;
-        pushLog(`魔導砲塔が ${BEASTS[target.kind].name} を撃った`);
-        damageBeast(target, stackDmg({ item: 'turret', q: t.q }));
-      }
-      t.turns -= 1;
-      if (t.turns > 0) remaining.push(t);
-      else pushLog('魔導砲塔が沈黙した');
-    }
-    set({ turrets: remaining, beasts: [...get().beasts] });
-  }
-
-  /**
-   * 敵の1ターン。状態異常 → 気づき判定 → 追跡/攻撃(ターゲットはプレイヤーと囮の近い方)。
-   * 最後に砲塔の斉射。「新たに気づかれた」or「攻撃を受けた」なら true(自動歩行の中断)。
-   */
-  function beastsTurn(): boolean {
-    let interrupted = false;
-    const { beasts, discovered } = get();
-    for (const b of beasts) {
-      if (!b.alive) continue;
-      if (get().phase !== 'play') break;
-      const { player, lightLevel } = get();
-      const def = BEASTS[b.kind];
-
-      // --- 状態異常 ---
-      if (b.status) {
-        const st = b.status;
-        if (st.kind === 'burn') {
-          pushLog(`${def.name} は延焼している`);
-          if (damageBeast(b, BURN_DMG, '#fdba74')) continue;
-        }
-        st.turns -= 1;
-        if (st.turns <= 0) b.status = null;
-        if (st.kind === 'sleep') continue; // 行動不能
-        if (st.kind === 'confuse') {
-          // 不動種(胞子茸)は混乱してもふらつかない(rogue-21)。
-          const cands = def.stationary ? [] : stepCandidates(b);
-          if (cands.length > 0) moveBeast(b, cands[irnd(0, cands.length - 1)]);
-          continue; // ふらつくだけ
-        }
-        if (st.kind === 'fear') {
-          // 恐慌: 縄張り・階層を忘れてプレイヤーから遠ざかる(不動種は動けない)。
-          const best = def.stationary ? null : chooseFleeStep(b, stepCandidates(b), player.pos);
-          if (best) moveBeast(b, best);
-          continue;
-        }
-        // burn は通常行動へ続く
-      }
-
-      // 気づき: 明かりを広げているほど遠くから気づかれる。
-      const aggroFactor = get().skillEquipped.includes('shinShinobi') ? 0.8 : 1; // 忍び足
-      if (!b.awake && checkAggro(b, def, player.pos, lightLevel, aggroFactor)) {
-        b.awake = true;
-        interrupted = true;
-        pushLog(`${def.name} がこちらに気づいた!`);
-        if (discovered.has(cellKey(b.pos))) {
-          pushFx({ kind: 'popup', at: b.pos, text: '!', color: '#fbbf24', dur: 800 });
-          sfx.play('alert');
-        }
-        continue; // 気づいたターンは動かない(猶予)
-      }
-      if (!b.awake) continue;
-
-      // ターゲット: プレイヤーと囮のうち最も近いもの。
-      const { pos: tgtPos, decoy: tgtDecoy } = chooseTarget(b, player.pos, get().decoys);
-
-      if (adjacent(b.pos, tgtPos)) {
-        if (tgtDecoy) {
-          hitDecoy(b, tgtDecoy);
-        } else {
-          beastStrike(b);
-          interrupted = true;
-        }
-        continue;
-      }
-
-      // 縄張りから離れすぎたら追跡を諦める(ターゲット基準)。
-      // 遠隔攻撃(rogue-24): 射程内かつ射線が通れば、離れたまま撃つ。
-      if (def.ranged && distW(b.pos, tgtPos) <= def.ranged.range && lineOfSight(get().dungeon.open, b.pos, tgtPos)) {
-        pushFx({ kind: 'bolt', from: b.pos, to: tgtPos, dur: 240 });
-        sfx.play('magic');
-        if (tgtDecoy) {
-          hitDecoy(b, tgtDecoy);
-        } else {
-          beastStrike(b, true);
-          interrupted = true;
-        }
-        continue;
-      }
-
-      const territoryFactor = get().skillEquipped.includes('shinKehai') ? 0.75 : 1; // 気配遮断
-      if (outOfTerritory(b, def, tgtPos, territoryFactor)) {
-        b.awake = false;
-        pushLog(`${def.name} は追跡を諦めた`);
-        continue;
-      }
-
-      // 追跡: 縄張り・階層制限内でターゲットへ最も近づく空洞セルへ1歩。
-      // 不動種(胞子茸)はその場から動かない(rogue-21)。
-      if (def.stationary) continue;
-      const best = chooseChaseStep(b, def, stepCandidates(b), tgtPos);
-      if (best) moveBeast(b, best);
-    }
-    set({ beasts: [...get().beasts] });
-    turretsFire();
-    return interrupted;
-  }
-
-  /** ターン経過の帳尻(ターン数・自然回復)。明かりが強いほど回復が早い。 */
-  function endTurn(): void {
-    const turn = get().turn + 1;
-    const { player, lightLevel, skillEquipped } = get();
-    // 篝火(hiKagari・rogue-24): 「広げる」中は回復間隔−1(最低2)。
-    const regenEvery =
-      lightLevel === 2 && get().skillEquipped.includes('hiKagari')
-        ? Math.max(2, LIGHT[lightLevel].regenEvery - 1)
-        : LIGHT[lightLevel].regenEvery;
-    if (turn % regenEvery === 0 && player.hp > 0) {
-      if (player.hp < player.maxHp) {
-        player.hp += 1;
-        set({ player: { ...player } });
-      } else if (skillEquipped.includes('tenka') && player.barrier < 24) {
-        // 転化(rogue-23): HP満タン時の自然回復ティックが障壁+1に変わる(上限24)。
-        player.barrier = Math.min(24, player.barrier + 1);
-        pushFx({ kind: 'popup', at: player.pos, text: '障壁+1', color: '#67d3e0', dur: 700 });
-        set({ player: { ...player } });
-      }
-    }
-    // プレイヤーの状態異常(rogue-21)。毒は障壁を素通りして HP 直撃。
-    if (player.status && player.hp > 0) {
-      if (player.status.kind === 'poison') {
-        player.hp = Math.max(0, player.hp - 1);
-        pushFx({ kind: 'popup', at: player.pos, text: '1', color: '#a78bfa', dur: 700 });
-        if (player.hp <= 0) set({ deathCause: '毒' });
-      }
-      player.status = { ...player.status, turns: player.status.turns - 1 };
-      if (player.status.turns <= 0) {
-        pushLog(player.status.kind === 'poison' ? '毒が抜けた。' : '頭がはっきりした。');
-        player.status = null;
-      }
-      set({ player: { ...player } });
-      checkDead();
-    }
-    // 解毒の水薬の予防(rogue-21)は毎ターン1ずつ減る。
-    if (player.immune > 0) {
-      player.immune -= 1;
-      set({ player: { ...player } });
-    }
-    set({ turn });
-    bgm.setBgmDepth(depthOf(player.pos)); // BGM は深度で曲調が変わる
-    autoSave();
-    checkStratum(); // 層の警告/崩落(移動に限らずすべてのターン消費行動の後で見る)
-    // 死亡直後のこの1回だけ通る(死亡後は phase!=='play' 判定で二度と endTurn まで来ない)。
-    if (get().phase === 'dead') recordRun(false);
-  }
+  // beastStrike/hitDecoy/damageBeast/KillCtx/fireTrap/triggerTrap/stepCandidates/moveBeast/
+  // turretsFire/beastsTurn は state/rogue/combatActions.ts(combat)へ分離(rogue.ts 分割A3)。
+  // checkStratum/triggerCollapse/endTurn は state/rogue/stratum.ts(stratum)へ、
+  // checkDead/recordRun/escape は state/rogue/runEnd.ts(runEnd)へ分離(rogue.ts 分割A5)。
 
   /** place モード: 選んだセル(足元+隣接)へ罠を設置する(1ターン)。 */
   function placeTrapAt(c: Cell): void {
@@ -881,384 +455,30 @@ export const useRogue = create<RogueState>((set, get) => {
     });
     sfx.play('place');
     pushLog(`${itemLabel(stack)} を設置した`);
-    beastsTurn();
-    endTurn();
-    settleAfterAction();
+    combat.beastsTurn();
+    stratum.endTurn();
+    move.settleAfterAction();
   }
 
-  /** 毎ターン終わりの自動保存(死んでいたら保存しない。死亡時は checkDead が破棄済み)。 */
+  /** 毎ターン終わりの自動保存(死んでいたら保存しない。死亡時は checkDead が破棄済み)。
+      SaveData の組み立ては saveCodec.encodeSave(分割A1)。 */
   function autoSave(): void {
     const s = get();
     if (s.phase !== 'play') return;
-    const data: SaveData = {
-      v: 6,
-      seed: s.seed,
-      rng: rngState,
-      seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
-      dungeon: {
-        open: [...s.dungeon.open],
-        chambers: s.dungeon.chambers,
-        stubs: s.dungeon.stubs,
-        rev: s.dungeon.rev,
-        cutLayer: s.dungeon.cutLayer,
-      },
-      discovered: [...s.discovered],
-      cellChamber: [...s.cellChamber],
-      visitedChambers: [...s.visitedChambers],
-      player: s.player,
-      lightLevel: s.lightLevel,
-      beasts: s.beasts,
-      items: s.items,
-      traps: s.traps,
-      turrets: s.turrets,
-      decoys: s.decoys,
-      turn: s.turn,
-      kills: s.kills,
-      maxDepth: s.maxDepth,
-      stratum: s.stratum,
-      skillSlots: s.skillSlots,
-      skillEquipped: s.skillEquipped,
-      skillDraft: s.skillDraft,
-      actionLog,
-      log: s.log.slice(-8),
-    };
-    persist.writeSave(data);
+    persist.writeSave(
+      encodeSave({
+        ...s,
+        rng: getRngState(),
+        seqs: { beast: beastSeq, item: itemSeq, device: deviceSeq },
+        actionLog,
+      }),
+    );
   }
 
-  /**
-   * 層の崩落(rogue-19b)を発動する: cutLayer より上を崩落させ、二度と戻れなくする。
-   * dungeon 本体は collapseAbove が刈る。ここでは store 側の他の集合(discovered・
-   * cellChamber・地上アイテム・罠・砲塔・囮・敵)を同じ cutLayer で刈り、stratum を進める。
-   */
-  function triggerCollapse(stratum: number): void {
-    const s = get();
-    const cutLayer = -4 * (STRATUM_DEPTH * (stratum + 1) - 1);
-    collapseAbove(s.dungeon, cutLayer);
-    const alive = (k: CellKey) => layer(keyToCell(k)) <= cutLayer;
-    set({
-      discovered: new Set([...s.discovered].filter(alive)),
-      discoveredRev: s.discoveredRev + 1,
-      cellChamber: new Map([...s.cellChamber].filter(([k]) => alive(k))),
-      items: s.items.filter((i) => layer(i.pos) <= cutLayer),
-      traps: s.traps.filter((t) => layer(t.pos) <= cutLayer),
-      turrets: s.turrets.filter((t) => layer(t.pos) <= cutLayer),
-      decoys: s.decoys.filter((d) => layer(d.pos) <= cutLayer),
-      beasts: s.beasts.filter((b) => layer(b.pos) <= cutLayer),
-      stratum: stratum + 1,
-      exploreRev: s.exploreRev + 1,
-    });
-    pushLog('背後で巣が崩れ落ちた。もう戻れない —');
-    // 実績「最初の関門」(rogue-25): 崩落を1度通過する(毎回呼んでも feats の冪等性で二重解除しない)。
-    maybeUnlockFeat('firstGate');
-    // 実績「無傷の関門」(rogue-25): HP満タンで関門を通過する。
-    if (get().player.hp === get().player.maxHp) maybeUnlockFeat('pureGate');
-    // 灯火マスタリー(rogue-24): 「絞る」以下の暗さで関門を通過した実績。
-    if (isDimLight(get().lightLevel)) {
-      incrementMastery({ dimCollapses: 1 });
-      maybeUnlockFeat('darkGate'); // 実績「暗闇行」(rogue-25)
-    }
-    // 崩落の衝撃で障壁は剥がれる(rogue-21。層を跨いだ持ち越しをさせない)。
-    const p = get().player;
-    if (p.barrier > 0) {
-      p.barrier = 0;
-      set({ player: { ...p } });
-      pushLog('崩落の衝撃で障壁が剥がれた。');
-    }
-    sfx.play('death');
-    stratumWarned = false;
-
-    // 関門(rogue-23): スロット+1(上限6)。解禁済み・未装着のノードから乱数3択
-    // (シード列 rand から引く)。候補ゼロなら乱数を引かず、ドラフトも出さない
-    // — マスタリー未育成のプレイヤーとゴールデンテストの経路で乱数列を守る。
-    const newSlots = Math.min(6, get().skillSlots + 1);
-    const draft = draftCandidates(undraftedUnlockedNodes(), rand, 3);
-    set({ skillSlots: newSlots, skillDraft: draft.length > 0 ? draft : null });
-    if (draft.length > 0) pushLog('関門の先へ進む前に、新たな心得を選べる。');
-
-    refreshReach();
-    autoSave();
-  }
-
-  /**
-   * 層の関門(rogue-19b): 深度が警告ライン(STRATUM_DEPTH*(stratum+1))・
-   * 崩落ライン(その+2)を跨いだかを見る。endTurn(移動に限らずすべてのターン
-   * 消費行動の後)から呼ぶ — wait で足踏みしていても境界を越えていれば発火する。
-   */
-  function checkStratum(): void {
-    const s = get();
-    if (s.phase !== 'play') return;
-    const depth = depthOf(s.player.pos);
-    const warnAt = STRATUM_DEPTH * (s.stratum + 1);
-    if (depth >= warnAt + 2) {
-      triggerCollapse(s.stratum);
-      return;
-    }
-    if (depth >= warnAt && !stratumWarned) {
-      stratumWarned = true;
-      pushLog('頭上の土がきしみ、砂がこぼれ落ちる…(これより深くへ進むと戻れない)');
-    }
-  }
-
-  /**
-   * 混乱(rogue-21)による移動ずれ: 50% で意図と違う「隣接する空セル」へ逸れる。
-   * 逸れ先候補は open かつ敵の居ないセル(意図した先も候補に含む素朴な抽選 —
-   * 結果的に意図どおりのこともある)。候補ゼロなら意図どおり。
-   */
-  function confusedStep(intended: Cell): Cell {
-    const s = get();
-    if (s.player.status?.kind !== 'confuse') return intended;
-    if (rand() < 0.5) return intended;
-    const from = s.player.pos;
-    const options: Cell[] = [];
-    for (const o of OFFSETS) {
-      const n: Cell = [from[0] + o[0], from[1] + o[1], from[2] + o[2]];
-      const k = cellKey(n);
-      if (s.dungeon.open.has(k) && !beastAt(s.beasts, k)) options.push(n);
-    }
-    if (options.length === 0) return intended;
-    const picked = options[Math.floor(rand() * options.length)];
-    if (cellKey(picked) !== cellKey(intended)) {
-      pushLog('足がもつれて違う方へ…');
-      pushFx({ kind: 'popup', at: from, text: '💫', color: '#f472b6', dur: 700 });
-    }
-    return picked;
-  }
-
-  /** プレイヤーを隣へ1歩(発見・拡張・拾得・訪問記録込み)。 */
-  function stepPlayer(next: Cell): void {
-    const { player, dungeon, items } = get();
-    animateUnit(PLAYER_ID, [player.pos, next]);
-    player.pos = next;
-    sfx.play('step');
-    const newMaxDepth = Math.max(get().maxDepth, depthOf(next));
-    set({
-      player: { ...player },
-      focus: next,
-      maxDepth: newMaxDepth,
-    });
-    // 実績「深淵の一瞥」(rogue-25): 深度16へ到達。
-    if (newMaxDepth >= 16) maybeUnlockFeat('deep16');
-    discover();
-    // 広間の訪問記録(壁色の変化キー)。
-    const chId = get().cellChamber.get(cellKey(next));
-    if (chId !== undefined && !get().visitedChambers.has(chId)) {
-      get().visitedChambers.add(chId);
-      set({ exploreRev: get().exploreRev + 1 });
-    }
-    // 生成: スタブ終端に近づいたら次の広間。
-    const grown = maybeExpand(dungeon, next, EXPAND_R);
-    if (grown.length > 0) {
-      for (const ch of grown) populate(ch);
-      pushLog('奥から冷たい風が流れてくる…');
-      sfx.play('land');
-      discover(); // 掘削で明かりの届く範囲が変わったかもしれない
-    }
-    // 拾得。
-    const k = cellKey(next);
-    const found = items.filter((i) => cellKey(i.pos) === k);
-    if (found.length > 0) {
-      for (const f of found) {
-        player.pack.push(f.stack);
-        pushFx({ kind: 'popup', at: next, text: itemLabel(f.stack), color: '#fde68a', dur: 900 });
-        pushLog(`${itemLabel(f.stack)} を拾った`);
-        // アイテム図鑑(rogue-25・永続): 入手数・最高品質。
-        codexStore.recordItemFound(f.stack.item, f.stack.q);
-        // 遺物「巣の琥珀」(rogue-25): 初めて拾うと実績解除+専用ログ。
-        if (f.stack.item === 'amber') {
-          pushLog('巣の琥珀を見つけた! 持ち帰れば宝物になる');
-          maybeUnlockFeat('relic');
-        }
-      }
-      sfx.play('pickup');
-      set({
-        items: items.filter((i) => cellKey(i.pos) !== k),
-        player: { ...player, pack: [...player.pack] },
-      });
-    }
-  }
-
-  /** 経路を1歩=1ターンで自動歩行。敵に気づかれた/攻撃されたら中断。 */
-  async function walkPath(path: Cell[]): Promise<void> {
-    const run = runSeq;
-    traveling = true;
-    set({ busy: true, reach: { cells: [], parent: new Map() }, hoverBeastId: null, hoverMarker: null });
-    try {
-      for (let i = 1; i < path.length; i++) {
-        if (runSeq !== run || get().phase !== 'play') break;
-        const next = path[i];
-        if (beastAt(get().beasts, cellKey(next))) break; // 起きた敵が塞いだ
-        const actual = confusedStep(next); // 混乱中は逸れうる(rogue-21)
-        stepPlayer(actual);
-        await sleep(STEP_MS + 40);
-        if (runSeq !== run) return; // restart / cancelTravel された
-        const interrupted = beastsTurn();
-        endTurn();
-        if (get().phase !== 'play') break;
-        if (get().skillDraft) break; // 関門ドラフトが出た(スキルモーダルで歩行中断)
-        if (cellKey(actual) !== cellKey(next)) break; // 逸れたら経路は無効 — 歩行中断
-        if (interrupted && i < path.length - 1) {
-          pushLog('(足を止めた)');
-          break;
-        }
-      }
-      if (runSeq !== run) return;
-      settleAfterAction();
-    } finally {
-      traveling = false;
-    }
-  }
-
-  /** プレイヤー→敵の近接攻撃。 */
-  /** 近接攻撃。薙ぎ払い武器はリーチ内の敵全員に、通常はクリックした1体に当たる。 */
-  async function meleeAttack(clicked: Beast): Promise<void> {
-    const run = runSeq;
-    triggerPose('attack', 600); // プレイヤーモデルの攻撃モーション
-    set({ busy: true, reach: { cells: [], parent: new Map() } });
-    const player = get().player;
-    const targets = weaponSweep(player)
-      ? get().beasts.filter(
-          (x) =>
-            x.alive &&
-            stepDist(player.pos, x.pos) <= weaponReach(player) &&
-            get().discovered.has(cellKey(x.pos)),
-        )
-      : [clicked];
-    if (targets.length > 1) pushLog('薙ぎ払い!');
-    sfx.play('melee');
-    await sleep(140);
-    if (runSeq !== run) return;
-    let diedCount = 0; // 実績「群れ祓い」(rogue-25): 1回の近接攻撃での撃破数
-    for (const b of targets) {
-      const def = BEASTS[b.kind];
-      const skills = get().skillEquipped;
-      // 攻撃前の覚醒状態を捕捉(rogue-24)— 背討ちの倍率と隠密マスタリーの両方がこの値を使う。
-      const preAwake = b.awake;
-      let dmg = Math.max(1, playerAtk(player, skills, get().lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
-      // 背討ち(shinSegiri): 未覚醒の敵へは×2。ただし気配感知(senses)の敵には無効。
-      if (!preAwake && !def.senses && skills.includes('shinSegiri')) {
-        dmg *= 2;
-        pushLog('背後から急所を突いた!');
-      }
-      b.awake = true;
-      pushLog(`${def.name} に ${dmg}ダメージ`);
-      const unarmed = player.weapon === null;
-      const died = damageBeast(b, dmg, '#fecaca', { weapon: !unarmed, unarmed, preAwake });
-      if (died) diedCount++;
-      // 延焼の刃(hiEnjin): 装着中のみ乱数を引く(30%で延焼2ターン)。倒した敵には不要。
-      if (!died && skills.includes('hiEnjin') && rand() < 0.3) {
-        b.status = { kind: 'burn', turns: 2 };
-        pushLog(`${def.name} に火が移った!`);
-      }
-    }
-    if (diedCount >= 3) maybeUnlockFeat('sweep3');
-    sfx.play('hit');
-    set({ beasts: [...get().beasts] });
-    await sleep(240);
-    if (runSeq !== run) return;
-    beastsTurn();
-    endTurn();
-    settleAfterAction();
-  }
-
-  function killBeast(b: Beast, ctx?: KillCtx): void {
-    b.alive = false;
-    set({ kills: get().kills + 1 });
-    pushFx({ kind: 'death', at: b.pos, dur: 700 });
-    sfx.play('death');
-    pushLog(`${BEASTS[b.kind].name} を倒した!`);
-    // 討伐図鑑(rogue-25・永続): 種ごとの討伐数・初討伐深度。
-    codexStore.recordBeastKill(b.kind, depthOf(b.pos));
-    // 門番討伐(rogue-24): 心得の器(スキルスロット)が広がる。実績(rogue-25)は
-    // スロット上限に関わらず毎回判定する(feats 集合の冪等性で二重解除は起きない)。
-    if (BEASTS[b.kind].gatekeeper) {
-      maybeUnlockFeat('gatekeeper');
-      if (get().skillSlots < 6) {
-        set({ skillSlots: get().skillSlots + 1 });
-        pushLog('門番を討った — 心得の器が広がる(スロット+1)');
-        sfx.play('pickup');
-      }
-    }
-    // マスタリー加算(rogue-24)。1回の討伐で複数系統に同時加算されうる
-    // (例: 素手で未覚醒の敵を倒す → 拳闘+隠密)。
-    if (ctx) {
-      const delta: Partial<MasteryCounters> = {};
-      if (ctx.weapon) delta.weaponKills = 1;
-      if (ctx.unarmed) delta.fistKills = 1;
-      if (ctx.preAwake === false) delta.stealthKills = 1;
-      if (ctx.viaTrap) delta.trapKills = 1;
-      if (Object.keys(delta).length > 0) incrementMastery(delta);
-    }
-    // 胞子爆発(rogue-21): 死亡時、隣接するプレイヤーに状態異常(予防中は無効)。
-    const burst = BEASTS[b.kind].deathBurst;
-    if (burst) {
-      const p = get().player;
-      if (stepDist(p.pos, b.pos) <= 1 && p.immune <= 0) {
-        p.status =
-          p.status?.kind === burst
-            ? { kind: burst, turns: Math.max(p.status.turns, 2) }
-            : { kind: burst, turns: 2 };
-        set({ player: { ...p } });
-        pushLog('胞子が弾けて視界がゆがむ…');
-        pushFx({ kind: 'popup', at: p.pos, text: '💫', color: '#f472b6', dur: 900 });
-      }
-    }
-    // ホーム広間の掃討判定(壁色の明化キー)。
-    if (!get().beasts.some((x) => x.alive && x.id !== b.id && x.homeChamber === b.homeChamber)) {
-      if (get().visitedChambers.has(b.homeChamber)) pushLog('この空間は静かになった…');
-      set({ exploreRev: get().exploreRev + 1 });
-    }
-    // 戦利品は湧き時に前倒し抽選済み(rogue-19b)。倒れたらそれを落とすだけ。
-    if (b.carry) {
-      get().items.push({ id: itemSeq++, stack: b.carry, pos: b.pos });
-      set({ items: [...get().items] });
-    }
-  }
-
-  /** 投げナイフ。 */
-  async function throwKnife(b: Beast): Promise<void> {
-    const run = runSeq;
-    const { player } = get();
-    const idx = player.pack.findIndex((x) => x.item === 'knife');
-    if (idx < 0) return;
-    const knife = player.pack[idx];
-    triggerPose('throw', 500); // プレイヤーモデルの投擲モーション
-    set({ busy: true, uiMode: 'walk', reach: { cells: [], parent: new Map() } });
-    player.pack.splice(idx, 1);
-    set({ player: { ...player, pack: [...player.pack] } });
-    pushFx({ kind: 'bolt', from: player.pos, to: b.pos, dur: 260 });
-    sfx.play('arrow');
-    await sleep(280);
-    if (runSeq !== run) return;
-    const def = BEASTS[b.kind];
-    const dmg = Math.max(1, stackDmg(knife) - Math.floor((b.defOverride ?? def.def) / 2) + irnd(-1, 1));
-    b.awake = true;
-    sfx.play('hit');
-    pushLog(`投げナイフが ${def.name} に ${dmg}ダメージ`);
-    const preAwakeKnife = b.awake;
-    const diedByKnife = damageBeast(b, dmg, '#fecaca', { weapon: true, preAwake: preAwakeKnife });
-    // 跳弾(knifeRico): 命中時、対象に隣接する敵1体(最小id)へ半分ダメージ(乱数なし)。
-    if (get().skillEquipped.includes('knifeRico')) {
-      const near = get()
-        .beasts.filter((x) => x.alive && x.id !== b.id && adjacent(x.pos, b.pos))
-        .sort((a, z) => a.id - z.id)[0];
-      if (near) {
-        const rico = Math.floor(dmg / 2);
-        if (rico > 0) {
-          pushLog(`ナイフが跳ねて ${BEASTS[near.kind].name} へ!`);
-          const preAwakeNear = near.awake;
-          near.awake = true;
-          damageBeast(near, rico, '#fecaca', { weapon: true, preAwake: preAwakeNear });
-        }
-      }
-    }
-    void diedByKnife;
-    set({ beasts: [...get().beasts] });
-    await sleep(200);
-    if (runSeq !== run) return;
-    beastsTurn();
-    endTurn();
-    settleAfterAction();
-  }
+  // confusedStep/stepPlayer/walkPath も state/rogue/moveActions.ts(move)へ分離
+  // (rogue.ts 分割A4)。meleeAttack/killBeast/throwKnife は state/rogue/combatActions.ts
+  // (combat)へ分離(rogue.ts 分割A3)。clickBeast からは combat.meleeAttack/
+  // combat.throwKnife を呼ぶ。
 
   function buildInitial(seed: number): Pick<
     RogueState,
@@ -1355,7 +575,7 @@ export const useRogue = create<RogueState>((set, get) => {
       resetView();
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
-      stratumWarned = false;
+      resetStratumWarned();
       actionLog = [];
       if (!opts?.keepSave) persist.clearSave(); // 新しい冒険を始めたら前の保存は破棄
       bgm.setBgmScene('game');
@@ -1371,38 +591,31 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     resume: () => {
-      const d = persist.readSave<SaveData>();
-      if (!d || d.v !== 6) return false;
+      // SaveData → 状態片の復元(Set/Map・dungeon の slots・rng 関数の再付与)は
+      // saveCodec.decodeSave(分割A1)。v 不一致は null で「再開できない」。
+      const raw = persist.readSave<SaveData>();
+      const d = raw ? decodeSave(raw) : null;
+      if (!d) return false;
       resetView();
       clearUnitAnims();
       runSeq++; // 進行中の自動歩行などを打ち切る
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
-      stratumWarned = false; // 保存には無い(層の途中で境界近くなら再掲されるだけ)
+      resetStratumWarned(); // 保存には無い(層の途中で境界近くなら再掲されるだけ)
       actionLog = d.actionLog;
       beastSeq = d.seqs.beast;
       itemSeq = d.seqs.item;
       deviceSeq = d.seqs.device;
-      seedRogueRng(d.rng); // 戦闘乱数列も保存時点から続ける(プレイ再現性)
+      setRngState(d.rng); // 戦闘乱数列も保存時点から続ける(プレイ再現性)
       bgm.setBgmScene('game');
       bgm.setBgmDepth(depthOf(d.player.pos));
-      const dungeon: Dungeon = {
-        open: new Set(d.dungeon.open),
-        chambers: d.dungeon.chambers,
-        stubs: d.dungeon.stubs,
-        slots: new Map(d.dungeon.chambers.map((c) => [slotKeyOfCell(c.center), c.id])),
-        seed: d.seed,
-        rng: lcg(d.seed), // 生成はすべて座標導出 rng なのでこの値は使われない
-        rev: d.dungeon.rev,
-        cutLayer: d.dungeon.cutLayer,
-      };
       set({
         seed: d.seed,
-        dungeon,
-        discovered: new Set(d.discovered),
+        dungeon: d.dungeon,
+        discovered: d.discovered,
         discoveredRev: 1,
-        cellChamber: new Map(d.cellChamber),
-        visitedChambers: new Set(d.visitedChambers),
+        cellChamber: d.cellChamber,
+        visitedChambers: d.visitedChambers,
         exploreRev: 1,
         player: d.player,
         lightLevel: d.lightLevel,
@@ -1436,25 +649,11 @@ export const useRogue = create<RogueState>((set, get) => {
         log: [...d.log, '—— 冒険を再開した'],
         fx: [],
       });
-      refreshReach();
+      move.refreshReach();
       return true;
     },
 
-    clickCell: (c) => {
-      logAction('C', c[0], c[1], c[2]);
-      const s = get();
-      if (s.phase !== 'play' || s.busy) return;
-      if (s.uiMode === 'throw') return;
-      if (s.uiMode === 'place') {
-        placeTrapAt(c);
-        return;
-      }
-      const k = cellKey(c);
-      if (!s.reach.cells.some((r) => cellKey(r) === k)) return;
-      const path = pathTo(c);
-      if (path.length < 2) return;
-      void walkPath(path);
-    },
+    ...move.actions,
 
     clickBeast: (id) => {
       logAction('B', id);
@@ -1466,13 +665,13 @@ export const useRogue = create<RogueState>((set, get) => {
         const range = ITEMS.knife.range ?? 0;
         if (distW(s.player.pos, b.pos) > range) return;
         if (!s.discovered.has(cellKey(b.pos))) return;
-        void throwKnife(b);
+        void combat.throwKnife(b);
         return;
       }
       // 武器リーチ内(素手・通常1歩、長槍2歩)なら近接攻撃できる。
       if (stepDist(s.player.pos, b.pos) > weaponReach(s.player)) return;
       if (!s.discovered.has(cellKey(b.pos))) return;
-      void meleeAttack(b);
+      void combat.meleeAttack(b);
     },
 
     useItem: (index) => {
@@ -1522,9 +721,9 @@ export const useRogue = create<RogueState>((set, get) => {
         }
         set({ player: { ...player, pack: [...player.pack] }, uiMode: 'walk' });
         // 飲むのも1ターン。
-        beastsTurn();
-        endTurn();
-        settleAfterAction();
+        combat.beastsTurn();
+        stratum.endTurn();
+        move.settleAfterAction();
         return;
       }
 
@@ -1613,9 +812,9 @@ export const useRogue = create<RogueState>((set, get) => {
         sfx.play('place');
         pushLog(`${itemLabel(stack)} を設置した`);
         set({ player: { ...player, pack: [...player.pack] }, uiMode: 'walk' });
-        beastsTurn();
-        endTurn();
-        settleAfterAction();
+        combat.beastsTurn();
+        stratum.endTurn();
+        move.settleAfterAction();
         return;
       }
 
@@ -1646,100 +845,10 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     // --- スキル(マスタリー×スロット。rogue-23) ------------------------------------
-    // equipSkill/unequipSkill/finishOutfitting/skipDraft は「支度」「関門ドラフト」の
-    // モーダル表示中だけ動く(busy 相当のゲーム操作ブロック中でも、この4つだけは通す)。
-
-    equipSkill: (id) => {
-      logAction('SE', id);
-      const s = get();
-      const inOutfitting = s.skillOutfitting;
-      const inDraft = s.skillDraft !== null;
-      if (!inOutfitting && !inDraft) return;
-      // 支度中は解禁済み全ノードから、ドラフト中は提示された候補からのみ選べる。
-      if (inOutfitting) {
-        if (!unlockedNodes(masteryLevels(masteryStore.readMastery())).includes(id)) return;
-      } else if (!s.skillDraft!.includes(id)) {
-        return;
-      }
-      if (s.skillEquipped.includes(id)) return;
-      // 反撃系(受け反撃/見切り)は同時装着不可(rogue-24 の横断ルール)。
-      if (
-        COUNTER_NODES.includes(id) &&
-        s.skillEquipped.some((x) => COUNTER_NODES.includes(x) && x !== id)
-      ) {
-        pushLog('反撃の技はひとつしか身につけられない');
-        return;
-      }
-      if (equippedCost(s.skillEquipped) + SKILL_NODES[id].cost > s.skillSlots) {
-        pushLog('スロットが足りない(外して組み替える)');
-        return;
-      }
-      set({ skillEquipped: [...s.skillEquipped, id] });
-      pushLog(`${SKILL_NODES[id].name} を装着した`);
-      sfx.play('select');
-      if (inDraft) {
-        set({ skillDraft: null });
-        settleAfterAction();
-      }
-    },
-
-    unequipSkill: (id) => {
-      logAction('SU', id);
-      const s = get();
-      if (!s.skillOutfitting && s.skillDraft === null) return;
-      if (!s.skillEquipped.includes(id)) return;
-      const player = s.player;
-      // 片手扱い(katate)を外すと、両手武器+盾の組み合わせが不整合になる — 盾を pack へ。
-      if (id === 'katate' && player.weapon && ITEMS[player.weapon.item].twoHanded && player.shield) {
-        player.pack.push(player.shield);
-        player.shield = null;
-        pushLog('盾を背負い直した(片手扱いを解除)');
-        set({ player: { ...player, pack: [...player.pack] } });
-      }
-      // 消灯(hiShobo)を外したとき消灯状態なら「絞る」へ戻す(rogue-24)。
-      if (id === 'hiShobo' && s.lightLevel === 3) {
-        set({ lightLevel: 0 });
-        pushLog('たいまつに火を戻した(絞る)');
-        discover();
-      }
-      set({ skillEquipped: get().skillEquipped.filter((x) => x !== id) });
-      pushLog(`${SKILL_NODES[id].name} を外した`);
-      sfx.play('cancel');
-    },
-
-    recoverTrap: (id) => {
-      logAction('RT', id);
-      const s = get();
-      if (s.phase !== 'play' || s.busy) return;
-      if (!s.skillEquipped.includes('wanaKaishu')) return;
-      const t = s.traps.find((x) => x.id === id);
-      if (!t) return;
-      const player = s.player;
-      player.pack.push({ item: t.item, q: t.q });
-      set({ traps: s.traps.filter((x) => x.id !== id), player: { ...player, pack: [...player.pack] } });
-      sfx.play('pickup');
-      pushLog(`${ITEMS[t.item].name} を回収した`);
-      // 回収も1ターン。
-      beastsTurn();
-      endTurn();
-      settleAfterAction();
-    },
-
-    finishOutfitting: () => {
-      logAction('SF');
-      if (!get().skillOutfitting) return;
-      set({ skillOutfitting: false });
-      pushLog('準備を終えて潜った。');
-      settleAfterAction();
-    },
-
-    skipDraft: () => {
-      logAction('SX');
-      if (get().skillDraft === null) return;
-      set({ skillDraft: null });
-      pushLog('スキルの選択を見送った。');
-      settleAfterAction();
-    },
+    // equipSkill/unequipSkill/finishOutfitting/skipDraft/recoverTrap の実体は
+    // state/rogue/skills.ts(分割A2)。「支度」「関門ドラフト」のモーダル表示中だけ
+    // 動く(busy 相当のゲーム操作ブロック中でも、この4つだけは通す)。
+    ...skills.actions,
 
     mergeItem: (index) => {
       logAction('M', index);
@@ -1767,9 +876,9 @@ export const useRogue = create<RogueState>((set, get) => {
       pushLog(`合成: ${itemLabel(merged)} になった`);
       set({ player: { ...player, pack: [...player.pack] } });
       // 合成も1ターン。
-      beastsTurn();
-      endTurn();
-      settleAfterAction();
+      combat.beastsTurn();
+      stratum.endTurn();
+      move.settleAfterAction();
     },
 
     cycleLight: () => {
@@ -1782,82 +891,19 @@ export const useRogue = create<RogueState>((set, get) => {
       set({ lightLevel: l });
       sfx.play('select');
       pushLog(`明かりを${LIGHT[l].name}(視界と回復が変わり、敵の気づきやすさも変わる)`);
-      discover();
-      refreshReach();
+      move.discover();
+      move.refreshReach();
     },
 
-    wait: () => {
-      logAction('W');
-      const s = get();
-      if (s.phase !== 'play' || s.busy) return;
-      set({ uiMode: 'walk' });
-      beastsTurn();
-      endTurn();
-      settleAfterAction();
-    },
-
-    escape: () => {
-      logAction('ESC');
-      const s = get();
-      if (s.phase !== 'play' || s.busy) return;
-      const depth = depthOf(s.player.pos);
-      const warnAt = STRATUM_DEPTH * (s.stratum + 1);
-      if (depth < warnAt || depth >= warnAt + 2) return; // 警告帯限定(HUD のボタンも同条件)
-      const amberCount = s.player.pack.filter((it) => it.item === 'amber').length;
-      codexStore.recordEscape(amberCount, s.stratum + 1); // 展示棚: 琥珀加算・最深生還層更新
-      set({ phase: 'escaped', busy: false, reach: { cells: [], parent: new Map() } });
-      persist.clearSave(); // dead と同じく、ローグライクの掟: 終えた冒険は再開できない
-      bgm.setBgmScene('dead');
-      sfx.play('heal');
-      pushLog(`地表へ生還した。琥珀${amberCount}個が展示棚に加わった。`);
-      recordRun(true);
-    },
-
-    travelTo: (c) => {
-      logAction('T', c[0], c[1], c[2]);
-      const s = get();
-      if (s.phase !== 'play' || s.busy || s.uiMode === 'throw') return;
-      const path = findPath(c);
-      if (!path) {
-        pushLog('そこへは辿り着けない');
-        return;
-      }
-      sfx.play('select');
-      void walkPath(path);
-    },
-
-    travelToChamber: (id) => {
-      logAction('TC', id);
-      const s = get();
-      if (s.phase !== 'play' || s.busy) return;
-      if (s.mapMode) get().toggleMap(); // ゲーム画面へ戻ってから歩く
-      if (get().cellChamber.get(cellKey(get().player.pos)) === id) return; // もう居る
-      // その広間に属するセルへ最初に踏み込むまでの最短経路 = 入り口まで。
-      const path = findPathWhere((k) => get().cellChamber.get(k) === id);
-      if (!path) {
-        pushLog('そこへは辿り着けない');
-        return;
-      }
-      sfx.play('select');
-      void walkPath(path);
-    },
+    // escape(脱出)の実体は state/rogue/runEnd.ts(分割A5)。checkDead/recordRun と
+    // 同じくラン終了系としてそちらへ移した。
+    ...runEnd.actions,
 
     cancelThrow: () => {
       logAction('X');
       if (get().uiMode === 'walk') return;
       sfx.play('cancel');
       set({ uiMode: 'walk', placeIndex: null });
-    },
-
-    cancelTravel: () => {
-      logAction('XT');
-      if (!traveling) return; // 歩行中のみ。攻撃演出などの busy は巻き込まない
-      runSeq++; // 進行中の walkPath ループを次のチェックで打ち切る
-      traveling = false;
-      sfx.play('cancel');
-      pushLog('(足を止めた)');
-      set({ busy: false });
-      refreshReach();
     },
 
     setArmed: (key) => {
@@ -1907,7 +953,10 @@ export const useRogue = create<RogueState>((set, get) => {
       const s = get();
       if (s.mapMode) {
         // 訪問済みの広間の中央を巡回(一周の最後にプレイヤー位置へ戻る)。Shift で逆順。
-        const ids = [...s.visitedChambers].sort((a, b) => a - b);
+        // 崩落済み(墓標化)広間は巡回対象から除外する(visitedChambers 自体は刈らない)。
+        const ids = [...s.visitedChambers]
+          .filter((id) => !s.dungeon.chambers[id].collapsed)
+          .sort((a, b) => a - b);
         if (ids.length === 0) return;
         const n = ids.length + 1; // 末尾はプレイヤー位置
         // 初期状態(-1)は「プレイヤー位置」相当: 逆順の最初は最後の広間へ。
@@ -1965,8 +1014,8 @@ export const useRogue = create<RogueState>((set, get) => {
 
   /** restart 直後の明かり+到達範囲(クロージャ内関数を初期化からも使うため)。 */
   function discoverInit(): void {
-    discover();
-    refreshReach();
+    move.discover();
+    move.refreshReach();
   }
 });
 

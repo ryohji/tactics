@@ -647,6 +647,22 @@ describe('マップモードとターゲット巡回', () => {
     expect(useRogue.getState().hoverBeastId).toBe(b1.id);
   });
 
+  it('崩落済み(墓標化)広間は TAB 巡回の対象から除外される(visitedChambers 自体は刈らない)', () => {
+    const s = useRogue.getState();
+    const pos = freeNeighbor();
+    s.cellChamber.set(cellKey(pos), 99);
+    s.visitedChambers.add(99); // visitedChambers には残ったまま
+    s.dungeon.chambers[99] = { id: 99, center: pos, r: 1, cells: [], collapsed: true };
+    s.toggleMap();
+    // 崩落済みの 99 は飛ばされ、最初の TAB で唯一の生存広間(0)へ。
+    useRogue.getState().cycleTarget();
+    expect(useRogue.getState().mapFocusChamber).toBe(0);
+    // 一周してプレイヤーへ戻るまで 99 は一度も現れない。
+    useRogue.getState().cycleTarget();
+    expect(useRogue.getState().mapFocusChamber).toBeNull();
+    expect(useRogue.getState().visitedChambers.has(99)).toBe(true); // 巡回対象から外れるだけ
+  });
+
   it('travelToChamber: マップを閉じて部屋の入り口(最初の広間セル)まで移動する', async () => {
     // 発見済みの遠いセルを仮想の広間 99 に見立てる。
     const s = useRogue.getState();

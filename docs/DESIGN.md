@@ -32,20 +32,29 @@
 model/            幾何・ダンジョン生成・敵/アイテム定義。Three 非依存・テスト対象
 model/rogue/      ゲームのドメイン層。Three/React/zustand 非依存の純関数
   types.ts          ドメイン型(Beast/PlayerState/Trap/Turret/Decoy/GameEvent/SaveData)
-  rules.ts          depthOf・playerAtk/Def・weaponReach/Sweep・parseSeed など
+  rules.ts          depthOf・playerAtk/Def/Evade・weaponReach/Sweep・parseSeed など
   visibility.ts     discoverInto(たいまつの明かり。BFS で discovered を拡張)
   reach.ts          computeReach/findPath/findPathWhere(発見済み空洞の BFS)
-  combat.ts         ダメージ計算・罠効果解決・砲塔照準(GameEvent を返す)
+  combat.ts         ダメージ計算・障壁吸収・罠効果解決・砲塔照準(GameEvent を返す)
   beastAI.ts        敵1体の意思決定(気づき・ターゲット選択・追跡/逃走)
-  spawn.ts          広間生成時の敵・アイテムの湧き
+  spawn.ts          広間生成時の敵・アイテム・門番・遺物の湧き
+  mastery.ts        マスタリー7系統・スキルノード25個の定義とドラフト抽選
+  feats.ts          実績8種の定義(達成条件は state 側がトリガから判定)
 state/            zustand ストア + 毎フレーム系チャネル
   rogue.ts          ストア本体。純関数を呼び、結果をコミットし、非同期演出
                      (自動歩行・攻撃モーション)の進行を管理する薄い層
   view.ts           カメラの旋回角・視線追跡目標(可変シングルトン)
   unitAnim.ts       ユニットの経路アニメ(離散位置と補間表示位置を分離)
   playerPose.ts     プレイヤーモデルの一時ポーズ(攻撃/投擲)
-  persist.ts        localStorage 保存/復元(SaveData 丸ごと)
-  share.ts          死亡時の X 投稿テキスト生成
+  persist.ts        localStorage 保存/復元(SaveData 丸ごと。ラン単位)
+  share.ts          死亡/生還時の X 投稿テキスト生成
+  history.ts        ラン履歴(localStorage 別キー。最大100件・自己ベスト)
+  masteryStore.ts   マスタリー永続カウンタ(localStorage 別キー。死んでも残る)
+  codexStore.ts     討伐/アイテム図鑑・実績・展示棚(localStorage 別キー。死んでも残る)
+sim/              バランスシミュレータ(ヘッドレス統計。§9 参照)
+  policies.ts       ボット方策(貪欲/慎重など)= (状態)→行動 のインターフェース
+  runner.ts         実ストアを fake timers で高速駆動するランナー
+  summary.ts        死亡深度分布・死因・種族別寄与などの集計
 render/           R3F コンポーネント(フラット。旧 render/rogue/ は rogue-17 で統合)
 ui/               DOM オーバーレイの HUD
 audio/            WebAudio 合成(効果音・BGM)。外部音声アセットなし
@@ -123,11 +132,56 @@ Three/React/zustand 非依存の純関数へ分離した。
 「コミット+実行」の薄い層に位置づける。
 
 - `uiMode`: `walk`(移動)/`throw`(投擲対象選択)/`place`(罠の設置先選択)。
+- `phase`: `play` / `dead` / `escaped`(rogue-25: 脱出=生還。dead と同様に
+  操作停止・セーブ破棄だが、pack の遺物を展示棚へ確定してから終える)。
 - `runSeq`(世代トークン): `restart` のたびに増分し、await を跨ぐ古い
   非同期処理(自動歩行中に再挑戦した場合など)を打ち切る。
 - 保存(`SaveData`, `model/rogue/types.ts`): 毎ターン `autoSave` が
-  localStorage へスナップショット。バージョン付き(現在 v2 — rogue-16 の
-  スロット式生成で v1 の迷宮と非互換になったため繰り上げ)。
+  localStorage へスナップショット。バージョン付き(現在 **v6**。破壊的変更の
+  たびに繰り上げて旧版は破棄 — v3=層リセット/事前ロール/行動ログ、
+  v4=障壁/状態異常、v5=盾、v6=スキルスロット/装着/ドラフト)。
+- 行動ログ(`actionLog`): 状態を変える全アクションを `[turn, code, ...args]`
+  で記録(将来のリプレイ検証 rogue-26 向け。今は記録のみ)。
+
+### 6a. 層と関門(rogue-19b)
+
+ダンジョンが無限に成長してメモリ・セーブ容量が破綻しないよう、深度
+`STRATUM_DEPTH=8` ごとに層を区切る。`endTurn` の `checkStratum` が深度
+8(stratum+1) で警告を1回出し、+2 で崩落(`triggerCollapse`)を発動する。
+崩落は `Dungeon.cutLayer`(1整数)を下げ、`collapseAbove` が cutLayer より
+浅い open セルを刈り・広間を墓標化(id=配列添字の不変条件を守るため
+`cells:[]` で残す)・境界向きスタブを used 化する。`materializeSlot` は
+cutLayer 付近より浅いスロットを**二度と実体化しない**(集合を持たない
+恒久ガード)。store 側も discovered・敵・アイテム・罠等を同じ基準で刈る。
+崩落は関門の儀式でもある: スキルスロット+1・3択ドラフト・障壁の剥がれ・
+灯火マスタリーの加算がここで起きる。
+
+### 6b. スキル(マスタリー×スロット。rogue-23/24)
+
+二層構造 — **マスタリー(永続・横の広がり)×スロット(ラン内・縦の力)**。
+- マスタリー7系統(武技/盾/甲殻/拳闘/隠密/罠師/灯火)は使用実績カウンタ
+  (`masteryStore.ts`・死んでも残る)を閾値で Lv0〜3 に離散化し、レベルが
+  ノード(全25個・`model/rogue/mastery.ts`)を「選べる候補」として解禁する。
+- スロットは初期2・関門+1・門番撃破+1・上限6。装着の組み替えはラン開始の
+  「支度」と関門ドラフト(解禁済み未装着から乱数3択)でのみ。
+- **決定論ガード**: 候補ゼロ(マスタリー未育成)ではドラフトの乱数もモーダルも
+  発生しない(`draftCandidates` は空プールで rng を呼ばない)。ゴールデン
+  テストとシミュレータのボットはこの経路を通るため乱数列が保たれる。
+  ノード効果の乱数(延焼の刃など)も装着時のみ消費する。
+
+### 6c. 戦闘の拡張(rogue-21/22/24)
+
+- **障壁**: `PlayerState.barrier`(上書き式)。被弾はまず `absorbBarrier` が
+  障壁を削り余りが HP へ。酸(acidBarrier)は障壁への削りだけ2倍、毒 DoT は
+  障壁を素通り。層の崩落で剥がれる。
+- **状態異常**: プレイヤー側は毒/混乱(`PlayerStatus`)、敵側は延焼/混乱/
+  恐慌/昏睡(`BeastStatus`)。解毒の水薬が治療+品質ターンの予防。
+- **回避**: 盾(+スキル)由来の `playerEvade`。盾なし(回避0)では
+  `beastStrike` が回避判定の乱数を引かない(既存ランの乱数列を守る)。
+- **遠隔**: `ranged` を持つ敵は射程内かつ `lineOfSight`(0.5刻みの線分
+  サンプリング)が通れば離れて撃つ。掲盾スキルが遠隔専用の回避を足す。
+- **個体差**: 深度24超の係数スケールと門番の層スケールは `Beast.atkOverride/
+  defOverride` で表現(種の定義 `BeastDef` は不変に保つ)。
 
 ---
 
@@ -169,7 +223,7 @@ Three/React/zustand 非依存の純関数へ分離した。
 
 ---
 
-## 9. テスト戦略
+## 9. テスト戦略とバランス計測
 
 - `model/**/*.test.ts`: 純関数の単体テスト(幾何・生成・戦闘計算など)。
 - `state/rogue.test.ts`: ストア経由の統合テスト(fake timers で非同期
@@ -178,6 +232,15 @@ Three/React/zustand 非依存の純関数へ分離した。
   罠設置・探索・広間拡張・深層降下・死亡までを1本通し、最終状態を
   スナップショット固定する。リファクタリングで**乱数の呼び出し順**が
   崩れていないことを検知する回帰網(意図した挙動変更時のみ更新)。
+  ※ golden の固定方針と `sim/policies.ts` の貪欲方策は似ているが
+  **意図的に別物**(golden は凍結された回帰網なので共通化しない)。
+- **バランスシミュレータ**(`src/sim/`・rogue-19a): `npm run balance` で
+  実ゲームと同じストアを `setTimeScaleForTest(0)`(演出待ちゼロ)で数百〜
+  数千ラン回すヘッドレス統計。ボット方策(貪欲/慎重)×シード集合で
+  死亡深度分布(percentile)・死因・通過層数を集計し、**変更前後の A/B 差分**で
+  難度の意図せぬ変動を検出する(ベースラインは `docs/balance/`)。厳密一致は
+  golden、統計はシミュレータ、人間の実データはローカルスコアボード
+  (`state/history.ts`)という三段構え。
 
 ---
 

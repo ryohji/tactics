@@ -1,9 +1,10 @@
 // ローカルスコアボード(rogue-20)。死亡のたびのラン記録を localStorage に貯める。
-// persist.ts と同じ流儀: localStorage の1キーに JSON 配列を置く。Node/テスト環境では
+// kvStore と同じ流儀: localStorage の1キーに JSON 配列を置く。Node/テスト環境では
 // localStorage が無いので全 API が no-op(テストは差し替え口を使う)。
 // サーバ無し・端末ローカルのみ(共有ボードは rogue-26)。
 
-const KEY = 'fcc-rogue-history-v1';
+import { makeKvStore, type KvStore } from './kvStore';
+
 /** 保持する最大件数(先頭=最新から MAX 件で切り詰める)。 */
 const MAX = 100;
 
@@ -28,46 +29,27 @@ export interface RunRecord {
   escaped: boolean;
 }
 
-let storage: Storage | null = (() => {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return null; // プライバシーモード等でアクセス自体が例外になる環境
-  }
-})();
+const store: KvStore<RunRecord[]> = makeKvStore('fcc-rogue-history-v1', () => [], {
+  validate: (v): v is RunRecord[] => Array.isArray(v),
+});
 
 /** テスト用: インメモリ実装などに差し替える。 */
 export function setHistoryStorageForTest(s: Storage | null): void {
-  storage = s;
+  store.setStorageForTest(s);
 }
 
 /** 先頭(最新)に追加し、最大 MAX 件で切り詰める。 */
 export function appendRun(r: RunRecord): void {
-  try {
-    const list = readHistory();
-    list.unshift(r);
-    storage?.setItem(KEY, JSON.stringify(list.slice(0, MAX)));
-  } catch {
-    // 容量超過などで保存に失敗してもゲームは止めない
-  }
+  const list = readHistory();
+  list.unshift(r);
+  store.write(list.slice(0, MAX));
 }
 
 /** 破損した JSON や配列以外の形は空履歴として扱う。 */
 export function readHistory(): RunRecord[] {
-  try {
-    const raw = storage?.getItem(KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as RunRecord[]) : [];
-  } catch {
-    return [];
-  }
+  return store.read();
 }
 
 export function clearHistory(): void {
-  try {
-    storage?.removeItem(KEY);
-  } catch {
-    // no-op
-  }
+  store.clear();
 }
