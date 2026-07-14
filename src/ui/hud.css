@@ -717,6 +717,51 @@
   white-space: nowrap;
 }
 
+/* --- rogue-26: 共有スコアボード。名前入力(タイトル)とモーダル(hud-help-panel の流儀) --- */
+.hud-title-name { display: flex; gap: 8px; justify-content: center; margin: 2px 0 10px; }
+.hud-title-name input {
+  font: inherit;
+  font-size: 12px;
+  color: #e2e8f0;
+  background: rgba(10, 8, 30, 0.7);
+  border: 1px solid #4c467e;
+  border-radius: 8px;
+  padding: 6px 12px;
+  width: 240px;
+  text-align: center;
+  pointer-events: auto;
+  outline: none;
+}
+.hud-title-name input:focus { border-color: #22d3ee; }
+.hud-title-name input::placeholder { color: #64748b; }
+
+.scoreboard-panel { width: min(640px, calc(100vw - 32px)); }
+.scoreboard-sub { margin: -4px 0 10px; font-size: 12px; color: #94a3b8; }
+.scoreboard-status { padding: 20px 0; text-align: center; color: #94a3b8; font-size: 13px; }
+.scoreboard-list { display: flex; flex-direction: column; gap: 4px; max-height: 52vh; overflow-y: auto; margin-bottom: 10px; }
+.scoreboard-row {
+  display: grid;
+  grid-template-columns: 1.6em 1fr auto auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(128, 118, 210, 0.3);
+  border-radius: 7px;
+  background: rgba(20, 16, 46, 0.4);
+  font-size: 12px;
+}
+.scoreboard-rank { color: #7d8aa5; font-variant-numeric: tabular-nums; text-align: right; }
+.scoreboard-name { color: #f1f5f9; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scoreboard-stat { color: #cbd5e1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scoreboard-cause { color: #fca5a5; white-space: nowrap; }
+.scoreboard-skills {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-left: calc(1.6em + 8px);
+}
+
 /* --- rogue-18: 中間幅(ハーフウィンドウ・タブレット横)での重なり防止 ---
    絶対配置のままだと下中央バーが右下ログと重なる(実測で ~1150px 以下)。
    スマホ向けと同じ「ログ → バー」の中央縦積みに切り替える。縮小や
@@ -861,6 +906,14 @@
   /* 図鑑(rogue-25)も同様に1カラム。 */
   .codex-grid { grid-template-columns: 1fr; }
   .codex-shelf { flex-wrap: wrap; gap: 8px 18px; font-size: 12px; }
+
+  /* 共有スコアボード(rogue-26)も1カラムで折り返す。 */
+  .hud-title-name input { width: min(240px, 70vw); }
+  .scoreboard-row {
+    grid-template-columns: 1.6em 1fr auto;
+    row-gap: 2px;
+  }
+  .scoreboard-skills { padding-left: 0; }
 }
 
 /* --- ダメージポップアップ（Effects の Html） --- */

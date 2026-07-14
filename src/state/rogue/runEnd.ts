@@ -16,6 +16,7 @@ import type { RogueState } from '../rogue';
 import * as persist from '../persist';
 import * as history from '../history';
 import * as codexStore from '../codexStore';
+import * as scoreboard from '../scoreboard';
 import * as bgm from '../../audio/bgm';
 import type { SfxName } from '../../audio/sfx';
 import { GAME_VERSION, STRATUM_DEPTH } from '../../model/rogue/types';
@@ -57,6 +58,27 @@ export function createRunEnd(deps: RunEndDeps) {
       escaped,
     });
     if (s.maxDepth > prevBest) pushLog('自己ベスト更新!');
+    // 共有スコアボード(rogue-26): 死亡/生還の確定送信。fire-and-forget(await しない)。
+    // URL 未設定(VITE_SCOREBOARD_URL 空)なら submitRun 内で即 return する no-op。
+    void scoreboard.submitRun(
+      scoreboard.buildRunPayload(
+        {
+          seed: s.seed,
+          turn: s.turn,
+          kills: s.kills,
+          maxDepth: s.maxDepth,
+          stratum: s.stratum,
+          deathCause: s.deathCause,
+          skillEquipped: s.skillEquipped,
+        },
+        {
+          runId: scoreboard.getRunId(),
+          name: scoreboard.readPlayerName(),
+          escaped,
+          dead: !escaped,
+        },
+      ),
+    );
   }
 
   function checkDead(): boolean {

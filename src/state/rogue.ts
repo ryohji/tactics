@@ -43,6 +43,7 @@ import { createRunEnd } from './rogue/runEnd';
 import * as persist from './persist';
 import * as masteryStore from './masteryStore';
 import * as codexStore from './codexStore';
+import * as scoreboard from './scoreboard';
 import {
   ITEMS,
   itemLabel,
@@ -577,6 +578,9 @@ export const useRogue = create<RogueState>((set, get) => {
       chamberCycleIdx = -1;
       resetStratumWarned();
       actionLog = [];
+      // 共有スコアボード(rogue-26): ランごとに送信専用の ID を採番(ゲームの決定論=乱数
+      // シード列とは無関係。scoreboard.ts 冒頭のコメント参照)。
+      scoreboard.startNewRun();
       if (!opts?.keepSave) persist.clearSave(); // 新しい冒険を始めたら前の保存は破棄
       bgm.setBgmScene('game');
       bgm.setBgmDepth(0);
@@ -602,6 +606,9 @@ export const useRogue = create<RogueState>((set, get) => {
       beastCycleIdx = -1;
       chamberCycleIdx = -1;
       resetStratumWarned(); // 保存には無い(層の途中で境界近くなら再掲されるだけ)
+      // 共有スコアボード(rogue-26): runId は saveData に入れない設計のため、再開したランは
+      // 新しい ID を採番する(簡潔さ優先)。
+      scoreboard.startNewRun();
       actionLog = d.actionLog;
       beastSeq = d.seqs.beast;
       itemSeq = d.seqs.item;

@@ -17,6 +17,7 @@
 
 import type { StoreApi } from 'zustand';
 import type { RogueState } from '../rogue';
+import * as scoreboard from '../scoreboard';
 import * as bgm from '../../audio/bgm';
 import type { SfxName } from '../../audio/sfx';
 import { layer, keyToCell, type CellKey } from '../../model/fcc';
@@ -111,6 +112,24 @@ export function createStratum(deps: StratumDeps) {
     const draft = draftCandidates(skills.undraftedUnlockedNodes(), rand, 3);
     set({ skillSlots: newSlots, skillDraft: draft.length > 0 ? draft : null });
     if (draft.length > 0) pushLog('関門の先へ進む前に、新たな心得を選べる。');
+
+    // 共有スコアボード(rogue-26): 関門通過時点のスナップショットを送信(進行中=潜行中扱い)。
+    // 死亡/生還の確定は runEnd.recordRun 側。fire-and-forget・URL 未設定は no-op。
+    const s2 = get();
+    void scoreboard.submitRun(
+      scoreboard.buildRunPayload(
+        {
+          seed: s2.seed,
+          turn: s2.turn,
+          kills: s2.kills,
+          maxDepth: s2.maxDepth,
+          stratum: s2.stratum,
+          deathCause: s2.deathCause,
+          skillEquipped: s2.skillEquipped,
+        },
+        { runId: scoreboard.getRunId(), name: scoreboard.readPlayerName(), escaped: false, dead: false },
+      ),
+    );
 
     refreshReach();
     autoSave();

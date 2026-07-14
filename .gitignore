@@ -3,3 +3,7 @@ dist/
 tsconfig.tsbuildinfo
 .DS_Store
 .claude.bak/
+
+# Cloudflare Workers(worker/。rogue-26 共有スコアボード)
+.wrangler/
+worker/.dev.vars

@@ -39,6 +39,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
               </td>
             </tr>
             <tr><td>セーブ</td><td>毎ターン自動保存。死ぬと消える(再挑戦のみ)</td></tr>
+            <tr><td>🏆 みんなの記録</td><td>タイトルの共有スコアボード。関門通過ごとに深度・討伐・構成を送信(名前は任意)</td></tr>
           </tbody>
         </table>
         <p className="hud-help-links">

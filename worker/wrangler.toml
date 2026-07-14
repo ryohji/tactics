@@ -1,0 +1,11 @@
+name = "fcc-rogue-scoreboard"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# `wrangler d1 create fcc-rogue-scoreboard` の出力にある database_id へ差し替える。
+# ローカル開発(wrangler dev --local)は database_id が仮でも動く(ローカル sqlite を使う)。
+# binding はコード(src/index.ts の Env.DB)と一致させること。
+[[d1_databases]]
+binding = "DB"
+database_name = "fcc-rogue-scoreboard"
+database_id = "bca44023-0c1d-45f7-a4eb-ccd67dfcee9c"

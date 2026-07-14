@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { useRogue, parseSeed, dailySeed, GAME_VERSION } from '../state/rogue';
 import { hasSave, clearSave } from '../state/persist';
 import { readHistory } from '../state/history';
+import { isScoreboardEnabled, readPlayerNameRaw, writePlayerName } from '../state/scoreboard';
 import { unlock } from '../audio/sfx';
 import { startBgm } from '../audio/bgm';
 import { CodexModal } from './modals/CodexModal';
+import { ScoreboardModal } from './modals/ScoreboardModal';
 
 /** タイトル画面: 「これまでの冒険」— ローカル履歴(rogue-20)から深度・討伐上位5件。
     行クリックでそのシードをシード入力欄へ流し込む(同じ迷宮に再挑戦できる)。 */
@@ -51,6 +53,9 @@ export function TitleOverlay() {
   const [seedInput, setSeedInput] = useState('');
   const [saved, setSaved] = useState(() => hasSave());
   const [codexOpen, setCodexOpen] = useState(false);
+  const [scoreboardOpen, setScoreboardOpen] = useState(false);
+  // 共有スコアボード(rogue-26)の名前入力。未設定は空欄(プレースホルダで案内)。
+  const [nameInput, setNameInput] = useState(() => readPlayerNameRaw());
   if (entered) return null;
 
   // 新しく潜る: シード入力があればその迷宮、無ければ起動時のランダム迷宮。
@@ -95,6 +100,21 @@ export function TitleOverlay() {
             spellCheck={false}
           />
         </div>
+        {isScoreboardEnabled() && (
+          <div className="hud-title-name">
+            <input
+              value={nameInput}
+              onChange={(e) => {
+                const v = e.target.value.slice(0, 24);
+                setNameInput(v);
+                writePlayerName(v);
+              }}
+              placeholder="名前(みんなの記録用・任意)"
+              maxLength={24}
+              spellCheck={false}
+            />
+          </div>
+        )}
         <div className="hud-title-buttons">
           {saved && (
             <button className="primary" onClick={resume}>
@@ -120,8 +140,18 @@ export function TitleOverlay() {
           >
             📖 図鑑
           </button>
+          {isScoreboardEnabled() && (
+            <button
+              className="secondary daily"
+              onClick={() => setScoreboardOpen(true)}
+              title="全プレイヤー共有のハイスコア(rogue-26。バージョン別)"
+            >
+              🏆 みんなの記録
+            </button>
+          )}
         </div>
         {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
+        {scoreboardOpen && <ScoreboardModal onClose={() => setScoreboardOpen(false)} />}
         {saved && (
           <button
             className="discard"
