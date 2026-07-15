@@ -109,7 +109,7 @@ function Death({ fx }: { fx: RogueFx }) {
 function Popup({ fx }: { fx: RogueFx }) {
   const at = toWorld(fx.at!);
   return (
-    <Html position={[at.x, at.y + 0.8 * S, at.z]} center zIndexRange={[100, 0]}>
+    <Html position={[at.x, at.y + 0.8 * S, at.z]} center zIndexRange={[6, 0]}>
       <div className="fx-popup" style={{ color: fx.color ?? '#fff' }}>
         {fx.text}
       </div>

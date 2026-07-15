@@ -40,7 +40,7 @@ function Bubble({
   const d = stepDist(playerPos, target);
   const key = `bubble:${id}`;
   return (
-    <Html position={[w.x, w.y + lift * S, w.z]} center zIndexRange={[50, 0]}>
+    <Html position={[w.x, w.y + lift * S, w.z]} center zIndexRange={[5, 0]}>
       <div
         className={`hud-bubble ${kind}${armedKey === key ? ' armed' : ''}`}
         onClick={(e) => {
