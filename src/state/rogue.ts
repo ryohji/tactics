@@ -119,9 +119,11 @@ export {
   MASTERY_NAME,
   SKILL_NODES,
   NODE_IDS,
+  MASTERY_THRESHOLDS,
   masteryLevels,
   unlockedNodes,
   equippedCost,
+  counterFor,
 } from '../model/rogue/mastery';
 export type { MasterySystem, MasteryCounters, NodeId, SkillNode } from '../model/rogue/mastery';
 export { readMastery } from './masteryStore';

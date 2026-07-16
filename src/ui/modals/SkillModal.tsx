@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { useRogue, SKILL_NODES, MASTERY_NAME, equippedCost, unlockedNodes, masteryLevels, readMastery, type NodeId } from '../../state/rogue';
+import { MasteryTree } from '../MasteryTree';
 
 /** スキルノード1枚のカード(名前・系統・コスト・効果1行・装着中/選択可否)。 */
 function SkillCard({
@@ -44,9 +46,11 @@ export function SkillModal() {
   const unequipSkill = useRogue((s) => s.unequipSkill);
   const finishOutfitting = useRogue((s) => s.finishOutfitting);
   const skipDraft = useRogue((s) => s.skipDraft);
+  const [peekTree, setPeekTree] = useState(false);
   if (!outfitting && !draft) return null;
   const used = equippedCost(skillEquipped);
-  const unlocked = outfitting ? unlockedNodes(masteryLevels(readMastery())) : [];
+  const mastery = outfitting ? readMastery() : null;
+  const unlocked = mastery ? unlockedNodes(masteryLevels(mastery)) : [];
 
   return (
     <div className="hud-help">
@@ -73,6 +77,10 @@ export function SkillModal() {
                 );
               })}
             </div>
+            <button className="mastery-peek-toggle" onClick={() => setPeekTree((v) => !v)}>
+              🌳 {peekTree ? 'この先の心得を閉じる' : 'この先の心得を覗く'}
+            </button>
+            {peekTree && <MasteryTree counters={mastery!} onlyLocked />}
             <button className="primary" onClick={finishOutfitting}>
               そのまま潜る
             </button>

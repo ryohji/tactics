@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { readCodex } from '../../state/codexStore';
+import { readMastery } from '../../state/rogue';
 import { BEASTS, type BeastKind } from '../../model/beasts';
 import { ITEMS, type ItemId } from '../../model/loot';
 import { FEAT_IDS, FEATS } from '../../model/rogue/feats';
+import { MasteryTree } from '../MasteryTree';
 
 /**
  * タイトル画面: 図鑑(rogue-25)。討伐図鑑・アイテム図鑑・実績を永続メタ(codexStore)
@@ -11,6 +13,7 @@ import { FEAT_IDS, FEATS } from '../../model/rogue/feats';
  */
 export function CodexModal({ onClose }: { onClose: () => void }) {
   const [codex] = useState(() => readCodex()); // 表示中は変わらないので初回だけ読む
+  const [mastery] = useState(() => readMastery());
   const beastKinds = Object.keys(BEASTS) as BeastKind[];
   const itemIds = Object.keys(ITEMS) as ItemId[];
   return (
@@ -80,6 +83,9 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
             );
           })}
         </div>
+
+        <h3>心得(マスタリー)</h3>
+        <MasteryTree counters={mastery} />
 
         <button className="primary" onClick={onClose}>
           閉じる

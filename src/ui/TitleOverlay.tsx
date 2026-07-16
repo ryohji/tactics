@@ -87,9 +87,9 @@ export function TitleOverlay() {
         <div className="hud-title-sub">FCC ROGUE</div>
         <h1>蟻巣迷宮</h1>
         <p>
-          面心立方の巣を、たいまつひとつで潜る。
+          闇に沈んだ蟻の巣は、底を知らない。
           <br />
-          明かりを広げれば癒えるが、目立つ。どこまで深く行けるか。
+          たいまつの灯りだけを道連れに、まだ誰も辿り着いていない深さへ。
         </p>
         <div className="hud-title-seed">
           <input

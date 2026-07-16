@@ -7,6 +7,7 @@ import {
   unlockedNodes,
   equippedCost,
   draftCandidates,
+  counterFor,
   SKILL_NODES,
   NODE_IDS,
   INITIAL_MASTERY,
@@ -71,6 +72,19 @@ describe('unlockedNodes', () => {
 
   it('全系統レベル3で全ノードが解禁される', () => {
     expect(unlockedNodes(levels({ arms: 3, guard: 3, carapace: 3, fist: 3, stealth: 3, trapper: 3, light: 3 }))).toEqual(NODE_IDS);
+  });
+});
+
+describe('counterFor(スキルツリー表示の進捗算出)', () => {
+  it('系統ごとに対応するカウンタ値を返す', () => {
+    const c = counters({ weaponKills: 42, evades: 7, absorbed: 120, fistKills: 3, stealthKills: 9, trapKills: 2, dimCollapses: 1 });
+    expect(counterFor('arms', c)).toBe(42);
+    expect(counterFor('guard', c)).toBe(7);
+    expect(counterFor('carapace', c)).toBe(120);
+    expect(counterFor('fist', c)).toBe(3);
+    expect(counterFor('stealth', c)).toBe(9);
+    expect(counterFor('trapper', c)).toBe(2);
+    expect(counterFor('light', c)).toBe(1);
   });
 });
 

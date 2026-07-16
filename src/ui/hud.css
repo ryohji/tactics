@@ -667,6 +667,35 @@
 .skill-card .skill-desc { margin: 0; font-size: 11px; color: #94a3b8; line-height: 1.4; flex: 1; }
 .skill-card > button { width: 100%; padding: 5px 8px; font-size: 12px; }
 .skill-panel > button:not(.skill-card > button) { margin-top: 6px; width: 100%; }
+.skill-card.locked { opacity: 0.5; border-style: dashed; }
+.skill-card.locked .skill-name { color: #cbd5e1; }
+.mastery-req { font-size: 10px; color: #fbbf24; letter-spacing: 0.03em; }
+
+/* --- 心得(マスタリー)の系統×ティア一覧。図鑑・支度画面から共用(MasteryTree) --- */
+.mastery-tree { display: flex; flex-direction: column; gap: 14px; margin-bottom: 8px; }
+.mastery-system { border-left: 2px solid rgba(128, 118, 210, 0.35); padding-left: 10px; }
+.mastery-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.mastery-sys-name { font-size: 13px; font-weight: 700; color: #f1f5f9; }
+.mastery-lv { font-size: 11px; color: #22d3ee; }
+.mastery-progress {
+  margin-left: auto;
+  font-size: 11px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.mastery-tier {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mastery-tier.locked { opacity: 0.85; }
+.mastery-peek-toggle { background: rgba(20, 16, 46, 0.5); border: 1px dashed rgba(128, 118, 210, 0.5); color: #c4b5fd; }
 
 /* --- rogue-25: 図鑑(討伐/アイテム/実績)。hud-help-panel の流儀を流用 --- */
 .codex-panel { width: min(760px, calc(100vw - 32px)); }

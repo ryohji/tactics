@@ -50,8 +50,8 @@ export const INITIAL_MASTERY: MasteryCounters = {
   dimCollapses: 0,
 };
 
-/** 系統ごとのレベル1/2/3の閾値。 */
-const THRESHOLDS: Record<MasterySystem, readonly [number, number, number]> = {
+/** 系統ごとのレベル1/2/3の閾値(スキルツリー表示の進捗算出にも使うため公開)。 */
+export const MASTERY_THRESHOLDS: Record<MasterySystem, readonly [number, number, number]> = {
   arms: [10, 30, 80],
   guard: [5, 15, 40],
   carapace: [30, 100, 300],
@@ -68,16 +68,31 @@ function levelFor(count: number, th: readonly [number, number, number]): number 
   return 0;
 }
 
+const COUNTER_KEY: Record<MasterySystem, keyof MasteryCounters> = {
+  arms: 'weaponKills',
+  guard: 'evades',
+  carapace: 'absorbed',
+  fist: 'fistKills',
+  stealth: 'stealthKills',
+  trapper: 'trapKills',
+  light: 'dimCollapses',
+};
+
+/** 系統の現在カウンタ値(スキルツリー表示の進捗表示用)。 */
+export function counterFor(system: MasterySystem, counters: MasteryCounters): number {
+  return counters[COUNTER_KEY[system]];
+}
+
 /** カウンタから系統ごとのレベル(0〜3)を求める(純関数・離散式)。 */
 export function masteryLevels(counters: MasteryCounters): Record<MasterySystem, number> {
   return {
-    arms: levelFor(counters.weaponKills, THRESHOLDS.arms),
-    guard: levelFor(counters.evades, THRESHOLDS.guard),
-    carapace: levelFor(counters.absorbed, THRESHOLDS.carapace),
-    fist: levelFor(counters.fistKills, THRESHOLDS.fist),
-    stealth: levelFor(counters.stealthKills, THRESHOLDS.stealth),
-    trapper: levelFor(counters.trapKills, THRESHOLDS.trapper),
-    light: levelFor(counters.dimCollapses, THRESHOLDS.light),
+    arms: levelFor(counters.weaponKills, MASTERY_THRESHOLDS.arms),
+    guard: levelFor(counters.evades, MASTERY_THRESHOLDS.guard),
+    carapace: levelFor(counters.absorbed, MASTERY_THRESHOLDS.carapace),
+    fist: levelFor(counters.fistKills, MASTERY_THRESHOLDS.fist),
+    stealth: levelFor(counters.stealthKills, MASTERY_THRESHOLDS.stealth),
+    trapper: levelFor(counters.trapKills, MASTERY_THRESHOLDS.trapper),
+    light: levelFor(counters.dimCollapses, MASTERY_THRESHOLDS.light),
   };
 }
 
