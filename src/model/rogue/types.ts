@@ -24,7 +24,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r27';
+export const GAME_VERSION = 'r28';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -171,8 +171,8 @@ export type SkillDraft = DraftEntry[] | 'free' | null;
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 7: rogue-27 スキル体系v2(ランク・結び・天秤ドラフト・見送り権・罠クールダウン)。旧 v6 は非互換。 */
-  v: 7;
+  /** 8: rogue-28 アイテムの束ね(ItemStack.n が保存に乗る)。旧 v7 は非互換。 */
+  v: 8;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;

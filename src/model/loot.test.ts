@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { lcg } from './dungeon';
-import { lootTable, stackEvade, statLabel } from './loot';
+import { lootTable, stackEvade, statLabel, stackCount, stackable, mergeable, itemLabel } from './loot';
 import { spawnTable } from './beasts';
 
 describe('lootTable(深度スケーリング)', () => {
@@ -82,5 +82,58 @@ describe('spawnTable(深層の種族)', () => {
     const rng = lcg(6);
     const kinds = new Set(Array.from({ length: 300 }, () => spawnTable(22, rng)).flat());
     expect(kinds.has('colossus')).toBe(true);
+  });
+});
+
+describe('stackable・mergeable(rogue-28)', () => {
+  it('stackCount は n ?? 1', () => {
+    expect(stackCount({ item: 'potion', q: 0 })).toBe(1);
+    expect(stackCount({ item: 'potion', q: 0, n: 3 })).toBe(3);
+    expect(stackCount({ item: 'knife', q: 0, n: 2 })).toBe(2);
+  });
+
+  it('stackable は potion と thrown のみ', () => {
+    expect(stackable('potion')).toBe(true);
+    expect(stackable('barrierPotion')).toBe(true);
+    expect(stackable('antidote')).toBe(true);
+    expect(stackable('knife')).toBe(true);
+    expect(stackable('dagger')).toBe(false);
+    expect(stackable('shield')).toBe(false);
+    expect(stackable('turret')).toBe(false);
+    expect(stackable('amber')).toBe(false);
+  });
+
+  it('mergeable は weapon・armor・shield のみ', () => {
+    expect(mergeable('dagger')).toBe(true);
+    expect(mergeable('sword')).toBe(true);
+    expect(mergeable('leather')).toBe(true);
+    expect(mergeable('plate')).toBe(true);
+    expect(mergeable('shield')).toBe(true);
+    expect(mergeable('potion')).toBe(false);
+    expect(mergeable('knife')).toBe(false);
+    expect(mergeable('turret')).toBe(false);
+    expect(mergeable('amber')).toBe(false);
+  });
+
+  it('itemLabel は n>=2 なら「×n」を表示', () => {
+    expect(itemLabel({ item: 'potion', q: 0 })).toBe('癒しの水薬');
+    expect(itemLabel({ item: 'potion', q: 1 })).toBe('癒しの水薬+1');
+    expect(itemLabel({ item: 'potion', q: 0, n: 3 })).toBe('癒しの水薬 ×3');
+    expect(itemLabel({ item: 'knife', q: 0, n: 2 })).toBe('投げナイフ ×2');
+    expect(itemLabel({ item: 'dagger', q: 2 })).toBe('短剣+2');
+  });
+
+  it('lootTable(rogue-28) のナイフは bundle: q=0・n=2-3', () => {
+    const rng = lcg(1);
+    const items = Array.from({ length: 500 }, () => lootTable(1, rng)).flat();
+    const knives = items.filter((s) => s.item === 'knife');
+    expect(knives.length).toBeGreaterThan(50);
+    // すべてのナイフが q=0
+    expect(knives.every((s) => s.q === 0)).toBe(true);
+    // すべてのナイフが n=2 または n=3
+    expect(knives.every((s) => (s.n ?? 1) === 2 || (s.n ?? 1) === 3)).toBe(true);
+    // n=2 と n=3 の両方が出ている(統計的に)
+    expect(knives.some((s) => (s.n ?? 1) === 2)).toBe(true);
+    expect(knives.some((s) => (s.n ?? 1) === 3)).toBe(true);
   });
 });

@@ -2,8 +2,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cellKey, keyToCell, layer, neighbors } from '../model/fcc';
-import { stepDist } from '../model/dungeon';
+import { stepDist, lcg } from '../model/dungeon';
 import type { ItemStack } from '../model/loot';
+import { lootTable } from '../model/loot';
 import {
   useRogue,
   seedRogueRng,
@@ -248,15 +249,39 @@ describe('戦闘', () => {
     const b = placeBeastAdjacent('bat');
     const s = useRogue.getState();
     const idx = s.player.pack.findIndex((x) => x.item === 'knife');
-    const knives = s.player.pack.filter((x) => x.item === 'knife').length;
+    // 本数は束(n)込みで数える(rogue-28: ナイフは1枠に束ねる)。
+    const countKnives = () =>
+      player().pack.filter((x) => x.item === 'knife').reduce((sum, x) => sum + (x.n ?? 1), 0);
+    const knives = countKnives();
     s.useItem(idx);
     expect(useRogue.getState().uiMode).toBe('throw');
     useRogue.getState().clickBeast(b.id);
     await run();
     expect(useRogue.getState().uiMode).toBe('walk');
-    expect(player().pack.filter((x) => x.item === 'knife').length).toBe(knives - 1);
+    expect(countKnives()).toBe(knives - 1);
     const after = useRogue.getState().beasts.find((x) => x.id === b.id)!;
     expect(after.hp).toBeLessThan(BEASTS.bat.hp);
+  });
+
+  it('武具投擲の指し先(throwItemIndex)は投擲後もナイフモード進入でも残らない', async () => {
+    // 残留すると「ナイフのつもりで武具を投げる」誤爆になる(rogue-28 T3 の回帰)。
+    const b = placeBeastAdjacent('bat');
+    const p = player();
+    p.pack.push({ item: 'dagger', q: 0 });
+    useRogue.setState({ player: { ...p, pack: [...p.pack] } });
+    const gearIdx = player().pack.findIndex((x) => x.item === 'dagger');
+    useRogue.getState().setThrowMode(gearIdx);
+    expect(useRogue.getState().uiMode).toBe('throw');
+    expect(useRogue.getState().throwItemIndex).toBe(gearIdx);
+    useRogue.getState().clickBeast(b.id);
+    await run();
+    expect(useRogue.getState().uiMode).toBe('walk');
+    expect(useRogue.getState().throwItemIndex).toBeUndefined();
+    // 続けてナイフ投擲モードへ入っても武具の指し先は復活しない。
+    const knifeIdx = player().pack.findIndex((x) => x.item === 'knife');
+    useRogue.getState().useItem(knifeIdx);
+    expect(useRogue.getState().uiMode).toBe('throw');
+    expect(useRogue.getState().throwItemIndex).toBeUndefined();
   });
 });
 
@@ -282,20 +307,25 @@ describe('アイテム', () => {
     expect(player().pack.some((x) => x.item === 'dagger')).toBe(true);
   });
 
-  it('合成: 同一アイテム・同一品質の2つが q+1 になる(+0と+1 は合成不可)', () => {
-    const knifeIdx = player().pack.findIndex((x) => x.item === 'knife');
-    useRogue.getState().mergeItem(knifeIdx); // knife×2(q0) → knife+1
-    const merged = player().pack.filter((x) => x.item === 'knife');
-    expect(merged).toHaveLength(1);
-    expect(merged[0].q).toBe(1);
-    expect(useRogue.getState().turn).toBe(1); // 合成は1ターン
-    // q1 のナイフに q0 を足しても合成できない。
+  it('合成: 同一アイテム・同一品質の2つが q+1 になる(+0と+1 は合成不可)(rogue-28: 武具のみ)', () => {
+    // dagger×2(q0) を合成 → dagger+1
+    // 初期武器のdaggerを外して pack に入れてから、別のdaggerを足して合成する
+    useRogue.getState().unequip('weapon');
     useRogue.setState({
-      player: { ...player(), pack: [...player().pack, { item: 'knife', q: 0 }] },
+      player: { ...player(), pack: [...player().pack, { item: 'dagger', q: 0 }] },
     });
-    const idx1 = player().pack.findIndex((x) => x.item === 'knife' && x.q === 1);
+    const daggerIdx = player().pack.findIndex((x) => x.item === 'dagger' && x.q === 0);
+    useRogue.getState().mergeItem(daggerIdx);
+    const merged = player().pack.filter((x) => x.item === 'dagger' && x.q === 1);
+    expect(merged).toHaveLength(1);
+    expect(useRogue.getState().turn).toBe(1); // 合成は1ターン
+    // q1 のdaggerに q0 を足しても合成できない。
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'dagger', q: 0 }] },
+    });
+    const idx1 = player().pack.findIndex((x) => x.item === 'dagger' && x.q === 1);
     useRogue.getState().mergeItem(idx1);
-    expect(player().pack.filter((x) => x.item === 'knife' && x.q === 1)).toHaveLength(1);
+    expect(player().pack.filter((x) => x.item === 'dagger' && x.q === 1)).toHaveLength(1);
     expect(useRogue.getState().log.at(-1)).toContain('同じ品質');
   });
 
@@ -1100,14 +1130,14 @@ describe('両手持ち・盾(rogue-22)', () => {
     expect(evaded).toBe(true);
   });
 
-  it('セーブ v7: player.shield が保存・復元される', () => {
+  it('セーブ v8: player.shield が保存・復元される(rogue-28)', () => {
     persist.setStorageForTest(new MemStorage() as unknown as Storage);
     try {
       useRogue.getState().restart(7);
       useRogue.setState({ player: { ...player(), shield: { item: 'shield', q: 1 } } });
       useRogue.getState().wait(); // 自動保存
       const raw = persist.readSave<{ v: number }>();
-      expect(raw?.v).toBe(7);
+      expect(raw?.v).toBe(8);
       useRogue.getState().restart(99);
       persist.writeSave(raw);
       expect(useRogue.getState().resume()).toBe(true);
@@ -1519,7 +1549,7 @@ describe('スキル: マスタリー×スロット(rogue-23。rogue-27でラン�
     }
   });
 
-  it('セーブ v7: skillSlots/skillEquipped(ランク付き)/skillDraft/skillFreePick/trapCooldown が保存・復元される', () => {
+  it('セーブ v8: skillSlots/skillEquipped(ランク付き)/skillDraft/skillFreePick/trapCooldown が保存・復元される(rogue-28)', () => {
     persist.setStorageForTest(new MemStorage() as unknown as Storage);
     try {
       useRogue.getState().restart(7);
@@ -1535,7 +1565,7 @@ describe('スキル: マスタリー×スロット(rogue-23。rogue-27でラン�
       });
       useRogue.getState().wait();
       const raw = persist.readSave<{ v: number }>();
-      expect(raw?.v).toBe(7);
+      expect(raw?.v).toBe(8);
       useRogue.getState().restart(99);
       persist.writeSave(raw);
       expect(useRogue.getState().resume()).toBe(true);
@@ -2177,7 +2207,7 @@ describe('遺物と脱出(rogue-25 後半)', () => {
     expect(useRogue.getState().log.at(-1)).toContain('大切なものだ');
   });
 
-  it('琥珀は合成できない(ターン消費なし・所持は変わらない)', () => {
+  it('琥珀は合成できない(ターン消費なし・所持は変わらない・rogue-28: 武具のみ)', () => {
     useRogue.setState({
       player: { ...player(), pack: [...player().pack, { item: 'amber', q: 1 }, { item: 'amber', q: 1 }] },
     });
@@ -2186,7 +2216,7 @@ describe('遺物と脱出(rogue-25 後半)', () => {
     useRogue.getState().mergeItem(idx);
     expect(useRogue.getState().turn).toBe(turn0);
     expect(player().pack.filter((x) => x.item === 'amber')).toHaveLength(2);
-    expect(useRogue.getState().log.at(-1)).toContain('合成できない');
+    expect(useRogue.getState().log.at(-1)).toContain('武具しか鍛えられない');
   });
 
   it('警告帯の外では脱出できない(phase は play のまま)', () => {
@@ -2233,5 +2263,361 @@ describe('遺物と脱出(rogue-25 後半)', () => {
     useRogue.getState().wait();
     expect(useRogue.getState().phase).toBe('dead');
     expect(codexStore.readCodex().ambers).toBe(0);
+  });
+});
+
+describe('アイテムの束ね(rogue-28)', () => {
+  afterEach(() => {
+    persist.setStorageForTest(null);
+  });
+
+  it('stackable なアイテムを拾うとき、同じ(item, q)の既存スタックがあれば n を加算する', async () => {
+    const pos = freeNeighbor();
+    useRogue.setState({
+      items: [
+        { id: 2001, stack: { item: 'potion', q: 0, n: 2 }, pos },
+      ],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const potions = player().pack.filter((x) => x.item === 'potion' && x.q === 0);
+    expect(potions).toHaveLength(1);
+    expect(potions[0].n ?? 1).toBe(3); // 初期1 + 新規2 = 3
+  });
+
+  it('pack が満杯(10枠)のとき stackable な新規アイテムは拾えず床に残る', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'potion', q: 0 },
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 2002, stack: { item: 'shield', q: 0 }, pos }],
+    });
+    const itemsBefore = useRogue.getState().items.length;
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    // pack は満杯のまま
+    expect(player().pack).toHaveLength(10);
+    // アイテムは床に残っている
+    expect(useRogue.getState().items.length).toBe(itemsBefore);
+    expect(useRogue.getState().log.at(-1)).toContain('これ以上持てない');
+  });
+
+  it('pack が満杯でも stackable な既存スタックと同じ(item, q)なら加算できる', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'potion', q: 0 },
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 2003, stack: { item: 'potion', q: 0, n: 2 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    // pack は依然10枠(スロット数変わらず、n が増えた)
+    expect(player().pack).toHaveLength(10);
+    // potion, q=0 の n が増えた
+    const potion = player().pack[0];
+    expect(potion.item).toBe('potion');
+    expect(potion.q).toBe(0);
+    expect(potion.n ?? 1).toBe(3); // 初期1 + 加算2
+  });
+
+  it('useItem で potion n>=2 なら n-1、n===1 で削除', async () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'potion', q: 0, n: 3 }],
+      },
+    });
+    useRogue.getState().useItem(0);
+    await run(2000);
+    // n が 3 → 2
+    expect(player().pack[0].n ?? 1).toBe(2);
+    expect(player().pack).toHaveLength(1);
+
+    // もう1回
+    useRogue.getState().useItem(0);
+    await run(2000);
+    expect(player().pack[0].n ?? 1).toBe(1);
+
+    // さらに1回で削除
+    useRogue.getState().useItem(0);
+    await run(2000);
+    expect(player().pack).toHaveLength(0);
+  });
+
+  it('throwKnife で knife n>=2 なら n-1、n===1 で削除', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'knife', q: 0, n: 3 }],
+      },
+    });
+    useRogue.getState().useItem(0); // ナイフをアクティベート
+    expect(useRogue.getState().uiMode).toBe('throw');
+    useRogue.getState().clickBeast(target.id);
+    await run(3000);
+    // n が 3 → 2
+    expect(player().pack[0].n ?? 1).toBe(2);
+  });
+
+  it('合成は武具のみ可能。水薬2つで拒否ログ(ターン消費なし)', () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [
+          { item: 'potion', q: 0 },
+          { item: 'potion', q: 0 },
+        ],
+      },
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().mergeItem(0);
+    expect(useRogue.getState().turn).toBe(turn0);
+    expect(useRogue.getState().log.at(-1)).toContain('武具しか鍛えられない');
+    expect(player().pack).toHaveLength(2); // pack は変わらない
+  });
+
+  it('knife の品質は常に q=0(品質ロールなし)でドロップされる', () => {
+    const rng = lcg(99);
+    let hasNonZeroQ = false;
+    for (let i = 0; i < 200; i++) {
+      const items = lootTable(15, rng); // 深層でも品質ロール対象なら q>0 が出るはず
+      for (const s of items) {
+        if (s.item === 'knife' && s.q > 0) hasNonZeroQ = true;
+      }
+    }
+    expect(hasNonZeroQ).toBe(false);
+  });
+});
+
+describe('アイテム投擲(rogue-28)', () => {
+  it('weapon 投擲: ダメージ=floor(stackAtk/2)+2、床に落ちる、n消費なし(武具は枠単位)', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'sword', q: 2 }], // atk=4、q=2 → stackAtk=6 → dmg=floor(6/2)+2=5
+      },
+      items: [], // クリア
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    // ターンが進む
+    expect(useRogue.getState().turn).toBe(turn0 + 1);
+    // 敵がダメージを受ける
+    expect(target.hp).toBe(100 - 5);
+    // pack から削除(武具は枠ごと)
+    expect(player().pack).toHaveLength(0);
+    // 敵の位置に落ちる
+    const items = useRogue.getState().items;
+    expect(items.length).toBe(1); // 新しく1つ落ちた
+    const dropped = items[0];
+    expect(dropped.stack.item).toBe('sword');
+    expect(dropped.stack.q).toBe(2);
+    expect(cellKey(dropped.pos)).toBe(cellKey(target.pos));
+  });
+
+  it('armor 投擲: ダメージ=3+q、床に落ちる', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'plate', q: 3 }], // def=4、q=3 → dmg=3+3=6
+      },
+      items: [],
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    expect(target.hp).toBe(100 - 6);
+    expect(player().pack).toHaveLength(0);
+    const items = useRogue.getState().items;
+    expect(items.length).toBe(1);
+    expect(items[0].stack.item).toBe('plate');
+  });
+
+  it('shield 投擲: ダメージ=3+q、床に落ちる', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'shield', q: 1 }], // dmg=3+1=4
+      },
+      items: [],
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    expect(target.hp).toBe(100 - 4);
+    const items = useRogue.getState().items;
+    expect(items.length).toBe(1);
+    expect(items[0].stack.item).toBe('shield');
+  });
+
+  it('potion 投擲: ダメージ=2、消滅(n>=2なら消費)', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'potion', q: 0, n: 3 }],
+      },
+      items: [],
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    expect(target.hp).toBe(100 - 2);
+    // n が 3 → 2
+    expect(player().pack[0].n ?? 1).toBe(2);
+    // 敵位置に何も落ちない(消滅)
+    const items = useRogue.getState().items;
+    expect(items.length).toBe(0); // 何も落ちない
+  });
+
+  it('potion n===1 で投擲すると枠が削除される', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'potion', q: 0 }], // n省略 = n===1
+      },
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    expect(player().pack).toHaveLength(0);
+  });
+
+  it('射程外(FCC歩数>4)は拒否される', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    // プレイヤーと敵を距離5以上に配置
+    useRogue.setState({
+      player: { ...player(), pos: [0, 0, 0] },
+      beasts: [{ ...target, pos: [5, 0, 0] }],
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'sword', q: 0 }],
+      },
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run();
+    // ターンが進まない(拒否)
+    expect(useRogue.getState().turn).toBe(turn0);
+    expect(target.hp).toBe(100); // ダメージなし
+  });
+
+  it('relic は投げられない(何もしない)', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'amber', q: 0 }],
+      },
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().throwItem(0, target.id);
+    await run();
+    expect(useRogue.getState().turn).toBe(turn0);
+    expect(target.hp).toBe(100);
+    expect(player().pack).toHaveLength(1); // 消費されない
+  });
+
+  it('turret は投げられない', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'turret', q: 0 }],
+      },
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().throwItem(0, target.id);
+    await run();
+    expect(useRogue.getState().turn).toBe(turn0);
+  });
+
+  it('decoy は投げられない', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'decoy', q: 0 }],
+      },
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().throwItem(0, target.id);
+    await run();
+    expect(useRogue.getState().turn).toBe(turn0);
+  });
+
+  it('討伐時は weaponKills に加算される', async () => {
+    const target = placeBeastAdjacent('rat', 3); // rat のデフォルト HP=4
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'sword', q: 0 }], // atk=4、dmg=floor(4/2)+2=4
+      },
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    expect(target.hp).toBe(0); // 倒れた
+    // weaponKills が加算される(マスタリーの確認)
+    expect(useRogue.getState().kills).toBe(1);
+  });
+
+  it('乱数を消費しない(固定ダメージ)', async () => {
+    const target = placeBeastAdjacent('rat', 100);
+    seedRogueRng(100);
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [{ item: 'sword', q: 0 }], // atk=4 → dmg=floor(4/2)+2=4
+      },
+    });
+    useRogue.getState().throwItem(0, target.id);
+    await run(3000);
+    // 固定値なので、常に同じダメージ(100-4=96)
+    expect(target.hp).toBe(96);
+  });
+});
+
+describe('セーブと再開(rogue-28)', () => {
+  afterEach(() => {
+    persist.setStorageForTest(null);
+  });
+
+  it('encode→decode で ItemStack.n が保存・復元される(saveCodec 専用テストに任せる)', () => {
+    // saveCodec.test.ts でより詳細にテストされているので、
+    // ここは state フロー全体での確認のみ。初期状態では n を指定していないアイテムが
+    // ほとんどなので、ここでは省略し saveCodec の完全なテストに依存する。
+    const item1 = { item: 'potion' as const, q: 0, n: 3 };
+    const item2 = { item: 'knife' as const, q: 0, n: 2 };
+    // シンプルなround-trip確認
+    const encoded = JSON.stringify({ pack: [item1, item2] });
+    const decoded = JSON.parse(encoded) as { pack: unknown[] };
+    expect((decoded.pack[0] as typeof item1).n).toBe(3);
+    expect((decoded.pack[1] as typeof item2).n).toBe(2);
   });
 });

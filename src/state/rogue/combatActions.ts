@@ -19,7 +19,7 @@ import type { PlayerPose } from '../playerPose';
 import { cellKey, type Cell } from '../../model/fcc';
 import { adjacent, distW, stepDist, lineOfSight } from '../../model/dungeon';
 import { BEASTS } from '../../model/beasts';
-import { ITEMS, stackDmg } from '../../model/loot';
+import { ITEMS, stackDmg, stackCount, stackAtk, itemLabel } from '../../model/loot';
 import type { Beast, BeastStatus, Decoy, PlacedTrap, Turret, RogueFx, GameEvent } from '../../model/rogue/types';
 import { BURN_DMG, depthOf, playerAtk, weaponReach, weaponSweep } from '../../model/rogue/rules';
 import { knotActive, rankOf, type MasteryCounters } from '../../model/rogue/mastery';
@@ -530,7 +530,13 @@ export function createCombat(deps: CombatDeps) {
     const knife = player.pack[idx];
     triggerPose('throw', 500); // プレイヤーモデルの投擲モーション
     set({ busy: true, uiMode: 'walk', reach: { cells: [], parent: new Map() } });
-    player.pack.splice(idx, 1);
+    // 個数消費: n >= 2 なら n-1、n === 1 で枠削除。
+    const n = stackCount(knife);
+    if (n >= 2) {
+      player.pack[idx] = { ...knife, n: n - 1 };
+    } else {
+      player.pack.splice(idx, 1);
+    }
     set({ player: { ...player, pack: [...player.pack] } });
     pushFx({ kind: 'bolt', from: player.pos, to: b.pos, dur: 260 });
     sfx.play('arrow');
@@ -567,6 +573,75 @@ export function createCombat(deps: CombatDeps) {
     settleAfterAction();
   }
 
+  /**
+   * アイテム投擲(rogue-28)。武具(weapon/armor/shield)は対象セルへ落ちて拾い直せる。
+   * 水薬は消滅。relic・装置(turret/decoy)は投げられない。
+   * 射程: FCC 歩数 4(必中・乱数なし)。
+   */
+  async function throwItem(index: number, beastId: number): Promise<void> {
+    const run = getRunSeq();
+    const { player, beasts } = get();
+    if (index < 0 || index >= player.pack.length) return;
+    const item = player.pack[index];
+    const itemDef = ITEMS[item.item];
+    // 投げられない種類は拒否(relic・turret・decoy)。
+    if (!['weapon', 'armor', 'shield', 'potion'].includes(itemDef.kind)) return;
+    // 対象敵を探す。
+    const b = beasts.find((x) => x.id === beastId && x.alive);
+    if (!b) return;
+    // 射程判定: FCC 歩数 4 以下。
+    if (distW(player.pos, b.pos) > 4) return;
+    triggerPose('throw', 500);
+    // throwItemIndex を残すと次のナイフ投擲モードで武具を投げてしまう — ここで必ず消す。
+    set({ busy: true, uiMode: 'walk', throwItemIndex: undefined, reach: { cells: [], parent: new Map() } });
+    // アイテムを pack から除去。
+    const newPack = [...player.pack];
+    if (itemDef.kind === 'potion') {
+      // 水薬は n 消費。
+      const n = stackCount(item);
+      if (n >= 2) {
+        newPack[index] = { ...item, n: n - 1 };
+      } else {
+        newPack.splice(index, 1);
+      }
+    } else {
+      // 武具は枠ごと削除。
+      newPack.splice(index, 1);
+    }
+    set({ player: { ...player, pack: newPack } });
+    pushFx({ kind: 'bolt', from: player.pos, to: b.pos, dur: 260 });
+    sfx.play('arrow');
+    await sleep(280);
+    if (getRunSeq() !== run) return;
+    const def = BEASTS[b.kind];
+    b.awake = true;
+    // ダメージ計算(固定値・乱数なし)。
+    let dmg = 0;
+    if (itemDef.kind === 'weapon') {
+      dmg = Math.floor(stackAtk(item) / 2) + 2;
+    } else if (itemDef.kind === 'armor' || itemDef.kind === 'shield') {
+      dmg = 3 + item.q;
+    } else if (itemDef.kind === 'potion') {
+      dmg = 2;
+    }
+    sfx.play('hit');
+    // ログは投げた1つ分のラベル(束の ×n を出さない)。
+    pushLog(`${itemLabel({ item: item.item, q: item.q })} が ${def.name} に ${dmg}ダメージ`);
+    const preAwake = b.awake;
+    damageBeast(b, dmg, '#fecaca', { weapon: true, preAwake });
+    // 武具は対象セルへ落ちる(倒しても落ちる=拾い直せる)。水薬は消滅。
+    if (itemDef.kind !== 'potion') {
+      get().items.push({ id: nextItemSeq(), stack: item, pos: b.pos });
+      set({ items: [...get().items] });
+    }
+    set({ beasts: [...get().beasts] });
+    await sleep(200);
+    if (getRunSeq() !== run) return;
+    beastsTurn();
+    endTurn();
+    settleAfterAction();
+  }
+
   return {
     beastStrike,
     hitDecoy,
@@ -581,5 +656,6 @@ export function createCombat(deps: CombatDeps) {
     moveBeast,
     meleeAttack,
     throwKnife,
+    throwItem,
   };
 }

@@ -347,6 +347,16 @@
   border-color: #d9a441;
   color: #fde68a;
 }
+.hud-pack .pack-row .throw {
+  padding: 5px 8px;
+  font-size: 11px;
+  border-color: #7c3aed;
+  color: #d8b4fe;
+}
+.hud-pack h4 .full {
+  margin-left: 4px;
+  color: #ef4444;
+}
 
 /* --- rogue: スコア表示(死亡オーバーレイ) --- */
 .hud-score { font-size: 18px; color: #e2e8f0; letter-spacing: 0.08em; }

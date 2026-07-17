@@ -31,7 +31,7 @@ import * as codexStore from '../codexStore';
 import type { SfxName } from '../../audio/sfx';
 import { OFFSETS, cellKey, type Cell, type CellKey } from '../../model/fcc';
 import { maybeExpand, type Chamber } from '../../model/dungeon';
-import { itemLabel } from '../../model/loot';
+import { itemLabel, stackable, stackCount } from '../../model/loot';
 import { spawnChamber } from '../../model/rogue/spawn';
 import { discoverInto } from '../../model/rogue/visibility';
 import {
@@ -238,9 +238,40 @@ export function createMove(deps: MoveDeps) {
     }
     // 拾得。
     const k = cellKey(next);
-    const found = items.filter((i) => cellKey(i.pos) === k);
-    if (found.length > 0) {
-      for (const f of found) {
+    const foundIndices = items
+      .map((i, idx) => (cellKey(i.pos) === k ? idx : -1))
+      .filter((idx) => idx >= 0);
+    if (foundIndices.length > 0) {
+      let pickedUp = false;
+      const pickedUpIndices = new Set<number>();
+      for (const idx of foundIndices) {
+        const f = items[idx];
+        // stackable かつ pack に同 (item, q) の既存スタックがあれば n を加算。
+        if (stackable(f.stack.item)) {
+          const existing = player.pack.findIndex(
+            (x) => x.item === f.stack.item && x.q === f.stack.q,
+          );
+          if (existing >= 0) {
+            // 既存スタックに加算。
+            const n = stackCount(f.stack);
+            player.pack[existing] = {
+              ...player.pack[existing],
+              n: (stackCount(player.pack[existing]) + n),
+            };
+            pushFx({ kind: 'popup', at: next, text: itemLabel(player.pack[existing]), color: '#fde68a', dur: 900 });
+            pushLog(`${itemLabel(player.pack[existing])} に加わった`);
+            codexStore.recordItemFound(f.stack.item, f.stack.q);
+            pickedUpIndices.add(idx);
+            pickedUp = true;
+            continue;
+          }
+        }
+        // 新しい枠が要る場合、pack.length >= 10 なら拾えない。
+        if (player.pack.length >= 10) {
+          pushLog('これ以上持てない(使うか投げて空ける)');
+          continue;
+        }
+        // 通常の拾得。
         player.pack.push(f.stack);
         pushFx({ kind: 'popup', at: next, text: itemLabel(f.stack), color: '#fde68a', dur: 900 });
         pushLog(`${itemLabel(f.stack)} を拾った`);
@@ -251,10 +282,14 @@ export function createMove(deps: MoveDeps) {
           pushLog('巣の琥珀を見つけた! 持ち帰れば宝物になる');
           skills.maybeUnlockFeat('relic');
         }
+        pickedUpIndices.add(idx);
+        pickedUp = true;
       }
-      sfx.play('pickup');
+      if (pickedUp) {
+        sfx.play('pickup');
+      }
       set({
-        items: items.filter((i) => cellKey(i.pos) !== k),
+        items: items.filter((_, i) => !pickedUpIndices.has(i)),
         player: { ...player, pack: [...player.pack] },
       });
     }

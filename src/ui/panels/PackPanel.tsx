@@ -50,6 +50,7 @@ export function PackPanel() {
   const mapMode = useRogue((s) => s.mapMode);
   const skillEquipped = useRogue((s) => s.skillEquipped);
   const lightLevel = useRogue((s) => s.lightLevel);
+  const setThrowMode = useRogue((s) => s.setThrowMode);
   const [open, setOpen] = useState(true);
   if (mapMode) return null;
   const pack = player.pack;
@@ -70,12 +71,22 @@ export function PackPanel() {
     if (g) g.count++;
     else groups.push({ stack, count: 1, index });
   });
+
+  // kind 順にグルーピング: weapon → shield → armor → potion → thrown → turret → decoy → relic
+  const kindOrder = ['weapon', 'shield', 'armor', 'potion', 'thrown', 'turret', 'decoy', 'relic'];
+  groups.sort((a, b) => {
+    const kindA = ITEMS[a.stack.item].kind;
+    const kindB = ITEMS[b.stack.item].kind;
+    return kindOrder.indexOf(kindA) - kindOrder.indexOf(kindB);
+  });
+
   const locked = phase !== 'play' || busy;
 
   return (
     <div className="hud-pack">
       <h4 onClick={() => setOpen(false)} title="たたむ">
-        🎒所持品<span className="fold">▾</span>
+        🎒所持 {pack.length}/10{pack.length === 10 && <span className="full"> 満杯</span>}
+        <span className="fold">▾</span>
       </h4>
       <EquipSlot
         slot="weapon"
@@ -110,6 +121,7 @@ export function PackPanel() {
       {groups.map((g) => {
         const def = ITEMS[g.stack.item];
         const throwing = def.kind === 'thrown' && uiMode === 'throw';
+        const isThrowItemMode = uiMode === 'throw' && setThrowMode !== undefined;
         // 罠(trapSpike等)は rogue-27 で廃止(罠師「罠編み」のスキル化)。ここに残るのは
         // 砲塔・囮のみで、いずれも即設置(選択モードなし)。
         const verb =
@@ -121,11 +133,19 @@ export function PackPanel() {
                 : '投げる'
               : def.kind === 'weapon' || def.kind === 'armor' || def.kind === 'shield'
                 ? '装備'
-                : '設置';
+                : def.kind === 'relic'
+                  ? '調べる'
+                  : '設置';
+        // 投げられる種類か(武具・水薬のみ)。装備中スロットは対象外。
+        const isEquipped =
+          (def.kind === 'weapon' && player.weapon?.item === g.stack.item && player.weapon.q === g.stack.q) ||
+          (def.kind === 'armor' && player.armor?.item === g.stack.item && player.armor.q === g.stack.q) ||
+          (def.kind === 'shield' && player.shield?.item === g.stack.item && player.shield.q === g.stack.q);
+        const canThrow = ['weapon', 'armor', 'shield', 'potion'].includes(def.kind) && !isEquipped;
         return (
           <div className="pack-row" key={`${g.stack.item}:${g.stack.q}`}>
             <button
-              className={throwing ? 'active' : ''}
+              className={throwing || isThrowItemMode ? 'active' : ''}
               disabled={locked}
               onClick={() => useItem(g.index)}
             >
@@ -135,6 +155,16 @@ export function PackPanel() {
                 {statLabel(g.stack)}·{verb}
               </span>
             </button>
+            {canThrow && (
+              <button
+                className="throw"
+                disabled={locked}
+                onClick={() => setThrowMode(g.index)}
+                title="敵をクリックして投擲"
+              >
+                投げる
+              </button>
+            )}
             {g.count >= 2 && (
               <button className="merge" disabled={locked} onClick={() => mergeItem(g.index)}>
                 合成

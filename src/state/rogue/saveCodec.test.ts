@@ -110,6 +110,16 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(dec.log).toEqual(input.log);
   });
 
+  it('rogue-28: アイテム個数(n)も往復する', () => {
+    const input = sampleInput();
+    input.player.pack = [
+      { item: 'potion', q: 0, n: 3 },
+      { item: 'knife', q: 0, n: 2 },
+    ];
+    const dec = decodeSave(encodeSave(input))!;
+    expect(dec.player.pack).toEqual(input.player.pack);
+  });
+
   it('rogue-27: ランク付きスキル(EquippedSkill)・見送り権(freeドラフト)・罠クールダウンも往復する', () => {
     const input = sampleInput();
     input.skillEquipped = [
@@ -142,9 +152,9 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(encodeSave(input).log).toEqual(['3', '4', '5', '6', '7', '8', '9', '10']);
   });
 
-  it('バージョン不一致(v!==7)は null', () => {
+  it('バージョン不一致(v!==8)は null', () => {
     const data = encodeSave(sampleInput());
-    expect(decodeSave({ ...data, v: 6 as unknown as 7 })).toBeNull();
+    expect(decodeSave({ ...data, v: 7 as unknown as 8 })).toBeNull();
   });
 
   it('decode は dungeon.slots を chambers の center から再構築する', () => {

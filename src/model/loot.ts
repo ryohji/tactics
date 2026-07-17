@@ -40,6 +40,8 @@ export interface ItemDef {
 export interface ItemStack {
   item: ItemId;
   q: number;
+  /** 個数(省略時1)。水薬・投げナイフだけが2以上になる(同一 item+q で束ねる)。 */
+  n?: number;
 }
 
 export const ITEMS: Record<ItemId, ItemDef> = {
@@ -61,6 +63,23 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   // 遺物(rogue-25)。q は「拾った層番号(0始まり)」を表す — 品質強化の意味ではない。
   amber: { name: '巣の琥珀', kind: 'relic' },
 };
+
+/** 個数(s.n ?? 1)。 */
+export function stackCount(s: ItemStack): number {
+  return s.n ?? 1;
+}
+
+/** 束ねられる種類か(potion / thrown)。武具・装置・遺物は常に n=1。 */
+export function stackable(item: ItemId): boolean {
+  const kind = ITEMS[item].kind;
+  return kind === 'potion' || kind === 'thrown';
+}
+
+/** 合成可の種類か(weapon / armor / shield のみ)。 */
+export function mergeable(item: ItemId): boolean {
+  const kind = ITEMS[item].kind;
+  return kind === 'weapon' || kind === 'armor' || kind === 'shield';
+}
 
 // --- 品質込みの実効値 -----------------------------------------------------------
 
@@ -100,10 +119,13 @@ export function decoyHp(s: ItemStack): number {
 
 // --- 表示 -----------------------------------------------------------------------
 
-/** 名前+品質("鉄の剣+1")。遺物の q は層番号なので「+q」を付けない。 */
+/** 名前+品質("鉄の剣+1")。n>=2 なら「×n」を追記。遺物の q は層番号なので「+q」を付けない。 */
 export function itemLabel(s: ItemStack): string {
-  if (ITEMS[s.item].kind === 'relic') return ITEMS[s.item].name;
-  return `${ITEMS[s.item].name}${s.q > 0 ? `+${s.q}` : ''}`;
+  const name = ITEMS[s.item].name;
+  if (ITEMS[s.item].kind === 'relic') return name;
+  const quality = s.q > 0 ? `+${s.q}` : '';
+  const count = stackCount(s) >= 2 ? ` ×${stackCount(s)}` : '';
+  return `${name}${quality}${count}`;
 }
 
 /** 性能の短い表記("攻5" / "延焼4T" など)。 */
@@ -187,14 +209,36 @@ export function lootTable(depth: number, rng: () => number): ItemStack[] {
   for (let i = 0; i < rolls; i++) {
     if (rng() > 0.68) continue;
     const r = rng();
-    let item: ItemId;
-    if (r < 0.3) item = potionFor(depth, rng);
-    else if (r < 0.5) item = 'knife';
-    else if (r < 0.65) item = weaponFor(depth, rng);
-    else if (r < 0.8) item = armorFor(depth, rng);
-    else if (depth >= 2) item = GADGETS[Math.floor(rng() * GADGETS.length)];
-    else item = rng() < 0.5 ? 'potion' : 'knife';
-    out.push({ item, q: qualityFor(depth, rng) });
+    let stack: ItemStack;
+    if (r < 0.3) {
+      // potion
+      const item = potionFor(depth, rng);
+      stack = { item, q: qualityFor(depth, rng) };
+    } else if (r < 0.45) {
+      // knife 束: q=0、n = 2〜3
+      stack = { item: 'knife', q: 0, n: 2 + (rng() < 0.5 ? 1 : 0) };
+    } else if (r < 0.65) {
+      // weapon
+      const item = weaponFor(depth, rng);
+      stack = { item, q: qualityFor(depth, rng) };
+    } else if (r < 0.85) {
+      // armor
+      const item = armorFor(depth, rng);
+      stack = { item, q: qualityFor(depth, rng) };
+    } else if (depth >= 2) {
+      // gadget
+      const item = GADGETS[Math.floor(rng() * GADGETS.length)];
+      stack = { item, q: qualityFor(depth, rng) };
+    } else {
+      // depth < 2: potion or knife bundle
+      if (rng() < 0.5) {
+        const item = potionFor(depth, rng);
+        stack = { item, q: qualityFor(depth, rng) };
+      } else {
+        stack = { item: 'knife', q: 0, n: 2 + (rng() < 0.5 ? 1 : 0) };
+      }
+    }
+    out.push(stack);
   }
   return out;
 }

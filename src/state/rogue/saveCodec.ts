@@ -87,7 +87,7 @@ export interface DecodedSave {
 /** ストアの状態片+モジュール値から SaveData スナップショットを組み立てる。 */
 export function encodeSave(s: EncodeSaveInput): SaveData {
   return {
-    v: 7,
+    v: 8,
     seed: s.seed,
     rng: s.rng,
     seqs: s.seqs,
@@ -123,12 +123,12 @@ export function encodeSave(s: EncodeSaveInput): SaveData {
 }
 
 /**
- * SaveData から状態片を復元する。バージョン不一致(v!==7)は null。
+ * SaveData から状態片を復元する。バージョン不一致(v!==8)は null。
  * Set/Map の再構築・dungeon の slots 再構築(slotKeyOfCell)・rng 関数の
  * 再付与(生成はすべて座標導出 rng なのでこの値は使われない)を担う。
  */
 export function decodeSave(d: SaveData): DecodedSave | null {
-  if (d.v !== 7) return null;
+  if (d.v !== 8) return null;
   const dungeon: Dungeon = {
     open: new Set(d.dungeon.open),
     chambers: d.dungeon.chambers,

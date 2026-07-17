@@ -50,6 +50,8 @@ import {
   stackHeal,
   stackBarrier,
   stackImmune,
+  stackCount,
+  mergeable,
   turretTurns,
   decoyHp,
   type ItemStack,
@@ -197,6 +199,8 @@ export interface RogueState {
   busy: boolean;
   /** walk=移動 / throw=投擲対象選択 / place=罠を編む先の選択(足元+隣接。rogue-27)。 */
   uiMode: 'walk' | 'throw' | 'place';
+  /** 武具投擲時の対象アイテム index(uiMode=throw かつ throwItemIndex が undefined なら投げナイフ)。 */
+  throwItemIndex?: number;
   /** クリック可能な移動先(BFS≤REACH_STEPS)。 */
   reach: { cells: Cell[]; parent: Map<CellKey, CellKey> };
   /** ホバー中の移動マーカーのセル(同レベルのヘックスオーバーレイ表示に使う)。 */
@@ -248,6 +252,12 @@ export interface RogueState {
   /** 遠隔起爆(rogue-27: 罠編みランクIII以上)。自分の罠をクリックで即時発動(連鎖込み・
       乱数なし・1ターン)。id が不明なら何もしない。 */
   detonateTrap: (id: number) => void;
+  /**
+   * アイテム投擲(rogue-28)。pack[index] を敵 beastId へ投げる。
+   * 武具(weapon/armor/shield)は落ちて拾い直せる。水薬は消滅。
+   * relic・装置は投げられない。射程: FCC 歩数 4。
+   */
+  throwItem: (index: number, beastId: number) => void;
   /** 「支度」を終えてそのまま潜る。 */
   finishOutfitting: () => void;
   /** 関門のドラフトを見送る(何も選ばず閉じる)。 */
@@ -262,6 +272,8 @@ export interface RogueState {
    */
   escape: () => void;
   cancelThrow: () => void;
+  /** 武具投擲モードへ進入(PackPanel で「投げる」ボタンクリック)。敵クリックで throwItem を呼ぶ。 */
+  setThrowMode: (index: number) => void;
   /** 発見済みセルへのファストトラベル(1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。 */
   travelTo: (c: Cell) => void;
   /** 進行中のファストトラベルを中断する(タップ/クリック/ESC)。歩行中でなければ無視。 */
@@ -578,8 +590,8 @@ export const useRogue = create<RogueState>((set, get) => {
         immune: 0,
         pack: [
           { item: 'potion', q: 0 },
-          { item: 'knife', q: 0 },
-          { item: 'knife', q: 0 },
+          // ナイフは1束に(rogue-28: 別枠のままだと拾得束と併存して「×n ×枠数」の二重表示になる)。
+          { item: 'knife', q: 0, n: 2 },
         ],
       },
       lightLevel: 1,
@@ -719,16 +731,29 @@ export const useRogue = create<RogueState>((set, get) => {
       const b = s.beasts.find((x) => x.id === id);
       if (!b || !b.alive) return;
       if (s.uiMode === 'throw') {
-        const range = ITEMS.knife.range ?? 0;
+        // 武具投擲(throwItemIndex あり)は射程4、投げナイフは knife.range(8)。
+        const range = s.throwItemIndex !== undefined ? 4 : (ITEMS.knife.range ?? 0);
         if (distW(s.player.pos, b.pos) > range) return;
         if (!s.discovered.has(cellKey(b.pos))) return;
-        void combat.throwKnife(b);
+        // throwItemIndex があれば武具投擲、なければ投げナイフ。
+        if (s.throwItemIndex !== undefined) {
+          void combat.throwItem(s.throwItemIndex, b.id);
+        } else {
+          void combat.throwKnife(b);
+        }
         return;
       }
       // 武器リーチ内(素手・通常1歩、長槍2歩)なら近接攻撃できる。
       if (stepDist(s.player.pos, b.pos) > weaponReach(s.player)) return;
       if (!s.discovered.has(cellKey(b.pos))) return;
       void combat.meleeAttack(b);
+    },
+
+    throwItem: (index, beastId) => {
+      logAction('T', index, beastId);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      void combat.throwItem(index, beastId);
     },
 
     useItem: (index) => {
@@ -750,7 +775,13 @@ export const useRogue = create<RogueState>((set, get) => {
       }
 
       if (def.kind === 'potion') {
-        player.pack.splice(index, 1);
+        // 個数消費: n >= 2 なら n-1、n === 1 で枠削除。
+        const n = stackCount(stack);
+        if (n >= 2) {
+          player.pack[index] = { ...stack, n: n - 1 };
+        } else {
+          player.pack.splice(index, 1);
+        }
         if (def.barrier !== undefined) {
           // 障壁の水薬(rogue-21): 上書き式。今の障壁が多くても新しい値で置き換わる。
           const b = stackBarrier(stack);
@@ -873,7 +904,8 @@ export const useRogue = create<RogueState>((set, get) => {
         }
         sfx.play('select');
         pushLog('投げナイフ: 射程内の敵をクリック(所持品クリックで解除)');
-        set({ uiMode: 'throw' });
+        // 直前の武具投擲の指し先が残っているとナイフのつもりで武具を投げてしまう — 必ず消す。
+        set({ uiMode: 'throw', throwItemIndex: undefined });
       }
     },
 
@@ -937,8 +969,9 @@ export const useRogue = create<RogueState>((set, get) => {
       if (s.phase !== 'play' || s.busy) return;
       const a = s.player.pack[index];
       if (!a) return;
-      if (ITEMS[a.item].kind === 'relic') {
-        pushLog('遺物は合成できない(そのまま持ち帰ろう)');
+      // 合成は武具のみ(weapon / armor / shield)。
+      if (!mergeable(a.item)) {
+        pushLog('武具しか鍛えられない');
         return;
       }
       const j = s.player.pack.findIndex((x, i) => i !== index && x.item === a.item && x.q === a.q);
@@ -984,7 +1017,17 @@ export const useRogue = create<RogueState>((set, get) => {
       logAction('X');
       if (get().uiMode === 'walk') return;
       sfx.play('cancel');
-      set({ uiMode: 'walk' });
+      set({ uiMode: 'walk', throwItemIndex: undefined });
+    },
+
+    setThrowMode: (index) => {
+      logAction('TM', index);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (index < 0 || index >= s.player.pack.length) return;
+      sfx.play('select');
+      pushLog('クリックで対象の敵を選ぶ');
+      set({ uiMode: 'throw', throwItemIndex: index });
     },
 
     setArmed: (key) => {
