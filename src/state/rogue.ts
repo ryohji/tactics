@@ -249,6 +249,9 @@ export interface RogueState {
   /** 罠を解く(rogue-24 の遠隔回収を rogue-27 で改訂): 罠編みランクII以上。設置済みの
       自分の罠をクリックで除去し、装填クールダウンを0に戻す(1ターン)。 */
   recoverTrap: (id: number) => void;
+  /** 罠を解体(rogue-28): 罠編みランクI以上。プレイヤーの足元または隣接する罠を
+      クリックで除去する(1ターン、クールダウン非リセット)。 */
+  dismantleTrap: (id: number) => void;
   /** 遠隔起爆(rogue-27: 罠編みランクIII以上)。自分の罠をクリックで即時発動(連鎖込み・
       乱数なし・1ターン)。id が不明なら何もしない。 */
   detonateTrap: (id: number) => void;
@@ -924,7 +927,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
 
     // --- スキル(マスタリー×スロット。rogue-23) ------------------------------------
-    // equipSkill/unequipSkill/finishOutfitting/skipDraft/recoverTrap の実体は
+    // equipSkill/unequipSkill/finishOutfitting/skipDraft/recoverTrap/dismantleTrap の実体は
     // state/rogue/skills.ts(分割A2)。「支度」「関門ドラフト」のモーダル表示中だけ
     // 動く(busy 相当のゲーム操作ブロック中でも、この4つだけは通す)。
     ...skills.actions,

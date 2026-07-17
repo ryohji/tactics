@@ -16,6 +16,7 @@ import * as masteryStore from '../masteryStore';
 import * as codexStore from '../codexStore';
 import * as sfx from '../../audio/sfx';
 import { ITEMS } from '../../model/loot';
+import { cellKey, neighbors, type CellKey } from '../../model/fcc';
 import { FEATS, type FeatId } from '../../model/rogue/feats';
 import {
   MASTERY_NAME,
@@ -194,6 +195,32 @@ export function createSkills(deps: SkillsDeps) {
       sfx.play('pickup');
       pushLog('罠を解いた(すぐ編み直せる)');
       // 回収も1ターン。
+      beastsTurn();
+      endTurn();
+      settleAfterAction();
+    },
+
+    dismantleTrap: (id: number) => {
+      logAction('DT', id);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      // 罠編みランク1以上で隣接解体が可能。
+      if (rankOf(s.skillEquipped, 'wanaAmi') < 1) return;
+      const t = s.traps.find((x) => x.id === id);
+      if (!t) return;
+      // プレイヤーの足元または隣接(placeableCells と同じ判定: 足元 + neighbors)。
+      const reachableCells = new Set<CellKey>([
+        cellKey(s.player.pos),
+        ...neighbors(s.player.pos).map(cellKey),
+      ]);
+      if (!reachableCells.has(cellKey(t.pos))) {
+        pushLog('近づけば解体できる');
+        return;
+      }
+      // 罠を除去(trapCooldown はリセットしない — rankIII の即再装填と違う)。
+      set({ traps: s.traps.filter((x) => x.id !== id) });
+      pushLog('罠を解体した');
+      // 解体も1ターン。
       beastsTurn();
       endTurn();
       settleAfterAction();

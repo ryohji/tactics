@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useRogue, playerAtk, playerDef, playerEvade, SKILL_NODES, rankOf } from '../../state/rogue';
-import { ITEMS, itemLabel, statLabel, type ItemStack } from '../../model/loot';
+import { ITEMS, itemLabel, statLabel, mergeable, type ItemStack } from '../../model/loot';
 
 const SLOT_NAME = { weapon: '武器', armor: '防具', shield: '盾' } as const;
 
@@ -165,7 +165,7 @@ export function PackPanel() {
                 投げる
               </button>
             )}
-            {g.count >= 2 && (
+            {g.count >= 2 && mergeable(g.stack.item) && (
               <button className="merge" disabled={locked} onClick={() => mergeItem(g.index)}>
                 合成
               </button>

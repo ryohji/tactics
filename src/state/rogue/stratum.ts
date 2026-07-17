@@ -80,12 +80,16 @@ export function createStratum(deps: StratumDeps) {
     const cutLayer = -4 * (STRATUM_DEPTH * (stratum + 1) - 1);
     collapseAbove(s.dungeon, cutLayer);
     const alive = (k: CellKey) => layer(keyToCell(k)) <= cutLayer;
+    // 崩落で置き去りの罠を自動破棄(rogue-28)。
+    const remainingTraps = s.traps.filter((t) => layer(t.pos) <= cutLayer);
+    const trapRemoved = s.traps.length > remainingTraps.length;
     set({
       discovered: new Set([...s.discovered].filter(alive)),
       discoveredRev: s.discoveredRev + 1,
       cellChamber: new Map([...s.cellChamber].filter(([k]) => alive(k))),
       items: s.items.filter((i) => layer(i.pos) <= cutLayer),
-      traps: s.traps.filter((t) => layer(t.pos) <= cutLayer),
+      traps: remainingTraps,
+      trapCooldown: trapRemoved ? 0 : s.trapCooldown,
       turrets: s.turrets.filter((t) => layer(t.pos) <= cutLayer),
       decoys: s.decoys.filter((d) => layer(d.pos) <= cutLayer),
       beasts: s.beasts.filter((b) => layer(b.pos) <= cutLayer),
@@ -93,6 +97,8 @@ export function createStratum(deps: StratumDeps) {
       exploreRev: s.exploreRev + 1,
     });
     pushLog('背後で巣が崩れ落ちた。もう戻れない —');
+    // 崩落で置き去りの罠があれば通知(rogue-28)。
+    if (trapRemoved) pushLog('崩落で仕掛けた罠は失われた(編み直せる)');
     // 実績「最初の関門」(rogue-25): 崩落を1度通過する(毎回呼んでも feats の冪等性で二重解除しない)。
     skills.maybeUnlockFeat('firstGate');
     // 実績「無傷の関門」(rogue-25): HP満タンで関門を通過する。

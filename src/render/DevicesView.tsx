@@ -13,20 +13,23 @@ const S = ROGUE_S;
 function TrapMesh({ t }: { t: PlacedTrap }) {
   const w = worldPos(t.pos[0], t.pos[1], t.pos[2], S);
   const color = '#cbd5e1';
-  // 罠編みランクII=クリックで回収(罠を解く)/ ランクIII=修飾なしクリックで起爆・
+  // 罠編みランクI=隣接ならクリック解体(1ターン消費。離れているとログのみ・消費なし)
+  // ランクII=クリックで回収(罠を解く)/ ランクIII=修飾なしクリックで起爆・
   // Shift+クリックで回収(rogue-27。見た目の仕上げは S3)。判定は store 側でも二重に守る。
   const recoverTrap = useRogue((s) => s.recoverTrap);
   const detonateTrap = useRogue((s) => s.detonateTrap);
+  const dismantleTrap = useRogue((s) => s.dismantleTrap);
   const rank = useRogue((s) => rankOf(s.skillEquipped, 'wanaAmi'));
   return (
     <group
       position={[w.x, w.y - 0.3 * S, w.z]}
       onClick={
-        rank >= 2
+        rank >= 1
           ? (e) => {
               e.stopPropagation();
               if (rank >= 3 && !e.nativeEvent.shiftKey) detonateTrap(t.id);
-              else recoverTrap(t.id);
+              else if (rank >= 2) recoverTrap(t.id);
+              else dismantleTrap(t.id);
             }
           : undefined
       }

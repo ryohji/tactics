@@ -823,6 +823,41 @@ describe('層リセット(rogue-19b)', () => {
     expect(s.dungeon.chambers[0].collapsed).toBe(true); // 入口も墓標化(id は残る)
   });
 
+  it('崩落で置き去りの罠は自動破棄され、装填CDが0に戻ってログが出る(rogue-28)', () => {
+    const s0 = useRogue.getState();
+    s0.dungeon.open.add(cellKey(deep));
+    useRogue.setState({
+      discovered: new Set([...s0.discovered, cellKey(deep)]),
+      traps: [{ id: 990, pos: [0, 0, 0], power: 8 }], // 上層(layer 0)に置き去り
+      trapCooldown: 5,
+      player: { ...s0.player, pos: deep },
+    });
+
+    useRogue.getState().wait(); // 崩落発動
+
+    const s = useRogue.getState();
+    expect(s.stratum).toBe(1);
+    expect(s.traps).toHaveLength(0);
+    expect(s.trapCooldown).toBe(0);
+    expect(s.log.some((m) => m.includes('崩落で仕掛けた罠は失われた'))).toBe(true);
+  });
+
+  it('崩落時に罠がなければ罠喪失のログは出ない(rogue-28)', () => {
+    const s0 = useRogue.getState();
+    s0.dungeon.open.add(cellKey(deep));
+    useRogue.setState({
+      discovered: new Set([...s0.discovered, cellKey(deep)]),
+      traps: [],
+      player: { ...s0.player, pos: deep },
+    });
+
+    useRogue.getState().wait(); // 崩落発動
+
+    const s = useRogue.getState();
+    expect(s.stratum).toBe(1);
+    expect(s.log.some((m) => m.includes('罠は失われた'))).toBe(false);
+  });
+
   it('警告ラインでは一度だけログが出て、崩落ラインに届くまでは崩落しない', () => {
     useRogue.setState({ player: { ...player(), pos: warnPos } });
     useRogue.getState().wait();
@@ -1723,6 +1758,41 @@ describe('rogue-24: スキル配線と新カウンタ(rogue-27でランク制へ
     });
     useRogue.getState().recoverTrap(902);
     expect(useRogue.getState().traps).toHaveLength(1);
+  });
+
+  it('罠を解体(rogue-28): ランクIで隣接の罠を除去し1ターン進む(装填CDはリセットされない)', () => {
+    const pos = freeNeighbor();
+    useRogue.setState({
+      skillEquipped: [{ id: 'wanaAmi', rank: 1 }],
+      traps: [{ id: 910, pos, power: 8 }],
+      trapCooldown: 5,
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().dismantleTrap(910);
+    const s = useRogue.getState();
+    expect(s.traps).toHaveLength(0);
+    expect(s.turn).toBe(turn0 + 1);
+    // CD は 0 にリセットされない(endTurn の自然回復で1減るだけ。即再装填はランクIIの回収の価値)。
+    expect(s.trapCooldown).toBe(4);
+    expect(s.log.some((m) => m.includes('罠を解体した'))).toBe(true);
+  });
+
+  it('罠を解体(rogue-28): 離れた罠は解体できない(ターン消費なし・ログのみ)', () => {
+    // プレイヤーから FCC 歩数2以上の遠いセル(状態テストなので open である必要はない)。
+    const p = player().pos;
+    const far: [number, number, number] = [p[0] + 2, p[1] + 2, p[2]]; // 隣接(ノルム²=2)ではない
+    useRogue.setState({
+      skillEquipped: [{ id: 'wanaAmi', rank: 1 }],
+      traps: [{ id: 911, pos: far, power: 8 }],
+      trapCooldown: 5,
+    });
+    const turn0 = useRogue.getState().turn;
+    useRogue.getState().dismantleTrap(911);
+    const s = useRogue.getState();
+    expect(s.traps).toHaveLength(1); // 罠は残る
+    expect(s.turn).toBe(turn0); // ターンも進まない
+    expect(s.trapCooldown).toBe(5);
+    expect(s.log.at(-1)).toContain('近づけば解体できる');
   });
 });
 
