@@ -41,11 +41,11 @@ function pickApproachCell(cells: readonly Cell[], goal: Cell): Cell | undefined 
  * greedy: golden.test.ts の固定方針(下手だが決定的)をそのまま移植した方策。
  * 1. 隣接する敵がいれば最小 id を殴る
  * 2. HP が半分未満で水薬があれば飲む
- * 3. 15 手ごとに、罠を持っていれば足元へ設置
- * 4. こちらに気づいた敵がいれば待って迎え撃つ
- * 5. それ以外は最小 id の未踏スタブへ自動歩行(拡張・湧き・発見を回す)
+ * 3. こちらに気づいた敵がいれば待って迎え撃つ
+ * 4. それ以外は最小 id の未踏スタブへ自動歩行(拡張・湧き・発見を回す)
+ * (罠アイテムは rogue-27 でスキル化され、スキル0のボットは罠を使わない)
  */
-export const greedy: Policy = async (i) => {
+export const greedy: Policy = async (_i) => {
   const s = useRogue.getState();
   const target = pickTarget();
   if (target !== null) {
@@ -55,12 +55,6 @@ export const greedy: Policy = async (i) => {
   const potion = s.player.pack.findIndex((it) => it.item === 'potion');
   if (s.player.hp < s.player.maxHp / 2 && potion >= 0) {
     s.useItem(potion);
-    return waitIdle();
-  }
-  const trap = s.player.pack.findIndex((it) => it.item.startsWith('trap'));
-  if (i % 15 === 14 && trap >= 0) {
-    s.useItem(trap); // place モードへ
-    useRogue.getState().clickCell(s.player.pos); // 足元に設置
     return waitIdle();
   }
   if (s.beasts.some((b) => b.alive && b.awake && stepDist(s.player.pos, b.pos) <= 6)) {
@@ -98,12 +92,6 @@ export const cautious: Policy = async (i) => {
   const potion = s.player.pack.findIndex((it) => it.item === 'potion');
   if (s.player.hp < (s.player.maxHp * 2) / 3 && potion >= 0) {
     s.useItem(potion);
-    return waitIdle();
-  }
-  const trap = s.player.pack.findIndex((it) => it.item.startsWith('trap'));
-  if (i % 15 === 14 && trap >= 0) {
-    s.useItem(trap);
-    useRogue.getState().clickCell(s.player.pos);
     return waitIdle();
   }
   if (s.beasts.some((b) => b.alive && b.awake && stepDist(s.player.pos, b.pos) <= 6)) {

@@ -1,4 +1,4 @@
-import { useRogue } from '../../state/rogue';
+import { useRogue, rankOf } from '../../state/rogue';
 import { stepDist } from '../../model/dungeon';
 import { BEASTS } from '../../model/beasts';
 import { itemLabel, statLabel } from '../../model/loot';
@@ -31,7 +31,7 @@ export function BeastPanel() {
         <span>距離<b>{stepDist(playerPos, b.pos)}歩</b></span>
       </div>
       {/* 目利き(rogue-24: shinMekiki): 持ち物は湧き時に事前ロール済みなので表示だけ。 */}
-      {skillEquipped.includes('shinMekiki') && (
+      {rankOf(skillEquipped, 'shinMekiki') >= 1 && (
         <div className="beast-carry">
           持ち物: {b.carry ? `${itemLabel(b.carry)}(${statLabel(b.carry)})` : 'なし'}
         </div>

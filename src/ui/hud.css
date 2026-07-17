@@ -945,6 +945,120 @@
   .scoreboard-skills { padding-left: 0; }
 }
 
+/* --- rogue-27 S3: ランク表示・レーンバッジ・結び・罠編みボタン --- */
+/* ドラフト候補のレーンバッジ */
+.lane-badge {
+  font-size: 9px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid;
+  margin-left: 3px;
+  font-weight: 600;
+}
+.lane-badge.lane-en {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+  color: #e9d5ff;
+}
+.lane-badge.lane-shinka {
+  background: rgba(236, 72, 153, 0.2);
+  border-color: #ec4899;
+  color: #fbcfe8;
+}
+.lane-badge.lane-nagare {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+  color: #dbeafe;
+}
+
+/* ライン(rank3)カードの段階表示 */
+.skill-card.line-card { gap: 2px; }
+.line-ranks { display: flex; flex-direction: column; gap: 3px; margin: 3px 0; }
+.rank-row {
+  display: flex;
+  gap: 4px;
+  font-size: 10px;
+  color: #94a3b8;
+  padding: 2px 0;
+}
+.rank-row.active { color: #7dd3fc; }
+.rank-row .rank-pip {
+  width: 8px;
+  flex-shrink: 0;
+  text-align: center;
+}
+.rank-row .rank-desc { flex: 1; }
+.rank-row .rank-req {
+  margin-left: auto;
+  color: #fbbf24;
+  font-size: 9px;
+}
+
+/* 発動中の結び(SkillModal) */
+.knots-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.knot-item {
+  background: rgba(26, 188, 156, 0.15);
+  border: 1px solid rgba(26, 188, 156, 0.5);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.knot-item .knot-name { font-size: 12px; font-weight: 600; color: #1abcac; display: block; }
+.knot-item .knot-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+/* 結びセクション(MasteryTree) */
+.knots-section { margin-top: 12px; }
+.knots-section h3 { margin: 8px 0 6px; }
+.knots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.knot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid rgba(128, 118, 210, 0.4);
+  border-radius: 9px;
+  background: rgba(20, 16, 46, 0.5);
+  font-size: 11px;
+}
+.knot-card.active {
+  border-color: #1abcac;
+  background: rgba(26, 188, 156, 0.15);
+}
+.knot-card.active .knot-name { color: #1abcac; }
+.knot-card.unlocked { border-color: #22d3ee; background: rgba(34, 211, 238, 0.1); }
+.knot-card.unlocked .knot-name { color: #7dd3fc; }
+.knot-card.locked { opacity: 0.5; border-style: dashed; }
+.knot-card .knot-name { font-weight: 700; color: #f1f5f9; font-size: 12px; }
+.knot-card .knot-parents { color: #c4b5fd; font-size: 10px; }
+.knot-card .knot-desc { color: #94a3b8; }
+
+/* 罠編みボタン(BottomBar) */
+.weave-trap-btn {
+  position: relative;
+  font-size: 16px;
+}
+.weave-trap-btn .cooldown {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #ef4444;
+  color: #fff;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: 1px solid #fca5a5;
+}
+
 /* --- ダメージポップアップ（Effects の Html） --- */
 .fx-popup {
   font-family: 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;

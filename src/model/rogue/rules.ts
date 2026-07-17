@@ -5,7 +5,7 @@ import { cellKey, layer, neighbors, worldPos, type Cell, type CellKey } from '..
 import type { Dungeon } from '../dungeon';
 import { ITEMS, stackAtk, stackDef, stackEvade } from '../loot';
 import { isDimLight, type Beast, type Decoy, type LightLevel, type PlacedTrap, type PlayerState, type Turret } from './types';
-import type { NodeId } from './mastery';
+import { knotActive, rankOf, type EquippedSkill } from './mastery';
 
 /** 素手の攻撃力。 */
 export const BASE_ATK = 2;
@@ -60,27 +60,30 @@ export function beastAt(beasts: readonly Beast[], k: CellKey): Beast | undefined
 }
 
 /**
- * 装備込みの攻撃力(rogue-23: 装着スキルの補正込み)。skills 省略時は素の値
- * (既存の呼び出し元・テストへの後方互換)。
- * - kensan(研鑽): 武器装備中、攻撃+1
+ * 装備込みの攻撃力(rogue-23: 装着スキルの補正込み。rogue-27: ランク制へ移行)。
+ * eq 省略時は素の値(既存の呼び出し元・テストへの後方互換)。
+ * - kensan(研鑽): 武器装備中、攻撃+ランク(1/2/3)
  * - ryote(両手保持): 片手武器装備・盾スロットが空のとき、攻撃+2
  * - katate(片手扱い): 両手武器+盾の同時装備中、攻撃−2
  *   (命中制はまだ無いので攻撃減で代替。将来、命中率を導入したら命中−へ置換する)
  */
 export function playerAtk(
   p: PlayerState,
-  skills: readonly NodeId[] = [],
+  eq: readonly EquippedSkill[] = [],
   lightLevel?: LightLevel,
 ): number {
   let atk = BASE_ATK + (p.weapon ? stackAtk(p.weapon) : 0);
-  if (p.weapon && skills.includes('kensan')) atk += 1;
-  if (p.weapon && !ITEMS[p.weapon.item].twoHanded && !p.shield && skills.includes('ryote')) atk += 2;
-  if (p.weapon && ITEMS[p.weapon.item].twoHanded && p.shield && skills.includes('katate')) atk -= 2;
-  // rogue-24: 拳闘・灯火の補正。
-  if (!p.weapon && skills.includes('kenPunch')) atk += 3; // 拳打(素手)
-  if (p.hp === p.maxHp && skills.includes('kenMuku')) atk += 2; // 無傷の型
-  if (p.hp * 4 <= p.maxHp && p.barrier === 0 && skills.includes('kenHaisui')) atk += 3; // 背水
-  if (lightLevel !== undefined && isDimLight(lightLevel) && skills.includes('hiShibori')) atk += 2; // 絞り撃ち
+  const kensanRank = rankOf(eq, 'kensan');
+  if (p.weapon && kensanRank > 0) atk += kensanRank; // 研鑽: 攻撃+1/+2/+3
+  if (p.weapon && !ITEMS[p.weapon.item].twoHanded && !p.shield && rankOf(eq, 'ryote') >= 1) atk += 2;
+  if (p.weapon && ITEMS[p.weapon.item].twoHanded && p.shield && rankOf(eq, 'katate') >= 1) atk -= 2;
+  // rogue-24: 拳闘・灯火の補正(rogue-27: 拳打はランク制)。
+  const kenPunchRank = rankOf(eq, 'kenPunch');
+  if (!p.weapon && kenPunchRank > 0) atk += [3, 5, 7][kenPunchRank - 1]; // 拳打(素手)
+  if (!p.weapon && p.barrier > 0 && knotActive(eq, 'kouken')) atk += 2; // 甲拳(結び・rogue-27)
+  if (p.hp === p.maxHp && rankOf(eq, 'kenMuku') >= 1) atk += 2; // 無傷の型
+  if (p.hp * 4 <= p.maxHp && p.barrier === 0 && rankOf(eq, 'kenHaisui') >= 1) atk += 3; // 背水
+  if (lightLevel !== undefined && isDimLight(lightLevel) && rankOf(eq, 'hiShibori') >= 1) atk += 2; // 絞り撃ち
   return atk;
 }
 export function playerDef(p: PlayerState): number {
@@ -88,19 +91,21 @@ export function playerDef(p: PlayerState): number {
 }
 /**
  * 盾の回避%(rogue-22)。盾なしは 0(=beastStrike が回避判定の乱数を引かない)。
- * jutsu(盾術・rogue-23): 盾装備中、回避+5%。
+ * jutsu(盾術・rogue-23): 盾装備中、回避+ランク段階(5/8/12。rogue-27)。
  */
 export function playerEvade(
   p: PlayerState,
-  skills: readonly NodeId[] = [],
+  eq: readonly EquippedSkill[] = [],
   ranged = false,
 ): number {
   let evade = p.shield ? stackEvade(p.shield) : 0;
-  if (p.shield && skills.includes('jutsu')) evade += 5;
-  // rogue-24: 拳闘・盾の補正。
-  if (!p.weapon && skills.includes('kenMigaru')) evade += 10; // 身軽(素手・盾不要)
-  if (p.hp * 4 <= p.maxHp && p.barrier === 0 && skills.includes('kenHaisui')) evade += 25; // 背水
-  if (ranged && p.shield && skills.includes('tateKakage')) evade += 20; // 掲盾(遠隔のみ)
+  const jutsuRank = rankOf(eq, 'jutsu');
+  if (p.shield && jutsuRank > 0) evade += [5, 8, 12][jutsuRank - 1];
+  // rogue-24: 拳闘・盾の補正(rogue-27: 身軽はランク制。10/10/15)。
+  const kenMigaruRank = rankOf(eq, 'kenMigaru');
+  if (!p.weapon && kenMigaruRank > 0) evade += [10, 10, 15][kenMigaruRank - 1]; // 身軽(素手・盾不要)
+  if (p.hp * 4 <= p.maxHp && p.barrier === 0 && rankOf(eq, 'kenHaisui') >= 1) evade += 25; // 背水
+  if (ranged && p.shield && rankOf(eq, 'tateKakage') >= 1) evade += 20; // 掲盾(遠隔のみ)
   return evade;
 }
 

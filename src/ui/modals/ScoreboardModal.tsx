@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react';
 import { fetchTop, type ScoreEntry } from '../../state/scoreboard';
 import { SKILL_NODES, GAME_VERSION, type NodeId } from '../../state/rogue';
 
+/** ランク表示(rogue-27: "id:rank" 形式の文字列を分解する)。 */
+const RANK_LABEL: Record<string, string> = { '2': 'Ⅱ', '3': 'Ⅲ' };
+
+function skillChipLabel(entry: string): string {
+  const [id, rank] = entry.split(':');
+  const node = SKILL_NODES[id as NodeId];
+  const label = RANK_LABEL[rank ?? ''] ?? '';
+  return node ? `${node.name}${label}` : entry;
+}
+
 type LoadState = 'loading' | 'ok' | 'error';
 
 /**
@@ -54,14 +64,11 @@ export function ScoreboardModal({ onClose }: { onClose: () => void }) {
                 </span>
                 {e.skills.length > 0 && (
                   <div className="scoreboard-skills">
-                    {e.skills.map((id, idx) => {
-                      const node = SKILL_NODES[id as NodeId];
-                      return (
-                        <span className="skill-chip" key={idx}>
-                          {node?.name ?? id}
-                        </span>
-                      );
-                    })}
+                    {e.skills.map((entry, idx) => (
+                      <span className="skill-chip" key={idx}>
+                        {skillChipLabel(entry)}
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>

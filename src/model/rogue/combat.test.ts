@@ -99,7 +99,7 @@ describe('beastStrike の回避判定(rogue-22)', () => {
     const player = basePlayer({ shield: { item: 'shield', q: 0 } });
     const withoutJutsu = beastStrike(bat(), player, rng);
     expect(withoutJutsu.dmg).toBeGreaterThan(0);
-    const withJutsu = beastStrike(bat(), player, rng, ['jutsu']);
+    const withJutsu = beastStrike(bat(), player, rng, [{ id: 'jutsu', rank: 1 }]);
     expect(withJutsu.dmg).toBe(0);
   });
 });

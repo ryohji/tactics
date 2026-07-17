@@ -48,14 +48,6 @@ function ItemMesh({ g }: { g: GroundItem }) {
         </mesh>
       );
       break;
-    case 'trap':
-      shape = (
-        <mesh rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.13 * S, 0.18 * S, 5]} />
-          <meshStandardMaterial color="#b45309" emissive="#92400e" emissiveIntensity={0.6} roughness={0.6} />
-        </mesh>
-      );
-      break;
     case 'turret':
       shape = (
         <mesh>

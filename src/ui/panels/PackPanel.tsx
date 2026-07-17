@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useRogue, playerAtk, playerDef, playerEvade, SKILL_NODES } from '../../state/rogue';
+import { useRogue, playerAtk, playerDef, playerEvade, SKILL_NODES, rankOf } from '../../state/rogue';
 import { ITEMS, itemLabel, statLabel, type ItemStack } from '../../model/loot';
 
 const SLOT_NAME = { weapon: '武器', armor: '防具', shield: '盾' } as const;
@@ -45,7 +45,6 @@ export function PackPanel() {
   const useItem = useRogue((s) => s.useItem);
   const mergeItem = useRogue((s) => s.mergeItem);
   const uiMode = useRogue((s) => s.uiMode);
-  const placeIndex = useRogue((s) => s.placeIndex);
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
   const mapMode = useRogue((s) => s.mapMode);
@@ -91,7 +90,7 @@ export function PackPanel() {
         stat={`回避${playerEvade(player, skillEquipped)}%`}
         locked={locked}
         emptyHint={
-          player.weapon && ITEMS[player.weapon.item].twoHanded && !skillEquipped.includes('katate')
+          player.weapon && ITEMS[player.weapon.item].twoHanded && rankOf(skillEquipped, 'katate') < 1
             ? '(両手がふさがっている)'
             : undefined
         }
@@ -99,9 +98,10 @@ export function PackPanel() {
       <EquipSlot slot="armor" stack={player.armor} stat={`防${playerDef(player)}`} locked={locked} />
       {skillEquipped.length > 0 && (
         <div className="skill-row">
-          {skillEquipped.map((id) => (
-            <span key={id} className="skill-chip" title={SKILL_NODES[id].desc}>
-              {SKILL_NODES[id].name}·{SKILL_NODES[id].cost}
+          {skillEquipped.map((e) => (
+            <span key={e.id} className="skill-chip" title={SKILL_NODES[e.id].descs[e.rank - 1]}>
+              {SKILL_NODES[e.id].name}
+              {e.rank > 1 ? (e.rank === 2 ? 'Ⅱ' : 'Ⅲ') : ''}·{SKILL_NODES[e.id].costs[e.rank - 1]}
             </span>
           ))}
         </div>
@@ -110,7 +110,8 @@ export function PackPanel() {
       {groups.map((g) => {
         const def = ITEMS[g.stack.item];
         const throwing = def.kind === 'thrown' && uiMode === 'throw';
-        const placing = def.kind === 'trap' && uiMode === 'place' && placeIndex === g.index;
+        // 罠(trapSpike等)は rogue-27 で廃止(罠師「罠編み」のスキル化)。ここに残るのは
+        // 砲塔・囮のみで、いずれも即設置(選択モードなし)。
         const verb =
           def.kind === 'potion'
             ? '飲む'
@@ -120,13 +121,11 @@ export function PackPanel() {
                 : '投げる'
               : def.kind === 'weapon' || def.kind === 'armor' || def.kind === 'shield'
                 ? '装備'
-                : placing
-                  ? '解除'
-                  : '設置';
+                : '設置';
         return (
           <div className="pack-row" key={`${g.stack.item}:${g.stack.q}`}>
             <button
-              className={throwing || placing ? 'active' : ''}
+              className={throwing ? 'active' : ''}
               disabled={locked}
               onClick={() => useItem(g.index)}
             >

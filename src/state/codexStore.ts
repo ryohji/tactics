@@ -4,7 +4,7 @@
 // 収集要素なので、ラン履歴(history.ts)・マスタリー(masteryStore.ts)とも別キーで管理する。
 
 import type { BeastKind } from '../model/beasts';
-import type { ItemId } from '../model/loot';
+import { ITEMS, type ItemId } from '../model/loot';
 import type { FeatId } from '../model/rogue/feats';
 import { makeKvStore, type KvStore } from './kvStore';
 
@@ -53,9 +53,17 @@ export function setCodexStorageForTest(s: Storage | null): void {
  * 破損した JSON や形の合わないデータは初期値として扱う。保存済みデータに無い
  * フィールド(版が上がって追加されたもの等)は INITIAL_CODEX の値で補完する
  * (図鑑・実績は永続資産なので、版が上がっても破棄しない。mastery.ts と同じ方針)。
+ *
+ * rogue-27: 罠アイテム5種の廃止で、以前のプレイで記録された items のキーに
+ * 現在の ITEMS に存在しない id(trapSpike 等)が残りうる。表示側が未知 id で
+ * 落ちないよう、読み込み時に `id in ITEMS` でフィルタする。
  */
 export function readCodex(): Codex {
-  return store.read();
+  const codex = store.read();
+  const items = Object.fromEntries(
+    Object.entries(codex.items).filter(([id]) => id in ITEMS),
+  ) as Codex['items'];
+  return { ...codex, items };
 }
 
 function writeCodex(codex: Codex): void {

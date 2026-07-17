@@ -19,16 +19,15 @@ import type { PlayerPose } from '../playerPose';
 import { cellKey, type Cell } from '../../model/fcc';
 import { adjacent, distW, stepDist, lineOfSight } from '../../model/dungeon';
 import { BEASTS } from '../../model/beasts';
-import { ITEMS, stackDmg, type ItemStack } from '../../model/loot';
-import type { Beast, Decoy, PlacedTrap, Turret, RogueFx, GameEvent } from '../../model/rogue/types';
+import { ITEMS, stackDmg } from '../../model/loot';
+import type { Beast, BeastStatus, Decoy, PlacedTrap, Turret, RogueFx, GameEvent } from '../../model/rogue/types';
 import { BURN_DMG, depthOf, playerAtk, weaponReach, weaponSweep } from '../../model/rogue/rules';
-import type { MasteryCounters } from '../../model/rogue/mastery';
+import { knotActive, rankOf, type MasteryCounters } from '../../model/rogue/mastery';
 import type { FeatId } from '../../model/rogue/feats';
 import {
   beastStrike as beastStrikeCalc,
   beastStrikeDecoy as beastStrikeDecoyCalc,
   damageEvents,
-  resolveTrapEffect,
   statusAppliedEvents,
   turretTarget,
   absorbBarrier,
@@ -119,25 +118,40 @@ export function createCombat(deps: CombatDeps) {
       // 盾の回避成功(rogue-22)。マスタリー(盾=回避)を積む(rogue-23)。
       skills.incrementMastery({ evades: 1 });
       applyEvents(events);
-      // 受け反撃(ukekaeshi・rogue-23)/ 見切り(kenMikiri・rogue-24: 素手時): 固定値の反撃。
-      if (
-        skillEquipped.includes('ukekaeshi') ||
-        (skillEquipped.includes('kenMikiri') && player.weapon === null)
-      ) {
-        const counter = Math.floor(playerAtk(player, skillEquipped, get().lightLevel) / 2);
+      // 受け反撃(盾術IIランク以上・rogue-27)/ 見切り(身軽IIランク以上・素手時): 固定値の反撃。
+      // jutsu>=2 と kenMigaru>=2 は EXCLUDES で同時装着できないため、同時成立はしない。
+      // 隣接の攻撃者のみに反撃する(rogue-27の意図的差分: 遠隔への反撃は結び「矢返し」の役割)。
+      // 矢返し(yagaeshi・rogue-27): jutsu 系の受け反撃に限り、遠隔攻撃なら非隣接の射手にも届く。
+      const jutsuRank = rankOf(skillEquipped, 'jutsu');
+      const kenMigaruRank = rankOf(skillEquipped, 'kenMigaru');
+      const adjacentAttacker = stepDist(b.pos, player.pos) === 1;
+      const yagaeshiReach = ranged && jutsuRank >= 2 && knotActive(skillEquipped, 'yagaeshi');
+      const counterActive =
+        (jutsuRank >= 2 || (kenMigaruRank >= 2 && player.weapon === null)) && (adjacentAttacker || yagaeshiReach);
+      if (counterActive) {
+        const activeRank = jutsuRank >= 2 ? jutsuRank : kenMigaruRank;
+        const atk = playerAtk(player, skillEquipped, get().lightLevel);
+        const counter = activeRank >= 3 ? Math.floor((atk * 3) / 4) : Math.floor(atk / 2);
         if (counter > 0) {
-          pushLog('受け流しざま反撃した!');
+          pushLog(adjacentAttacker ? '受け流しざま反撃した!' : '矢を弾き、射手へ打ち返した!');
           damageBeast(b, counter, '#93c5fd'); // 武技(討伐)マスタリーの対象外(近接/薙ぎ/投擲のみ)
           set({ beasts: [...get().beasts] });
         }
+      }
+      // 錬鉄の受け(rentetsu・rogue-27): 回避成功時、障壁+1(上限24)。
+      if (knotActive(skillEquipped, 'rentetsu')) {
+        player.barrier = Math.min(24, player.barrier + 1);
       }
       set({ player: { ...player } });
       checkDead();
       return;
     }
-    // 硬化(kouka・rogue-23): 障壁が1以上ある間、被ダメージ−1(最低1。absorbBarrier前)。
+    // 硬化(kouka・rogue-23): 障壁が1以上ある間、被ダメージ−(ランク2以上で2、それ以外1。
+    // 最低1。absorbBarrier前。rogue-27でランク制へ)。
     let dmg = rawDmg;
-    if (player.barrier > 0 && skillEquipped.includes('kouka')) dmg = Math.max(1, dmg - 1);
+    const koukaRank = rankOf(skillEquipped, 'kouka');
+    if (player.barrier > 0 && koukaRank >= 2) dmg = Math.max(1, dmg - 2);
+    else if (player.barrier > 0 && koukaRank >= 1) dmg = Math.max(1, dmg - 1);
     // 障壁がまず削れ、余りが HP へ(酸は障壁への削りだけ2倍)。
     const hadBarrierAmt = player.barrier;
     const { barrier, hpDmg } = absorbBarrier(hadBarrierAmt, dmg, !!def.acidBarrier);
@@ -181,45 +195,39 @@ export function createCombat(deps: CombatDeps) {
   }
 
   /**
-   * 罠1つを b に対して発動する(rogue-24 で triggerTrap から分離)。
-   * wanaTsuyoka(罠強化)装着中は品質+1相当で効く。
+   * 罠1つを b に対して発動する(rogue-27: 罠のスキル化。ダメージは trap.power 固定・
+   * kind 分岐は廃止)。生存すれば結び kakei(延焼2T)・nemuriito(昏睡2T)を付与する
+   * (両方成立時は後段の nemuriito が上書きする — 敵の状態異常は単一スロットのため。
+   * 詳細は完了記録の「仕様からの逸脱」参照)。
    */
   function fireTrap(t: PlacedTrap, b: Beast): void {
     const name = BEASTS[b.kind].name;
-    const qBonus = get().skillEquipped.includes('wanaTsuyoka') ? 1 : 0;
-    const stack: ItemStack = { item: t.item, q: t.q + qBonus };
     sfx.play('hit');
-    const effect = resolveTrapEffect(t.kind, stack);
-    if (effect.kind === 'damage') {
-      pushLog(
-        t.kind === 'spike'
-          ? `${name} が棘の罠を踏んだ!`
-          : `${name} が火炎の罠を踏んだ! 延焼した`,
-      );
-      if (!damageBeast(b, effect.dmg, effect.color, { viaTrap: true }) && effect.burnOnSurvive) {
-        b.status = effect.burnOnSurvive;
+    pushLog(`${name} が罠を踏んだ!`);
+    const died = damageBeast(b, t.power, '#fecaca', { viaTrap: true });
+    if (!died) {
+      const eq = get().skillEquipped;
+      let status: BeastStatus | null = null;
+      if (knotActive(eq, 'kakei')) status = { kind: 'burn', turns: 2 };
+      if (knotActive(eq, 'nemuriito')) status = { kind: 'sleep', turns: 2 };
+      if (status) {
+        b.status = status;
+        applyEvents(statusAppliedEvents(name, b.pos, status));
       }
-    } else {
-      b.status = effect.status;
-      if (effect.awaken) b.awake = true;
-      applyEvents(statusAppliedEvents(name, b.pos, effect.status));
     }
   }
 
-  /** b が今のセルの罠を踏んだら発動(罠は消費)。連鎖(wanaRensa)は隣接罠を1ホップ誘爆。 */
-  function triggerTrap(b: Beast): void {
-    const { traps } = get();
-    const k = cellKey(b.pos);
-    const t = traps.find((x) => cellKey(x.pos) === k);
-    if (!t) return;
-    // 連鎖の誘爆対象は「発動前に隣接していた自分の罠」を先に確定する(1ホップ限定)。
-    const chained = get().skillEquipped.includes('wanaRensa')
+  /** 連鎖対象(罠編みランクIII・rogue-27): t に隣接する自分の罠(1ホップ限定)。 */
+  function chainedTrapsFor(t: PlacedTrap): PlacedTrap[] {
+    const { traps, skillEquipped } = get();
+    return rankOf(skillEquipped, 'wanaAmi') >= 3
       ? traps.filter((x) => x.id !== t.id && adjacent(x.pos, t.pos))
       : [];
-    set({ traps: traps.filter((x) => x.id !== t.id && !chained.some((c) => c.id === x.id)) });
-    fireTrap(t, b);
+  }
+
+  /** 連鎖誘爆の適用: 誘爆先のセルに敵が居れば発動、居なければ空振りログのみ。 */
+  function detonateChain(chained: readonly PlacedTrap[]): void {
     for (const c of chained) {
-      // 誘爆はその罠のセルに居る敵へ。誰も踏んでいなければ空振り(消費のみ)。
       const victim = get().beasts.find((x) => x.alive && cellKey(x.pos) === cellKey(c.pos));
       pushFx({ kind: 'hit', at: c.pos, dur: 320 });
       if (victim) {
@@ -229,6 +237,40 @@ export function createCombat(deps: CombatDeps) {
         pushLog('罠が誘爆した(空振り)');
       }
     }
+  }
+
+  /** b が今のセルの罠を踏んだら発動(罠は消費)。連鎖(罠編みランクIII)は隣接罠を1ホップ誘爆。 */
+  function triggerTrap(b: Beast): void {
+    const { traps } = get();
+    const k = cellKey(b.pos);
+    const t = traps.find((x) => cellKey(x.pos) === k);
+    if (!t) return;
+    const chained = chainedTrapsFor(t);
+    set({ traps: traps.filter((x) => x.id !== t.id && !chained.some((c) => c.id === x.id)) });
+    fireTrap(t, b);
+    detonateChain(chained);
+  }
+
+  /**
+   * 遠隔起爆(罠編みランクIII・rogue-27): プレイヤーが自分の罠をクリックして即時発動する。
+   * 乱数は一切引かない。そのセルに敵が居れば発動、居なければ空発動(連鎖は起きる)。
+   * id が見つからなければ false(呼び出し元はターンを消費しない)。
+   */
+  function detonateTrap(id: number): boolean {
+    const { traps, beasts } = get();
+    const t = traps.find((x) => x.id === id);
+    if (!t) return false;
+    const chained = chainedTrapsFor(t);
+    set({ traps: traps.filter((x) => x.id !== t.id && !chained.some((c) => c.id === x.id)) });
+    const victim = beasts.find((x) => x.alive && cellKey(x.pos) === cellKey(t.pos));
+    if (victim) {
+      pushLog('罠を起爆した!');
+      fireTrap(t, victim);
+    } else {
+      pushLog('罠を起爆した(空振り)');
+    }
+    detonateChain(chained);
+    return true;
   }
 
   /** b の移動先候補(空洞・他の敵/プレイヤー/囮が居ない)。 */
@@ -304,7 +346,9 @@ export function createCombat(deps: CombatDeps) {
       }
 
       // 気づき: 明かりを広げているほど遠くから気づかれる。
-      const aggroFactor = get().skillEquipped.includes('shinShinobi') ? 0.8 : 1; // 忍び足
+      // 忍び足(shinShinobi・rogue-27): ランクIで−20%、ランクIIIで−35%(ランクIIは追跡距離のみ強化)。
+      const shinShinobiRank = rankOf(get().skillEquipped, 'shinShinobi');
+      const aggroFactor = shinShinobiRank >= 3 ? 0.65 : shinShinobiRank >= 1 ? 0.8 : 1;
       if (!b.awake && checkAggro(b, def, player.pos, lightLevel, aggroFactor)) {
         b.awake = true;
         interrupted = true;
@@ -344,7 +388,8 @@ export function createCombat(deps: CombatDeps) {
         continue;
       }
 
-      const territoryFactor = get().skillEquipped.includes('shinKehai') ? 0.75 : 1; // 気配遮断
+      // 追跡を諦める距離(shinShinobi・rogue-27): ランクIIで−25%、ランクIIIで−40%(旧 shinKehai を統合)。
+      const territoryFactor = shinShinobiRank >= 3 ? 0.6 : shinShinobiRank >= 2 ? 0.75 : 1;
       if (outOfTerritory(b, def, tgtPos, territoryFactor)) {
         b.awake = false;
         pushLog(`${def.name} は追跡を諦めた`);
@@ -387,9 +432,17 @@ export function createCombat(deps: CombatDeps) {
       const skills = get().skillEquipped;
       // 攻撃前の覚醒状態を捕捉(rogue-24)— 背討ちの倍率と隠密マスタリーの両方がこの値を使う。
       const preAwake = b.awake;
-      let dmg = Math.max(1, playerAtk(player, skills, get().lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
-      // 背討ち(shinSegiri): 未覚醒の敵へは×2。ただし気配感知(senses)の敵には無効。
-      if (!preAwake && !def.senses && skills.includes('shinSegiri')) {
+      const lightLevel = get().lightLevel;
+      let dmg = Math.max(1, playerAtk(player, skills, lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
+      // 個体の強化判定(門番・深度係数等による atk/defOverride 持ち)。闇討ちの除外条件。
+      const isElite = !!def.gatekeeper || b.atkOverride !== undefined || b.defOverride !== undefined;
+      // 闇討ち(yamiuchi・rogue-27): 消灯中の背討ちは一般敵を即死させる
+      // (門番・強化個体・気配感知の敵には効かない)。成立しなければ従来の背討ち×2へ。
+      if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skills, 'yamiuchi')) {
+        dmg = b.hp;
+        pushLog('闇討ち!');
+      } else if (!preAwake && !def.senses && rankOf(skills, 'shinSegiri') >= 1) {
+        // 背討ち(shinSegiri): 未覚醒の敵へは×2。ただし気配感知(senses)の敵には無効。
         dmg *= 2;
         pushLog('背後から急所を突いた!');
       }
@@ -399,7 +452,7 @@ export function createCombat(deps: CombatDeps) {
       const died = damageBeast(b, dmg, '#fecaca', { weapon: !unarmed, unarmed, preAwake });
       if (died) diedCount++;
       // 延焼の刃(hiEnjin): 装着中のみ乱数を引く(30%で延焼2ターン)。倒した敵には不要。
-      if (!died && skills.includes('hiEnjin') && rand() < 0.3) {
+      if (!died && rankOf(skills, 'hiEnjin') >= 1 && rand() < 0.3) {
         b.status = { kind: 'burn', turns: 2 };
         pushLog(`${def.name} に火が移った!`);
       }
@@ -426,7 +479,7 @@ export function createCombat(deps: CombatDeps) {
     // スロット上限に関わらず毎回判定する(feats 集合の冪等性で二重解除は起きない)。
     if (BEASTS[b.kind].gatekeeper) {
       skills.maybeUnlockFeat('gatekeeper');
-      if (get().skillSlots < 6) {
+      if (get().skillSlots < 8) {
         set({ skillSlots: get().skillSlots + 1 });
         pushLog('門番を討った — 心得の器が広がる(スロット+1)');
         sfx.play('pickup');
@@ -491,7 +544,7 @@ export function createCombat(deps: CombatDeps) {
     const preAwakeKnife = b.awake;
     const diedByKnife = damageBeast(b, dmg, '#fecaca', { weapon: true, preAwake: preAwakeKnife });
     // 跳弾(knifeRico): 命中時、対象に隣接する敵1体(最小id)へ半分ダメージ(乱数なし)。
-    if (get().skillEquipped.includes('knifeRico')) {
+    if (rankOf(get().skillEquipped, 'knifeRico') >= 1) {
       const near = get()
         .beasts.filter((x) => x.alive && x.id !== b.id && adjacent(x.pos, b.pos))
         .sort((a, z) => a.id - z.id)[0];
@@ -521,6 +574,7 @@ export function createCombat(deps: CombatDeps) {
     killBeast,
     fireTrap,
     triggerTrap,
+    detonateTrap,
     turretsFire,
     beastsTurn,
     stepCandidates,

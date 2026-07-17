@@ -28,7 +28,7 @@
 //   runEnd.ts                    死亡判定・スコア記録・脱出(escape)(A5)
 // rogue.ts に残るのは: 状態定義(RogueState)・型の再輸出・restart/resume・
 // 上記のいずれにも属さない UI 系アクション・pushLog/pushFx/applyEvents/logAction/
-// autoSave/placeTrapAt などの共有ヘルパ・各ファクトリの生成と配線のみ。
+// autoSave/weaveTrapAt などの共有ヘルパ・各ファクトリの生成と配線のみ。
 
 import { create } from 'zustand';
 import { cellKey, keyToCell, type Cell, type CellKey } from '../model/fcc';
@@ -71,10 +71,18 @@ import {
   type RogueFx,
   type PlayerState,
   type SaveData,
+  type SkillDraft,
   type ActionLogEntry,
 } from '../model/rogue/types';
 import { depthOf, weaponReach, placeableCells, gazeAngles } from '../model/rogue/rules';
-import { masteryLevels, unlockedNodes, type NodeId } from '../model/rogue/mastery';
+import {
+  masteryLevels,
+  takeable,
+  rankOf,
+  hasAnyMastery,
+  type NodeId,
+  type EquippedSkill,
+} from '../model/rogue/mastery';
 import type { GameEvent } from '../model/rogue/types';
 
 // ドメイン型・純ヘルパは model/rogue/ へ分離(rogue-17)。既存の import 先を
@@ -114,18 +122,37 @@ export {
   dailySeed,
 } from '../model/rogue/rules';
 export { parseSeed } from '../model/rogue/rules';
-// マスタリー・スキルノード(rogue-23)は HUD が直接参照するのでここから再輸出する。
+// マスタリー・スキルノード(rogue-23。rogue-27でランク・結び・排他へ再編)は HUD が
+// 直接参照するのでここから再輸出する。
 export {
   MASTERY_NAME,
   SKILL_NODES,
   NODE_IDS,
   MASTERY_THRESHOLDS,
   masteryLevels,
-  unlockedNodes,
+  takeable,
+  draftLanes,
+  unlockedRank,
   equippedCost,
   counterFor,
+  rankOf,
+  maxRank,
+  KNOTS,
+  knotActive,
+  EXCLUDES,
 } from '../model/rogue/mastery';
-export type { MasterySystem, MasteryCounters, NodeId, SkillNode } from '../model/rogue/mastery';
+export type {
+  MasterySystem,
+  MasteryCounters,
+  NodeId,
+  SkillNode,
+  EquippedSkill,
+  DraftEntry,
+  DraftLane,
+  KnotId,
+  Knot,
+} from '../model/rogue/mastery';
+export type { SkillDraft } from '../model/rogue/types';
 export { readMastery } from './masteryStore';
 
 export interface RogueState {
@@ -153,21 +180,23 @@ export interface RogueState {
   maxDepth: number;
   /** 通過済みの層数(rogue-19b)。深度 STRATUM_DEPTH*(stratum+1)+2 で次の崩落。 */
   stratum: number;
-  /** スキルスロット数(rogue-23。初期2・関門+1・上限6)。 */
+  /** スキルスロット数(rogue-23。初期2・関門+1・門番+1・rogue-27で上限8)。 */
   skillSlots: number;
-  /** 装着中のスキルノード id 列(コスト合計 ≤ skillSlots)。 */
-  skillEquipped: NodeId[];
-  /** 関門で提示中のドラフト候補(null=非表示)。 */
-  skillDraft: NodeId[] | null;
+  /** 装着中のスキル(id・ランク。コスト合計 ≤ skillSlots。rogue-27でランク制へ)。 */
+  skillEquipped: EquippedSkill[];
+  /** 関門で提示中のドラフト(rogue-27: 天秤ドラフトの3枠 | 見送り権による自由選択'free' | null)。 */
+  skillDraft: SkillDraft;
+  /** 見送り権(rogue-27): true なら次の関門でドラフトの代わりに 'free' が出る(永続保存)。 */
+  skillFreePick: boolean;
+  /** 罠(罠編み)の装填クールダウン(rogue-27)。編むと 10/8/6(ランク)、endTurn で1ずつ回復。 */
+  trapCooldown: number;
   /** ラン開始直後の「支度」(自由装着)モード中か。 */
   skillOutfitting: boolean;
   /** escaped(rogue-25): 脱出(生還)で終えたラン。dead と同様に操作停止・セーブ破棄。 */
   phase: 'play' | 'dead' | 'escaped';
   busy: boolean;
-  /** walk=移動 / throw=投擲対象選択 / place=罠の設置先選択(足元+隣接)。 */
+  /** walk=移動 / throw=投擲対象選択 / place=罠を編む先の選択(足元+隣接。rogue-27)。 */
   uiMode: 'walk' | 'throw' | 'place';
-  /** place モードで設置しようとしている所持品 index。 */
-  placeIndex: number | null;
   /** クリック可能な移動先(BFS≤REACH_STEPS)。 */
   reach: { cells: Cell[]; parent: Map<CellKey, CellKey> };
   /** ホバー中の移動マーカーのセル(同レベルのヘックスオーバーレイ表示に使う)。 */
@@ -206,8 +235,19 @@ export interface RogueState {
   equipSkill: (id: NodeId) => void;
   /** 装着中のスキルノードを外す(「支度」中/ドラフト中のみ。組み替えの自由枠)。 */
   unequipSkill: (id: NodeId) => void;
-  /** 遠隔回収(rogue-24: 罠師 wanaKaishu)。設置済みの自分の罠をクリックで回収(1ターン)。 */
+  /**
+   * 罠を編む(rogue-27: 罠師「罠編み」ランクI以上)。装填クールダウンが0・自分の罠数が
+   * 同時数(1/2/3)未満なら place モードへ入る(uiMode='place')。足元/隣接セルを
+   * clickCell すると威力8/10/12・装填10/8/6(現在ランク)で設置し、1ターン消費する。
+   * uiMode='place' 中にもう一度呼ぶと解除(cancelThrow と同じ経路)。
+   */
+  weaveTrap: () => void;
+  /** 罠を解く(rogue-24 の遠隔回収を rogue-27 で改訂): 罠編みランクII以上。設置済みの
+      自分の罠をクリックで除去し、装填クールダウンを0に戻す(1ターン)。 */
   recoverTrap: (id: number) => void;
+  /** 遠隔起爆(rogue-27: 罠編みランクIII以上)。自分の罠をクリックで即時発動(連鎖込み・
+      乱数なし・1ターン)。id が不明なら何もしない。 */
+  detonateTrap: (id: number) => void;
   /** 「支度」を終えてそのまま潜る。 */
   finishOutfitting: () => void;
   /** 関門のドラフトを見送る(何も選ばず閉じる)。 */
@@ -354,10 +394,11 @@ export const useRogue = create<RogueState>((set, get) => {
   });
 
   // 層(ストラタム)のオーケストレーション(rogue-19b)は state/rogue/stratum.ts へ分離
-  // (rogue.ts 分割A5)。triggerCollapse が skills.maybeUnlockFeat/incrementMastery/
-  // undraftedUnlockedNodes を呼ぶため直前に作った skills(実体)を渡し、move.refreshReach を
-  // 呼ぶためまだ存在しない move はサンクで渡す。checkDead/recordRun は runEnd(実体)から、
-  // autoSave は rogue.ts 側の関数宣言(hoisted なのでこの時点でも参照可)をそのまま渡す。
+  // (rogue.ts 分割A5)。triggerCollapse が skills.maybeUnlockFeat/incrementMastery を呼ぶため
+  // 直前に作った skills(実体)を渡し、move.refreshReach を呼ぶためまだ存在しない move は
+  // サンクで渡す。checkDead/recordRun は runEnd(実体)から、autoSave は rogue.ts 側の関数宣言
+  // (hoisted なのでこの時点でも参照可)をそのまま渡す(rogue-27: 関門ドラフトの生成自体は
+  // stratum.ts が masteryStore/draftLanes を直接呼んで組み立てる)。
   stratum = createStratum({
     set,
     get,
@@ -370,7 +411,6 @@ export const useRogue = create<RogueState>((set, get) => {
     skills: {
       maybeUnlockFeat: skills.maybeUnlockFeat,
       incrementMastery: skills.incrementMastery,
-      undraftedUnlockedNodes: skills.undraftedUnlockedNodes,
     },
     refreshReach: () => move.refreshReach(),
     autoSave,
@@ -380,7 +420,7 @@ export const useRogue = create<RogueState>((set, get) => {
   // state/rogue/moveActions.ts へ分離(rogue.ts 分割A4)。stepPlayer が
   // skills.maybeUnlockFeat を呼ぶため直前に作った skills(実体)を渡し、walkPath/wait が
   // combat.beastsTurn を呼ぶためまだ存在しない combat はサンクで渡す。beastSeq/itemSeq/
-  // runSeq のアクセサ・placeTrapAt(罠設置。rogue.ts 側に残置)・endTurn(A5 で stratum へ)
+  // runSeq のアクセサ・weaveTrapAt(罠を編む。rogue.ts 側に残置)・endTurn(A5 で stratum へ)
   // もここで共有コンテキストとして渡す。
   move = createMove({
     set,
@@ -400,7 +440,7 @@ export const useRogue = create<RogueState>((set, get) => {
     },
     nextBeastSeq: () => beastSeq++,
     nextItemSeq: () => itemSeq++,
-    placeTrapAt,
+    weaveTrapAt,
   });
 
   // 戦闘オーケストレーション(近接/投擲攻撃・敵の1ターン・罠・砲塔・討伐処理)は
@@ -434,30 +474,32 @@ export const useRogue = create<RogueState>((set, get) => {
   // checkStratum/triggerCollapse/endTurn は state/rogue/stratum.ts(stratum)へ、
   // checkDead/recordRun/escape は state/rogue/runEnd.ts(runEnd)へ分離(rogue.ts 分割A5)。
 
-  /** place モード: 選んだセル(足元+隣接)へ罠を設置する(1ターン)。 */
-  function placeTrapAt(c: Cell): void {
+  /** 罠を編むランクごとの威力・装填クールダウン(rogue-27)。index はランク−1。 */
+  const WEAVE_POWER = [8, 10, 12];
+  const WEAVE_COOLDOWN = [10, 8, 6];
+
+  /**
+   * place モード: 選んだセル(足元+隣接)へ罠師「罠編み」の罠を編む(1ターン)。
+   * 条件(rankOf(wanaAmi)>=1・trapCooldown===0・自分の罠数<同時数)は weaveTrap
+   * (モード入場)側で既に確認済みだが、モード中に装備やランクが変わりうるので
+   * ここでも再確認する(壊れた指し先の安全弁)。
+   */
+  function weaveTrapAt(c: Cell): void {
     const s = get();
-    if (s.placeIndex === null) return;
-    const stack = s.player.pack[s.placeIndex];
-    if (!stack || ITEMS[stack.item].kind !== 'trap') {
-      set({ uiMode: 'walk', placeIndex: null }); // pack が変わって指し先が壊れた
+    const rank = rankOf(s.skillEquipped, 'wanaAmi');
+    if (rank < 1 || s.trapCooldown > 0 || s.traps.length >= rank) {
+      set({ uiMode: 'walk' }); // 前提が崩れた(ランク低下・CD再発生・上限到達)
       return;
     }
     const k = cellKey(c);
     if (!placeableCells(s).some((x) => cellKey(x) === k)) return;
-    const player = s.player;
-    player.pack.splice(s.placeIndex, 1);
     set({
-      traps: [
-        ...s.traps,
-        { id: deviceSeq++, item: stack.item, kind: ITEMS[stack.item].trap!, q: stack.q, pos: c },
-      ],
-      player: { ...player, pack: [...player.pack] },
+      traps: [...s.traps, { id: deviceSeq++, pos: c, power: WEAVE_POWER[rank - 1] }],
+      trapCooldown: WEAVE_COOLDOWN[rank - 1],
       uiMode: 'walk',
-      placeIndex: null,
     });
     sfx.play('place');
-    pushLog(`${itemLabel(stack)} を設置した`);
+    pushLog('罠を編んだ');
     combat.beastsTurn();
     stratum.endTurn();
     move.settleAfterAction();
@@ -487,10 +529,10 @@ export const useRogue = create<RogueState>((set, get) => {
     RogueState,
     | 'seed' | 'dungeon' | 'discovered' | 'discoveredRev' | 'player' | 'beasts' | 'items'
     | 'traps' | 'turrets' | 'decoys' | 'lightLevel'
-    | 'turn' | 'kills' | 'maxDepth' | 'stratum' | 'phase' | 'busy' | 'uiMode' | 'placeIndex' | 'reach'
+    | 'turn' | 'kills' | 'maxDepth' | 'stratum' | 'phase' | 'busy' | 'uiMode' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'armedKey' | 'focus' | 'log' | 'fx'
     | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
-    | 'skillSlots' | 'skillEquipped' | 'skillDraft' | 'skillOutfitting'
+    | 'skillSlots' | 'skillEquipped' | 'skillDraft' | 'skillFreePick' | 'trapCooldown' | 'skillOutfitting'
   > {
     clearUnitAnims();
     runSeq++;
@@ -500,7 +542,12 @@ export const useRogue = create<RogueState>((set, get) => {
     // 支度(rogue-23): 解禁済みノードが1つ以上あればラン開始直後に自由装着パネルを開く
     // (マスタリー未育成の初回プレイヤーには出ない)。開いている間はゲーム操作をブロック。
     // skillEquipped はこの直後に空へリセットするので、ここでは絞り込まず単純に見る。
-    const outfitting = unlockedNodes(masteryLevels(masteryStore.readMastery())).length > 0;
+    // rogue-27: wanaAmi(罠編み)ランクIは系統レベル0でも解禁済みという特別な閾値を持つため
+    // takeable([], levels) だけで判定すると真にマスタリー0のプレイヤーにも支度が開いてしまう
+    // — hasAnyMastery(何か1つでも系統が育っているか)を併せて見て、真にマスタリー0の
+    // プレイヤー・ボット・ゴールデンテストの操作列を守る(mastery.ts の hasAnyMastery 参照)。
+    const levels0 = masteryLevels(masteryStore.readMastery());
+    const outfitting = hasAnyMastery(levels0) && takeable([], levels0).length > 0;
     const dungeon = createDungeon(seed);
     // 入口に水薬をひとつ(手触り確認と「拾える」ことの提示)。
     const entrance = dungeon.chambers[0];
@@ -533,7 +580,6 @@ export const useRogue = create<RogueState>((set, get) => {
           { item: 'potion', q: 0 },
           { item: 'knife', q: 0 },
           { item: 'knife', q: 0 },
-          { item: 'trapSpike', q: 0 },
         ],
       },
       lightLevel: 1,
@@ -549,11 +595,12 @@ export const useRogue = create<RogueState>((set, get) => {
       skillSlots: 2,
       skillEquipped: [],
       skillDraft: null,
+      skillFreePick: false,
+      trapCooldown: 0,
       skillOutfitting: outfitting,
       phase: 'play',
       busy: outfitting, // 支度パネルが開いている間はゲーム操作をブロック
       uiMode: 'walk',
-      placeIndex: null,
       reach: { cells: [], parent: new Map() },
       hoverMarker: null,
       hoverBeastId: null,
@@ -642,11 +689,12 @@ export const useRogue = create<RogueState>((set, get) => {
         skillSlots: d.skillSlots,
         skillEquipped: d.skillEquipped,
         skillDraft: d.skillDraft,
+        skillFreePick: d.skillFreePick,
+        trapCooldown: d.trapCooldown,
         skillOutfitting: false,
         phase: 'play',
         busy: d.skillDraft !== null,
         uiMode: 'walk',
-        placeIndex: null,
         reach: { cells: [], parent: new Map() },
         hoverMarker: null,
         hoverBeastId: null,
@@ -691,8 +739,9 @@ export const useRogue = create<RogueState>((set, get) => {
       if (!stack) return;
       const def = ITEMS[stack.item];
       const player = s.player;
-      // 設置先選択中に別のアイテムを使ったら選択を解く(pack の index がずれるため)。
-      if (s.uiMode === 'place' && def.kind !== 'trap') set({ uiMode: 'walk', placeIndex: null });
+      // 罠編みの設置先選択中に所持品を使ったら選択を解く(rogue-27: 罠アイテムは廃止済みで
+      // 'place' は罠編み専用のため、ここでは常に解除する)。
+      if (s.uiMode === 'place') set({ uiMode: 'walk' });
 
       // 遺物(rogue-25): 使用・装備・合成不可。ログのみでターン消費なし。
       if (def.kind === 'relic') {
@@ -745,7 +794,7 @@ export const useRogue = create<RogueState>((set, get) => {
         codexStore.recordItemFound(stack.item, stack.q); // アイテム図鑑(rogue-25)
         // 両手武器(rogue-22)は盾と併用できない。装備中の盾は自動で外して pack へ。
         // ただし片手扱い(katate・rogue-23)を装着中は両手武器+盾の併用が許される。
-        if (def.twoHanded && player.shield && !s.skillEquipped.includes('katate')) {
+        if (def.twoHanded && player.shield && rankOf(s.skillEquipped, 'katate') < 1) {
           player.pack.push(player.shield);
           player.shield = null;
           pushLog('盾を背負い直した(両手持ち)');
@@ -766,7 +815,7 @@ export const useRogue = create<RogueState>((set, get) => {
       if (def.kind === 'shield') {
         // 両手武器(rogue-22)を装備中は盾を持てない(両手がふさがっている)。
         // 片手扱い(katate・rogue-23)を装着中はこの制約が外れる。
-        if (player.weapon && ITEMS[player.weapon.item].twoHanded && !s.skillEquipped.includes('katate')) {
+        if (player.weapon && ITEMS[player.weapon.item].twoHanded && rankOf(s.skillEquipped, 'katate') < 1) {
           pushLog('両手がふさがっている(武器を外せば装備できる)');
           return;
         }
@@ -780,17 +829,6 @@ export const useRogue = create<RogueState>((set, get) => {
         return;
       }
 
-      // 罠: 設置先の選択モードへ(足元+隣接の橙マーカーから選ぶ。もう一度クリックで解除)。
-      if (def.kind === 'trap') {
-        if (s.uiMode === 'place' && s.placeIndex === index) {
-          get().cancelThrow();
-          return;
-        }
-        sfx.play('select');
-        pushLog('罠の設置: 足元か隣の橙マーカーをクリック(所持品クリックで解除)');
-        set({ uiMode: 'place', placeIndex: index });
-        return;
-      }
 
       // 設置系: 砲塔・囮を足元へ(1ターン消費)。
       if (def.kind === 'turret' || def.kind === 'decoy') {
@@ -859,6 +897,40 @@ export const useRogue = create<RogueState>((set, get) => {
     // 動く(busy 相当のゲーム操作ブロック中でも、この4つだけは通す)。
     ...skills.actions,
 
+    weaveTrap: () => {
+      logAction('WV');
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (s.uiMode === 'place') {
+        get().cancelThrow(); // もう一度呼ぶと解除(投擲モードと同じ経路)
+        return;
+      }
+      const rank = rankOf(s.skillEquipped, 'wanaAmi');
+      if (rank < 1) return;
+      if (s.trapCooldown > 0) {
+        pushLog('まだ装填が終わっていない');
+        return;
+      }
+      if (s.traps.length >= rank) {
+        pushLog(`罠は同時に${rank}個までしか編めない`);
+        return;
+      }
+      sfx.play('select');
+      pushLog('罠を編む: 足元か隣の橙マーカーをクリック(もう一度押すと解除)');
+      set({ uiMode: 'place' });
+    },
+
+    detonateTrap: (id) => {
+      logAction('DT', id);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (rankOf(s.skillEquipped, 'wanaAmi') < 3) return;
+      if (!combat.detonateTrap(id)) return;
+      combat.beastsTurn();
+      stratum.endTurn();
+      move.settleAfterAction();
+    },
+
     mergeItem: (index) => {
       logAction('M', index);
       const s = get();
@@ -895,7 +967,7 @@ export const useRogue = create<RogueState>((set, get) => {
       const s = get();
       if (s.phase !== 'play') return;
       // 消灯(rogue-24): hiShobo 装着中のみ 0→1→2→3→0 の4循環。未装着は従来の3循環。
-      const cycle = s.skillEquipped.includes('hiShobo') ? 4 : 3;
+      const cycle = rankOf(s.skillEquipped, 'hiShobo') >= 1 ? 4 : 3;
       const l = ((s.lightLevel + 1) % cycle) as LightLevel;
       set({ lightLevel: l });
       sfx.play('select');
@@ -912,7 +984,7 @@ export const useRogue = create<RogueState>((set, get) => {
       logAction('X');
       if (get().uiMode === 'walk') return;
       sfx.play('cancel');
-      set({ uiMode: 'walk', placeIndex: null });
+      set({ uiMode: 'walk' });
     },
 
     setArmed: (key) => {

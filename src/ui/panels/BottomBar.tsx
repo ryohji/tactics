@@ -1,4 +1,4 @@
-import { useRogue, depthOf, STRATUM_DEPTH } from '../../state/rogue';
+import { useRogue, depthOf, STRATUM_DEPTH, rankOf } from '../../state/rogue';
 
 /** 脱出ボタン(rogue-25・push-your-luck の自発的終点)。警告帯(深度が
  * 8*(stratum+1) 以上・崩落ライン未満)に居る間だけ表示する。確認モーダルは
@@ -21,6 +21,34 @@ function EscapeButton({ busy, onClick }: { busy: boolean; onClick: () => void })
       title="地表へ戻ってランを終える(持ち物の琥珀を確定して持ち帰る)"
     >
       ⛏脱出
+    </button>
+  );
+}
+
+/** 罠編みボタン(rogue-27)。wanaAmi ランクI以上で表示。装填中は無効化。 */
+function WeaveTrapButton({ busy }: { busy: boolean }) {
+  const skillEquipped = useRogue((s) => s.skillEquipped);
+  const trapCooldown = useRogue((s) => s.trapCooldown);
+  const traps = useRogue((s) => s.traps);
+  const weaveTrap = useRogue((s) => s.weaveTrap);
+  const uiMode = useRogue((s) => s.uiMode);
+  const rank = rankOf(skillEquipped, 'wanaAmi');
+  if (rank < 1) return null;
+
+  const maxSimultaneous = rank;
+  const atCapacity = traps.length >= maxSimultaneous;
+  const isActive = uiMode === 'place';
+  const isDisabled = busy || trapCooldown > 0 || atCapacity;
+
+  return (
+    <button
+      className={`weave-trap-btn${isActive ? ' active' : ''}`}
+      disabled={isDisabled}
+      onClick={weaveTrap}
+      title={`罠を編む(同時${maxSimultaneous}個)`}
+    >
+      🕸
+      {trapCooldown > 0 && <span className="cooldown">{trapCooldown}</span>}
     </button>
   );
 }
@@ -86,6 +114,7 @@ export function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
           <button disabled={busy} onClick={wait}>
             待機
           </button>
+          <WeaveTrapButton busy={busy} />
           <button onClick={toggleMap} title="マップ(M)">
             🗺
           </button>

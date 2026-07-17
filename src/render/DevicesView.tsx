@@ -1,37 +1,32 @@
-// 設置物の描画(rogue-4)。罠(種別ごとの色の棘付き円盤)・魔導砲塔(砲身つき塔)・
+// 設置物の描画(rogue-4)。罠(棘付き円盤)・魔導砲塔(砲身つき塔)・
 // 囮人形(藁色のプレイヤー風)。すべて自分が置いたものなので常時見える。
+// rogue-27: 罠は罠師「罠編み」のスキル化で単一種になった(種別色は廃止)。
 
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { worldPos } from '../model/fcc';
-import { useRogue, ROGUE_S, type PlacedTrap, type Turret, type Decoy } from '../state/rogue';
-import type { TrapKind } from '../model/loot';
+import { useRogue, ROGUE_S, rankOf, type PlacedTrap, type Turret, type Decoy } from '../state/rogue';
 
 const S = ROGUE_S;
 
-const TRAP_COLOR: Record<TrapKind, string> = {
-  spike: '#cbd5e1',
-  fire: '#fb923c',
-  confuse: '#f472b6',
-  fear: '#a78bfa',
-  sleep: '#60a5fa',
-};
-
 function TrapMesh({ t }: { t: PlacedTrap }) {
   const w = worldPos(t.pos[0], t.pos[1], t.pos[2], S);
-  const color = TRAP_COLOR[t.kind];
-  // 遠隔回収(rogue-24: wanaKaishu)。装着中のみクリックで回収(判定は store 側でも二重に守る)。
+  const color = '#cbd5e1';
+  // 罠編みランクII=クリックで回収(罠を解く)/ ランクIII=修飾なしクリックで起爆・
+  // Shift+クリックで回収(rogue-27。見た目の仕上げは S3)。判定は store 側でも二重に守る。
   const recoverTrap = useRogue((s) => s.recoverTrap);
-  const canRecover = useRogue((s) => s.skillEquipped.includes('wanaKaishu'));
+  const detonateTrap = useRogue((s) => s.detonateTrap);
+  const rank = useRogue((s) => rankOf(s.skillEquipped, 'wanaAmi'));
   return (
     <group
       position={[w.x, w.y - 0.3 * S, w.z]}
       onClick={
-        canRecover
+        rank >= 2
           ? (e) => {
               e.stopPropagation();
-              recoverTrap(t.id);
+              if (rank >= 3 && !e.nativeEvent.shiftKey) detonateTrap(t.id);
+              else recoverTrap(t.id);
             }
           : undefined
       }

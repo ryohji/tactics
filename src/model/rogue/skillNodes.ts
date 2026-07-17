@@ -1,5 +1,13 @@
 // スキルノードのデータ表(render/beastModels.ts と同じデータ表分離の流儀)。
-// マスタリー系統・ノード id・効果定義・解禁要件を一元管理する。
+// マスタリー系統・ノード id・効果定義・解禁要件を一元管理する(rogue-27: 体系v2)。
+//
+// rogue-27 でノードを「ライン」(ランクI〜III・段階的に強化)と「単発」(ランクIのみ)に
+// 再編した。ライン7本(研鑽・盾術・硬化・拳打・身軽・忍び足・罠編み)は unlockLevels/costs/
+// descs が長さ3、単発13本は長さ1。旧 rogue-23/24 の unlockLevel/cost(単一値)は廃止。
+//
+// 廃止 id(rogue-26 まで): ukekaeshi(→jutsu ランクII の受け反撃に統合)・
+// kenMikiri(→kenMigaru ランクII の見切りに統合)・shinKehai(→shinShinobi ランクII の
+// 追跡諦め距離強化に統合)・wanaTsuyoka/wanaKaishu/wanaRensa(→wanaAmi ランクI/II/III に統合)。
 
 /** マスタリー系統。 */
 export type MasterySystem = 'arms' | 'guard' | 'carapace' | 'fist' | 'stealth' | 'trapper' | 'light';
@@ -15,297 +23,368 @@ export const MASTERY_NAME: Record<MasterySystem, string> = {
   light: '灯火',
 };
 
-/** スキルノード id(rogue-23 の7個 + rogue-24 の18個 = 25個)。 */
+/** スキルノード id(rogue-27: ライン7 + 単発13 = 20個)。 */
 export type NodeId =
+  // --- arms(武技) ---
   | 'kensan'
   | 'ryote'
   | 'katate'
+  // --- guard(盾) ---
   | 'jutsu'
-  | 'ukekaeshi'
+  | 'tateKakage'
+  // --- carapace(甲殻) ---
   | 'kouka'
   | 'tenka'
-  // rogue-24: 拳闘(fist)
+  // --- fist(拳闘) ---
   | 'kenPunch'
   | 'kenMigaru'
-  | 'kenMikiri'
   | 'kenMuku'
   | 'kenHaisui'
-  // rogue-24: 隠密(stealth)
+  // --- stealth(隠密) ---
   | 'shinShinobi'
   | 'shinMekiki'
   | 'shinSegiri'
-  | 'shinKehai'
-  // rogue-24: 罠師(trapper)
-  | 'wanaTsuyoka'
-  | 'wanaKaishu'
-  | 'wanaRensa'
+  // --- trapper(罠師) ---
+  | 'wanaAmi'
   | 'knifeRico'
-  // rogue-24: 灯火(light)
+  // --- light(灯火) ---
   | 'hiShibori'
   | 'hiKagari'
-  | 'hiShobo'
   | 'hiEnjin'
-  // rogue-24: 盾(guard)
-  | 'tateKakage';
+  | 'hiShobo';
 
 export const NODE_IDS: NodeId[] = [
   'kensan',
   'ryote',
   'katate',
   'jutsu',
-  'ukekaeshi',
+  'tateKakage',
   'kouka',
   'tenka',
   'kenPunch',
   'kenMigaru',
-  'kenMikiri',
   'kenMuku',
   'kenHaisui',
   'shinShinobi',
   'shinMekiki',
   'shinSegiri',
-  'shinKehai',
-  'wanaTsuyoka',
-  'wanaKaishu',
-  'wanaRensa',
+  'wanaAmi',
   'knifeRico',
   'hiShibori',
   'hiKagari',
-  'hiShobo',
   'hiEnjin',
-  'tateKakage',
+  'hiShobo',
 ];
 
 export interface SkillNode {
   id: NodeId;
   system: MasterySystem;
-  /** 解禁に要るその系統のマスタリーレベル。 */
-  unlockLevel: number;
-  /** スロットコスト(1〜3)。 */
-  cost: number;
   name: string;
-  /** 効果の1行説明(UI表示用)。 */
-  desc: string;
+  /** ランク r の解禁に要る系統Lv(単発は長さ1)。wanaAmi は [0,1,2](ランクIは Lv0=最初から)。 */
+  unlockLevels: number[];
+  /** ランク r までの累計コスト(単発は長さ1)。ライン=[1,2,3]。 */
+  costs: number[];
+  /** ランクごとの効果1行(UI と図鑑で使う)。 */
+  descs: string[];
 }
 
 export const SKILL_NODES: Record<NodeId, SkillNode> = {
+  // --- arms(武技) ---------------------------------------------------------------
   kensan: {
     id: 'kensan',
     system: 'arms',
-    unlockLevel: 1,
-    cost: 1,
     name: '研鑽',
-    desc: '武器の攻撃+1',
+    unlockLevels: [1, 2, 3],
+    costs: [1, 2, 3],
+    descs: ['武器の攻撃+1', '攻撃+2', '攻撃+3'],
   },
   ryote: {
     id: 'ryote',
     system: 'arms',
-    unlockLevel: 2,
-    cost: 2,
     name: '両手保持',
-    desc: '片手武器を装備し盾スロットが空のとき攻撃+2',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['片手武器を装備し盾スロットが空のとき攻撃+2'],
   },
   katate: {
     id: 'katate',
     system: 'arms',
-    unlockLevel: 3,
-    cost: 2,
     name: '片手扱い',
+    unlockLevels: [3],
+    costs: [2],
     // 命中制はまだ無いので攻撃減で代替する(将来、命中率を導入したら命中−へ置換する)。
-    desc: '両手武器でも盾を装備できる(その間、攻撃−2)',
+    descs: ['両手武器でも盾を装備できる(その間、攻撃−2)'],
   },
+
+  // --- guard(盾) -----------------------------------------------------------------
   jutsu: {
     id: 'jutsu',
     system: 'guard',
-    unlockLevel: 1,
-    cost: 1,
     name: '盾術',
-    desc: '盾装備中の回避+5%',
+    unlockLevels: [1, 2, 3],
+    costs: [1, 2, 3],
+    descs: [
+      '盾装備中の回避+5%',
+      '回避+8%・受け反撃(隣接の攻撃者へ攻の半分)',
+      '回避+12%・反撃は攻の3/4',
+    ],
   },
-  ukekaeshi: {
-    id: 'ukekaeshi',
+  tateKakage: {
+    id: 'tateKakage',
     system: 'guard',
-    unlockLevel: 2,
-    cost: 2,
-    name: '受け反撃',
-    // 反撃自体は乱数を引かない固定値(戦闘の乱数列を守るため)。反撃系(kenMikiri)と排他。
-    desc: '回避成功時、攻撃者へ攻撃力半分の固定反撃(見切りと同時装着不可)',
+    name: '掲盾',
+    unlockLevels: [2],
+    costs: [1],
+    descs: ['盾装備中、遠隔攻撃への回避+20%(近接には効かない)'],
   },
+
+  // --- carapace(甲殻) -------------------------------------------------------------
   kouka: {
     id: 'kouka',
     system: 'carapace',
-    unlockLevel: 1,
-    cost: 1,
     name: '硬化',
-    desc: '障壁が1以上ある間、被ダメージ−1(最低1)',
+    unlockLevels: [1, 2, 3],
+    costs: [1, 2, 3],
+    descs: [
+      '障壁が1以上ある間、被ダメージ−1(最低1)',
+      '被ダメージ−2(最低1)',
+      'さらに砕殻: 障壁が砕けた瞬間、隣接の敵へ攻の半分の固定ダメージ',
+    ],
   },
   tenka: {
     id: 'tenka',
     system: 'carapace',
-    unlockLevel: 2,
-    cost: 2,
     name: '転化',
-    desc: 'HP満タン時の自然回復ティックが障壁+1に変わる(上限24)',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['HP満タン時の自然回復ティックが障壁+1に変わる(上限24)'],
   },
 
-  // --- rogue-24: 拳闘(素手討伐で育つ) ---------------------------------------------
+  // --- fist(拳闘) ------------------------------------------------------------------
   kenPunch: {
     id: 'kenPunch',
     system: 'fist',
-    unlockLevel: 1,
-    cost: 1,
     name: '拳打',
-    desc: '素手時、攻撃+3',
+    unlockLevels: [1, 2, 3],
+    costs: [1, 2, 3],
+    descs: ['素手時、攻撃+3', '素手時、攻撃+5', '素手時、攻撃+7'],
   },
   kenMigaru: {
     id: 'kenMigaru',
     system: 'fist',
-    unlockLevel: 1,
-    cost: 1,
     name: '身軽',
-    desc: '素手時、回避+10%(盾不要)',
-  },
-  kenMikiri: {
-    id: 'kenMikiri',
-    system: 'fist',
-    unlockLevel: 2,
-    cost: 2,
-    name: '見切り',
-    desc: '素手時、回避成功で攻撃力半分の固定反撃(受け反撃と同時装着不可)',
+    unlockLevels: [1, 2, 3],
+    costs: [1, 2, 3],
+    descs: [
+      '素手時、回避+10%(盾不要)',
+      'さらに見切り: 回避成功で隣接の攻撃者へ攻の半分の固定反撃',
+      '回避+15%',
+    ],
   },
   kenMuku: {
     id: 'kenMuku',
     system: 'fist',
-    unlockLevel: 2,
-    cost: 2,
     name: '無傷の型',
-    desc: 'HP満タンで攻撃+2',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['HP満タンで攻撃+2'],
   },
   kenHaisui: {
     id: 'kenHaisui',
     system: 'fist',
-    unlockLevel: 3,
-    cost: 3,
     name: '背水',
-    desc: 'HP25%以下かつ障壁0のとき、回避+25%・攻撃+3',
+    unlockLevels: [3],
+    costs: [3],
+    descs: ['HP25%以下かつ障壁0のとき、回避+25%・攻撃+3'],
   },
 
-  // --- rogue-24: 隠密(未覚醒討伐で育つ) -------------------------------------------
+  // --- stealth(隠密) ---------------------------------------------------------------
   shinShinobi: {
     id: 'shinShinobi',
     system: 'stealth',
-    unlockLevel: 1,
-    cost: 1,
     name: '忍び足',
-    desc: '敵の気づく距離−20%',
+    unlockLevels: [1, 2, 3],
+    costs: [1, 2, 3],
+    descs: [
+      '敵の気づく距離−20%',
+      'さらに追跡を諦める距離−25%',
+      '気づく距離−35%・諦める距離−40%',
+    ],
   },
   shinMekiki: {
     id: 'shinMekiki',
     system: 'stealth',
-    unlockLevel: 1,
-    cost: 1,
     name: '目利き',
-    desc: '敵ホバーの情報に持ち物を表示する',
+    unlockLevels: [1],
+    costs: [1],
+    descs: ['敵ホバーの情報に持ち物を表示する'],
   },
   shinSegiri: {
     id: 'shinSegiri',
     system: 'stealth',
-    unlockLevel: 2,
-    cost: 2,
     name: '背討ち',
-    desc: '未覚醒の敵への近接攻撃ダメージ×2(気配感知の敵には無効)',
-  },
-  shinKehai: {
-    id: 'shinKehai',
-    system: 'stealth',
-    unlockLevel: 2,
-    cost: 1,
-    name: '気配遮断',
-    desc: '敵が追跡を諦める距離−25%',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['未覚醒の敵への近接攻撃ダメージ×2(気配感知の敵には無効)'],
   },
 
-  // --- rogue-24: 罠師(罠での討伐・発動で育つ) -------------------------------------
-  wanaTsuyoka: {
-    id: 'wanaTsuyoka',
+  // --- trapper(罠師) --------------------------------------------------------------
+  wanaAmi: {
+    id: 'wanaAmi',
     system: 'trapper',
-    unlockLevel: 1,
-    cost: 1,
-    name: '罠強化',
-    desc: '罠の威力・持続を品質+1相当で扱う',
-  },
-  wanaKaishu: {
-    id: 'wanaKaishu',
-    system: 'trapper',
-    unlockLevel: 2,
-    cost: 2,
-    name: '遠隔回収',
-    desc: '設置済みの自分の罠をクリックで回収できる(1ターン消費)',
-  },
-  wanaRensa: {
-    id: 'wanaRensa',
-    system: 'trapper',
-    unlockLevel: 3,
-    cost: 2,
-    name: '連鎖',
-    desc: '罠発動時、隣接セルの自分の罠も誘爆する',
+    name: '罠編み',
+    unlockLevels: [0, 1, 2],
+    costs: [1, 2, 3],
+    descs: [
+      '棘の罠を編める(威力8・装填10ターン・同時1)',
+      '威力10・装填8・同時2・回収=即時再装填',
+      '威力12・装填6・同時3・連鎖誘爆・遠隔起爆',
+    ],
   },
   knifeRico: {
     id: 'knifeRico',
     system: 'trapper',
-    unlockLevel: 2,
-    cost: 2,
     name: '跳弾',
-    desc: '投げナイフ命中時、対象に隣接する敵1体へ半分ダメージ',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['投げナイフ命中時、対象に隣接する敵1体へ半分ダメージ'],
   },
 
-  // --- rogue-24: 灯火(暗い明かりでの層通過で育つ) ---------------------------------
+  // --- light(灯火) -----------------------------------------------------------------
   hiShibori: {
     id: 'hiShibori',
     system: 'light',
-    unlockLevel: 1,
-    cost: 1,
     name: '絞り撃ち',
-    desc: '「絞る」以下の明かりで攻撃+2',
+    unlockLevels: [1],
+    costs: [1],
+    descs: ['「絞る」以下の明かりで攻撃+2'],
   },
   hiKagari: {
     id: 'hiKagari',
     system: 'light',
-    unlockLevel: 1,
-    cost: 1,
     name: '篝火',
-    desc: '「広げる」中の自然回復間隔−1ターン(最低2)',
-  },
-  hiShobo: {
-    id: 'hiShobo',
-    system: 'light',
-    unlockLevel: 2,
-    cost: 3,
-    name: '消灯',
-    desc: '明かりの4段階目「消す」を解禁する(視界2・回復なし・気づかれにくい)',
+    unlockLevels: [1],
+    costs: [1],
+    descs: ['「広げる」中の自然回復間隔−1ターン(最低2)'],
   },
   hiEnjin: {
     id: 'hiEnjin',
     system: 'light',
-    unlockLevel: 2,
-    cost: 2,
     name: '延焼の刃',
-    desc: '近接攻撃の命中時30%で敵を延焼させる(2ターン)',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['近接攻撃の命中時30%で敵を延焼させる(2ターン)'],
   },
-
-  // --- rogue-24: 盾(対遠隔の対抗ノード) -------------------------------------------
-  tateKakage: {
-    id: 'tateKakage',
-    system: 'guard',
-    unlockLevel: 2,
-    cost: 1,
-    name: '掲盾',
-    desc: '盾装備中、遠隔攻撃への回避+20%(近接には効かない)',
+  hiShobo: {
+    id: 'hiShobo',
+    system: 'light',
+    name: '消灯',
+    unlockLevels: [2],
+    costs: [3],
+    descs: ['明かりの4段階目「消す」を解禁する(視界2・回復なし・気づかれにくい)'],
   },
 };
 
+/** 装着中スキル。rank は 1..maxRank(id)。 */
+export interface EquippedSkill {
+  id: NodeId;
+  rank: number;
+}
+
+/** ノードの最大ランク(unlockLevels の長さ)。 */
+export function maxRank(id: NodeId): number {
+  return SKILL_NODES[id].unlockLevels.length;
+}
+
+/** 装着中スキル列から id の現在ランクを引く(未装着=0)。 */
+export function rankOf(eq: readonly EquippedSkill[], id: NodeId): number {
+  return eq.find((e) => e.id === id)?.rank ?? 0;
+}
+
 /**
- * 反撃系ノード(同時装着不可)。ukekaeshi(受け反撃)と kenMikiri(見切り)は
- * どちらも「回避成功時に固定反撃」という同種の効果なので併用させない。
- * equipSkill(state/rogue.ts)がこの集合を見て装着UIで弾く。
+ * 結び: 親2ノードを(所定ランク以上で)同時装着すると自動発動する(コスト0)。
+ * 効果の配線は S2(本ファイルはデータ表と knotActive のみ)。
  */
-export const COUNTER_NODES: readonly NodeId[] = ['ukekaeshi', 'kenMikiri'];
+export type KnotId = 'yamiuchi' | 'kakei' | 'nemuriito' | 'rentetsu' | 'kouken' | 'yagaeshi';
+
+export interface Knot {
+  id: KnotId;
+  name: string;
+  desc: string;
+  parents: readonly [readonly [NodeId, number], readonly [NodeId, number]];
+}
+
+export const KNOTS: Record<KnotId, Knot> = {
+  yamiuchi: {
+    id: 'yamiuchi',
+    name: '闇討ち',
+    desc: '消灯中の背討ちは一般敵を即死させる(門番・強化個体・気配感知には効かない)',
+    parents: [
+      ['shinSegiri', 1],
+      ['hiShobo', 1],
+    ],
+  },
+  kakei: {
+    id: 'kakei',
+    name: '火計',
+    desc: '罠の発動が延焼(2ターン)を確定付与',
+    parents: [
+      ['wanaAmi', 1],
+      ['hiEnjin', 1],
+    ],
+  },
+  nemuriito: {
+    id: 'nemuriito',
+    name: '眠り糸',
+    desc: '罠がダメージ後、生き残った敵を昏睡(2ターン)させる',
+    parents: [
+      ['wanaAmi', 1],
+      ['shinShinobi', 1],
+    ],
+  },
+  rentetsu: {
+    id: 'rentetsu',
+    name: '錬鉄の受け',
+    desc: '回避成功時に障壁+1(上限24)',
+    parents: [
+      ['jutsu', 1],
+      ['kouka', 1],
+    ],
+  },
+  kouken: {
+    id: 'kouken',
+    name: '甲拳',
+    desc: '障壁が1以上ある間、素手攻撃+2',
+    parents: [
+      ['kenPunch', 1],
+      ['kouka', 1],
+    ],
+  },
+  yagaeshi: {
+    id: 'yagaeshi',
+    name: '矢返し',
+    desc: '遠隔攻撃の回避成功時、離れた射手にも受け反撃が届く',
+    parents: [
+      ['tateKakage', 1],
+      ['jutsu', 2],
+    ],
+  },
+};
+
+/** 結びが発動中か(両親を所定ランク以上で装着中)。 */
+export function knotActive(eq: readonly EquippedSkill[], id: KnotId): boolean {
+  const [[a, aMin], [b, bMin]] = KNOTS[id].parents;
+  return rankOf(eq, a) >= aMin && rankOf(eq, b) >= bMin;
+}
+
+/** 排他: 両方を所定ランク以上で装着することはできない。 */
+export const EXCLUDES: readonly (readonly [readonly [NodeId, number], readonly [NodeId, number]])[] = [
+  [
+    ['jutsu', 2],
+    ['kenMigaru', 2],
+  ], // 反撃は1本
+  [
+    ['kenMuku', 1],
+    ['kenHaisui', 1],
+  ], // 完璧主義 vs 捨て身
+];

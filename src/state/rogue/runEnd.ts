@@ -21,6 +21,7 @@ import * as bgm from '../../audio/bgm';
 import type { SfxName } from '../../audio/sfx';
 import { GAME_VERSION, STRATUM_DEPTH } from '../../model/rogue/types';
 import { depthOf, isoDate, dailySeed } from '../../model/rogue/rules';
+import { formatEquippedForRecord } from '../../model/rogue/mastery';
 
 export interface RunEndDeps {
   set: StoreApi<RogueState>['setState'];
@@ -44,6 +45,9 @@ export function createRunEnd(deps: RunEndDeps) {
   function recordRun(escaped: boolean): void {
     const s = get();
     const prevBest = history.readHistory().reduce((max, r) => Math.max(max, r.maxDepth), 0);
+    // rogue-27: 装着スキルはランク付き(EquippedSkill)。記録形式は "id:rank" 文字列
+    // (表示側は ':' で分解して名前+ランクバッジにする)。
+    const skillsForRecord = formatEquippedForRecord(s.skillEquipped);
     history.appendRun({
       v: GAME_VERSION,
       seed: s.seed,
@@ -54,7 +58,7 @@ export function createRunEnd(deps: RunEndDeps) {
       stratum: s.stratum,
       deathCause: escaped ? '生還' : (s.deathCause ?? '不明'),
       daily: s.seed === dailySeed(new Date()),
-      skills: s.skillEquipped,
+      skills: skillsForRecord,
       escaped,
     });
     if (s.maxDepth > prevBest) pushLog('自己ベスト更新!');
@@ -69,7 +73,7 @@ export function createRunEnd(deps: RunEndDeps) {
           maxDepth: s.maxDepth,
           stratum: s.stratum,
           deathCause: s.deathCause,
-          skillEquipped: s.skillEquipped,
+          skillEquipped: skillsForRecord,
         },
         {
           runId: scoreboard.getRunId(),

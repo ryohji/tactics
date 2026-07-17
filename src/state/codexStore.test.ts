@@ -84,6 +84,21 @@ describe('codexStore(図鑑・実績の永続化)', () => {
     expect(readCodex()).toEqual(INITIAL_CODEX);
   });
 
+  it('rogue-27: 保存済みデータに残る廃止アイテム id(trapSpike 等)は読み込み時にフィルタされる', () => {
+    const s = memStorage();
+    s.setItem(
+      'fcc-rogue-codex-v1',
+      JSON.stringify({
+        ...INITIAL_CODEX,
+        items: { sword: { found: 2, bestQ: 1 }, trapSpike: { found: 5, bestQ: 2 } },
+      }),
+    );
+    setCodexStorageForTest(s);
+    const c = readCodex();
+    expect(c.items.sword).toEqual({ found: 2, bestQ: 1 }); // 既知 id は保持
+    expect('trapSpike' in c.items).toBe(false); // 未知 id は落とす
+  });
+
   it('storage が無い(Node 環境相当)なら no-op で例外を投げない', () => {
     setCodexStorageForTest(null);
     expect(() => recordBeastKill('bat', 1)).not.toThrow();

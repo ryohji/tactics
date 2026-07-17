@@ -1,9 +1,10 @@
 // isoDate・dailySeed(rogue-20「本日の迷宮」)の純関数テスト。
+// playerAtk/playerEvade は rogue-27 でランク付き(EquippedSkill)へ移行。
 
 import { describe, it, expect } from 'vitest';
 import { isoDate, dailySeed, playerAtk, playerEvade } from './rules';
 import type { PlayerState } from './types';
-import type { NodeId } from './mastery';
+import type { EquippedSkill, NodeId } from './mastery';
 
 function basePlayer(overrides: Partial<PlayerState> = {}): PlayerState {
   return {
@@ -19,6 +20,11 @@ function basePlayer(overrides: Partial<PlayerState> = {}): PlayerState {
     immune: 0,
     ...overrides,
   };
+}
+
+/** id・rank から EquippedSkill 配列を組む(テスト用の簡略記法)。 */
+function eq(...entries: [NodeId, number][]): EquippedSkill[] {
+  return entries.map(([id, rank]) => ({ id, rank }));
 }
 
 describe('isoDate', () => {
@@ -56,49 +62,52 @@ describe('playerEvade(盾の回避%。rogue-22)', () => {
   });
 });
 
-describe('スキルノードの効果(rogue-23)', () => {
+describe('スキルノードの効果(rogue-23。rogue-27でランク制)', () => {
   const dagger = { item: 'dagger', q: 0 } as const; // 片手武器
   const spear = { item: 'spear', q: 0 } as const; // 両手武器(twoHanded)
   const shield = { item: 'shield', q: 0 } as const;
-  const skills = (...ids: NodeId[]) => ids;
 
-  it('skills 省略時は素の値のまま(既存呼び出し元への後方互換)', () => {
+  it('eq 省略時は素の値のまま(既存呼び出し元への後方互換)', () => {
     const p = basePlayer({ weapon: dagger });
     expect(playerAtk(p)).toBe(playerAtk(p, []));
   });
 
-  it('kensan(研鑽): 武器装備中のみ攻撃+1(素手には効かない)', () => {
+  it('kensan(研鑽): 武器装備中のみ攻撃+ランク(1/2/3。素手には効かない)', () => {
     const armed = basePlayer({ weapon: dagger });
     const unarmed = basePlayer({ weapon: null });
-    expect(playerAtk(armed, skills('kensan'))).toBe(playerAtk(armed) + 1);
-    expect(playerAtk(unarmed, skills('kensan'))).toBe(playerAtk(unarmed));
+    expect(playerAtk(armed, eq(['kensan', 1]))).toBe(playerAtk(armed) + 1);
+    expect(playerAtk(armed, eq(['kensan', 2]))).toBe(playerAtk(armed) + 2);
+    expect(playerAtk(armed, eq(['kensan', 3]))).toBe(playerAtk(armed) + 3);
+    expect(playerAtk(unarmed, eq(['kensan', 1]))).toBe(playerAtk(unarmed));
   });
 
   it('ryote(両手保持): 片手武器・盾スロットが空のときだけ攻撃+2', () => {
     const bare = basePlayer({ weapon: dagger, shield: null });
     const withShield = basePlayer({ weapon: dagger, shield });
     const twoHanded = basePlayer({ weapon: spear, shield: null });
-    expect(playerAtk(bare, skills('ryote'))).toBe(playerAtk(bare) + 2);
-    expect(playerAtk(withShield, skills('ryote'))).toBe(playerAtk(withShield)); // 盾で埋まっていると発動しない
-    expect(playerAtk(twoHanded, skills('ryote'))).toBe(playerAtk(twoHanded)); // 両手武器には効かない
+    expect(playerAtk(bare, eq(['ryote', 1]))).toBe(playerAtk(bare) + 2);
+    expect(playerAtk(withShield, eq(['ryote', 1]))).toBe(playerAtk(withShield)); // 盾で埋まっていると発動しない
+    expect(playerAtk(twoHanded, eq(['ryote', 1]))).toBe(playerAtk(twoHanded)); // 両手武器には効かない
   });
 
   it('katate(片手扱い): 両手武器+盾の同時装備中のみ攻撃−2', () => {
     const dualWield = basePlayer({ weapon: spear, shield }); // katate があって初めて成立する組み合わせ
     const twoHandedOnly = basePlayer({ weapon: spear, shield: null });
-    expect(playerAtk(dualWield, skills('katate'))).toBe(playerAtk(dualWield) - 2);
-    expect(playerAtk(twoHandedOnly, skills('katate'))).toBe(playerAtk(twoHandedOnly)); // 盾が無ければ発動しない
+    expect(playerAtk(dualWield, eq(['katate', 1]))).toBe(playerAtk(dualWield) - 2);
+    expect(playerAtk(twoHandedOnly, eq(['katate', 1]))).toBe(playerAtk(twoHandedOnly)); // 盾が無ければ発動しない
   });
 
-  it('jutsu(盾術): 盾装備中の回避+5%(盾なしには効かない)', () => {
+  it('jutsu(盾術): 盾装備中の回避+ランク段階(5/8/12。盾なしには効かない)', () => {
     const withShield = basePlayer({ shield });
     const withoutShield = basePlayer({ shield: null });
-    expect(playerEvade(withShield, skills('jutsu'))).toBe(playerEvade(withShield) + 5);
-    expect(playerEvade(withoutShield, skills('jutsu'))).toBe(0);
+    expect(playerEvade(withShield, eq(['jutsu', 1]))).toBe(playerEvade(withShield) + 5);
+    expect(playerEvade(withShield, eq(['jutsu', 2]))).toBe(playerEvade(withShield) + 8);
+    expect(playerEvade(withShield, eq(['jutsu', 3]))).toBe(playerEvade(withShield) + 12);
+    expect(playerEvade(withoutShield, eq(['jutsu', 1]))).toBe(0);
   });
 });
 
-describe('rogue-24 のノード補正(playerAtk / playerEvade)', () => {
+describe('rogue-24 のノード補正(playerAtk / playerEvade。rogue-27でランク制)', () => {
   const base = (over: Partial<PlayerState> = {}): PlayerState => ({
     pos: [0, 0, 0],
     hp: 24,
@@ -113,44 +122,61 @@ describe('rogue-24 のノード補正(playerAtk / playerEvade)', () => {
     ...over,
   });
 
-  it('拳打: 素手のときだけ攻撃+3', () => {
-    expect(playerAtk(base(), ['kenPunch']) - playerAtk(base())).toBe(3);
+  it('拳打: 素手のときだけ攻撃+3/+5/+7(ランク別)', () => {
+    expect(playerAtk(base(), eq(['kenPunch', 1])) - playerAtk(base())).toBe(3);
+    expect(playerAtk(base(), eq(['kenPunch', 2])) - playerAtk(base())).toBe(5);
+    expect(playerAtk(base(), eq(['kenPunch', 3])) - playerAtk(base())).toBe(7);
     const armed = base({ weapon: { item: 'dagger', q: 0 } });
-    expect(playerAtk(armed, ['kenPunch'])).toBe(playerAtk(armed));
+    expect(playerAtk(armed, eq(['kenPunch', 1]))).toBe(playerAtk(armed));
   });
 
   it('無傷の型: HP満タンのときだけ攻撃+2', () => {
-    expect(playerAtk(base(), ['kenMuku']) - playerAtk(base())).toBe(2);
+    expect(playerAtk(base(), eq(['kenMuku', 1])) - playerAtk(base())).toBe(2);
     const hurt = base({ hp: 23 });
-    expect(playerAtk(hurt, ['kenMuku'])).toBe(playerAtk(hurt));
+    expect(playerAtk(hurt, eq(['kenMuku', 1]))).toBe(playerAtk(hurt));
   });
 
   it('背水: HP25%以下かつ障壁0のとき攻撃+3・回避+25', () => {
     const low = base({ hp: 6 });
-    expect(playerAtk(low, ['kenHaisui']) - playerAtk(low)).toBe(3);
-    expect(playerEvade(low, ['kenHaisui']) - playerEvade(low)).toBe(25);
+    expect(playerAtk(low, eq(['kenHaisui', 1])) - playerAtk(low)).toBe(3);
+    expect(playerEvade(low, eq(['kenHaisui', 1])) - playerEvade(low)).toBe(25);
     const withBarrier = base({ hp: 6, barrier: 8 });
-    expect(playerAtk(withBarrier, ['kenHaisui'])).toBe(playerAtk(withBarrier));
-    expect(playerEvade(withBarrier, ['kenHaisui'])).toBe(playerEvade(withBarrier));
+    expect(playerAtk(withBarrier, eq(['kenHaisui', 1]))).toBe(playerAtk(withBarrier));
+    expect(playerEvade(withBarrier, eq(['kenHaisui', 1]))).toBe(playerEvade(withBarrier));
   });
 
-  it('身軽: 素手なら盾なしでも回避+10', () => {
-    expect(playerEvade(base(), ['kenMigaru'])).toBe(10);
+  it('身軽: 素手なら盾なしでも回避+10/+10/+15(ランク別)', () => {
+    expect(playerEvade(base(), eq(['kenMigaru', 1]))).toBe(10);
+    expect(playerEvade(base(), eq(['kenMigaru', 2]))).toBe(10);
+    expect(playerEvade(base(), eq(['kenMigaru', 3]))).toBe(15);
     const armed = base({ weapon: { item: 'dagger', q: 0 } });
-    expect(playerEvade(armed, ['kenMigaru'])).toBe(0);
+    expect(playerEvade(armed, eq(['kenMigaru', 1]))).toBe(0);
   });
 
   it('絞り撃ち: 「絞る」以下の明かりでのみ攻撃+2(消灯でも効く)', () => {
-    expect(playerAtk(base(), ['hiShibori'], 0) - playerAtk(base())).toBe(2);
-    expect(playerAtk(base(), ['hiShibori'], 3) - playerAtk(base())).toBe(2);
-    expect(playerAtk(base(), ['hiShibori'], 1)).toBe(playerAtk(base()));
-    expect(playerAtk(base(), ['hiShibori'], 2)).toBe(playerAtk(base()));
+    expect(playerAtk(base(), eq(['hiShibori', 1]), 0) - playerAtk(base())).toBe(2);
+    expect(playerAtk(base(), eq(['hiShibori', 1]), 3) - playerAtk(base())).toBe(2);
+    expect(playerAtk(base(), eq(['hiShibori', 1]), 1)).toBe(playerAtk(base()));
+    expect(playerAtk(base(), eq(['hiShibori', 1]), 2)).toBe(playerAtk(base()));
   });
 
   it('掲盾: 盾装備中の遠隔攻撃に対してのみ回避+20', () => {
     const shielded = base({ shield: { item: 'shield', q: 0 } });
-    expect(playerEvade(shielded, ['tateKakage'], true) - playerEvade(shielded)).toBe(20);
-    expect(playerEvade(shielded, ['tateKakage'], false)).toBe(playerEvade(shielded));
-    expect(playerEvade(base(), ['tateKakage'], true)).toBe(0); // 盾なしは対象外
+    expect(playerEvade(shielded, eq(['tateKakage', 1]), true) - playerEvade(shielded)).toBe(20);
+    expect(playerEvade(shielded, eq(['tateKakage', 1]), false)).toBe(playerEvade(shielded));
+    expect(playerEvade(base(), eq(['tateKakage', 1]), true)).toBe(0); // 盾なしは対象外
+  });
+
+  it('結び「甲拳」(rogue-27 S2): 拳打×硬化の同時装着中、素手かつ障壁1以上で攻撃+2', () => {
+    const knot = eq(['kenPunch', 1], ['kouka', 1]);
+    const withBarrier = base({ barrier: 5 });
+    const noBarrier = base({ barrier: 0 });
+    const armed = base({ barrier: 5, weapon: { item: 'dagger', q: 0 } });
+    // 拳打+3 に加えて甲拳+2。
+    expect(playerAtk(withBarrier, knot) - playerAtk(withBarrier)).toBe(5);
+    expect(playerAtk(noBarrier, knot) - playerAtk(noBarrier)).toBe(3); // 障壁0では発動しない
+    expect(playerAtk(armed, knot)).toBe(playerAtk(armed, eq(['kouka', 1]))); // 武器持ちには効かない
+    // 親が片方だけ(結び不成立)では素の拳打のみ。
+    expect(playerAtk(withBarrier, eq(['kenPunch', 1])) - playerAtk(withBarrier)).toBe(3);
   });
 });

@@ -1,7 +1,7 @@
 // 移動・探索オーケストレーション(rogue.ts 分割A4)。A2(skills.ts)/A3(combatActions.ts)
 // と同じく zustand ストアは1つのまま(state/rogue.ts の useRogue)。ここは共有コンテキスト
 // (set/get・pushLog/pushFx・logAction・sfx/animateUnit/rand・combat.beastsTurn・endTurn・
-// skills の一部・beastSeq/itemSeq/runSeq のアクセサ・placeTrapAt)を受け取るファクトリとして
+// skills の一部・beastSeq/itemSeq/runSeq のアクセサ・weaveTrapAt)を受け取るファクトリとして
 // 切り出す。関数本文は rogue.ts に直書きされていた頃と1文字も変えていない — 参照だけ
 // deps/戻り値経由に置き換えてある。
 //
@@ -12,7 +12,7 @@
 // getRunSeq/bumpRunSeq のアクセサで渡す。
 //
 // discover/refreshReach/settleAfterAction は skills.ts(recoverTrap 等)や rogue.ts 本体
-// (cycleLight・checkStratum・triggerCollapse・resume・useItem・mergeItem・placeTrapAt)からも
+// (cycleLight・checkStratum・triggerCollapse・resume・useItem・mergeItem・weaveTrapAt)からも
 // 呼ばれるため createMove の戻り値として公開する。findPath 系・confusedStep・stepPlayer・
 // walkPath はこのモジュール内の clickCell/travelTo/travelToChamber/cancelTravel/wait からしか
 // 呼ばれないため非公開のまま。
@@ -86,8 +86,8 @@ export interface MoveDeps {
   /** 地上物の id 採番(rogue.ts のモジュール変数 beastSeq/itemSeq)。 */
   nextBeastSeq(): number;
   nextItemSeq(): number;
-  /** place モードでの罠設置(rogue.ts 側に残置)。 */
-  placeTrapAt(c: Cell): void;
+  /** place モードでの罠編み設置(rogue-27。rogue.ts 側に残置)。 */
+  weaveTrapAt(c: Cell): void;
 }
 
 export function createMove(deps: MoveDeps) {
@@ -107,7 +107,7 @@ export function createMove(deps: MoveDeps) {
     bumpRunSeq,
     nextBeastSeq,
     nextItemSeq,
-    placeTrapAt,
+    weaveTrapAt,
   } = deps;
 
   // ファストトラベル(walkPath)が進行中か。cancelTravel はこのときだけ runSeq を進めて
@@ -298,7 +298,7 @@ export function createMove(deps: MoveDeps) {
       if (s.phase !== 'play' || s.busy) return;
       if (s.uiMode === 'throw') return;
       if (s.uiMode === 'place') {
-        placeTrapAt(c);
+        weaveTrapAt(c);
         return;
       }
       const k = cellKey(c);

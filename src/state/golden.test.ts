@@ -29,12 +29,12 @@ function pickTarget(): number | null {
  * 固定方針(下手だが決定的):
  * 1. 隣接する敵がいれば最小 id を殴る
  * 2. HP が半分未満で水薬があれば飲む
- * 3. 15 手ごとに、罠を持っていれば足元へ設置
- * 4. こちらに気づいた敵がいれば待って迎え撃つ
- * 5. それ以外は最小 id の未踏スタブへ自動歩行(拡張・湧き・発見を回す)
- * 戦闘・回復・罠・自動歩行・広間拡張・深層降下をひととおり通すのが目的。
+ * 3. こちらに気づいた敵がいれば待って迎え撃つ
+ * 4. それ以外は最小 id の未踏スタブへ自動歩行(拡張・湧き・発見を回す)
+ * 戦闘・回復・自動歩行・広間拡張・深層降下をひととおり通すのが目的
+ * (罠アイテムは rogue-27 でスキル化され、素のボットは罠を使わない)。
  */
-async function playTurn(i: number): Promise<void> {
+async function playTurn(_i: number): Promise<void> {
   const s = useRogue.getState();
   const target = pickTarget();
   if (target !== null) {
@@ -44,12 +44,6 @@ async function playTurn(i: number): Promise<void> {
   const potion = s.player.pack.findIndex((it) => it.item === 'potion');
   if (s.player.hp < s.player.maxHp / 2 && potion >= 0) {
     s.useItem(potion);
-    return run(1000);
-  }
-  const trap = s.player.pack.findIndex((it) => it.item.startsWith('trap'));
-  if (i % 15 === 14 && trap >= 0) {
-    s.useItem(trap); // place モードへ
-    useRogue.getState().clickCell(s.player.pos); // 足元に設置
     return run(1000);
   }
   if (s.beasts.some((b) => b.alive && b.awake && stepDist(s.player.pos, b.pos) <= 6)) {

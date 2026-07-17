@@ -6,14 +6,11 @@ export type ItemId =
   | 'dagger' | 'sword' | 'waraxe' | 'spear' | 'maul'
   | 'leather' | 'chain' | 'plate' | 'shield'
   | 'potion' | 'barrierPotion' | 'antidote' | 'knife'
-  | 'trapSpike' | 'trapFire' | 'trapConfuse' | 'trapFear' | 'trapSleep'
   | 'turret' | 'decoy' | 'amber';
 
-/** relic(rogue-25): 遺物。使用・装備・合成できず、脱出で持ち帰ると展示棚に飾られる。 */
-export type ItemKind = 'weapon' | 'armor' | 'shield' | 'potion' | 'thrown' | 'trap' | 'turret' | 'decoy' | 'relic';
-
-/** 罠の効果種別。 */
-export type TrapKind = 'spike' | 'fire' | 'confuse' | 'fear' | 'sleep';
+/** relic(rogue-25): 遺物。使用・装備・合成できず、脱出で持ち帰ると展示棚に飾られる。
+    rogue-27 で罠アイテム5種を廃止(罠は罠師「罠編み」のスキル化。state/rogue/types.ts の PlacedTrap 参照)。 */
+export type ItemKind = 'weapon' | 'armor' | 'shield' | 'potion' | 'thrown' | 'turret' | 'decoy' | 'relic';
 
 export interface ItemDef {
   name: string;
@@ -33,7 +30,6 @@ export interface ItemDef {
   twoHanded?: boolean;
   /** 盾の回避率(基礎値。rogue-22)。品質+1ごとに+2(stackEvade)。 */
   evade?: number;
-  trap?: TrapKind;
   /** 障壁の水薬(rogue-21): 飲むと基礎値の障壁を張る(上書き式)。品質+1ごとに+2。 */
   barrier?: number;
   /** 解毒の水薬(rogue-21): 毒・混乱を治し、以後 q ターンの予防を付与する。 */
@@ -60,11 +56,6 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   barrierPotion: { name: '障壁の水薬', kind: 'potion', barrier: 8 },
   antidote: { name: '解毒の水薬', kind: 'potion', cure: true },
   knife: { name: '投げナイフ', kind: 'thrown', dmg: 5, range: 8 },
-  trapSpike: { name: '棘の罠', kind: 'trap', trap: 'spike', dmg: 8 },
-  trapFire: { name: '火炎の罠', kind: 'trap', trap: 'fire', dmg: 2 },
-  trapConfuse: { name: '幻惑の罠', kind: 'trap', trap: 'confuse' },
-  trapFear: { name: '恐慌の罠', kind: 'trap', trap: 'fear' },
-  trapSleep: { name: '眠りの罠', kind: 'trap', trap: 'sleep' },
   turret: { name: '魔導砲塔', kind: 'turret', dmg: 3, range: 8 },
   decoy: { name: '囮人形', kind: 'decoy' },
   // 遺物(rogue-25)。q は「拾った層番号(0始まり)」を表す — 品質強化の意味ではない。
@@ -82,13 +73,9 @@ export function stackDef(s: ItemStack): number {
 export function stackHeal(s: ItemStack): number {
   return (ITEMS[s.item].heal ?? 0) + 4 * s.q;
 }
-/** 投擲・棘罠・砲塔のダメージ。 */
+/** 投擲・砲塔のダメージ。 */
 export function stackDmg(s: ItemStack): number {
   return (ITEMS[s.item].dmg ?? 0) + 2 * s.q;
-}
-/** 状態異常系の持続ターン(混乱/恐慌/昏睡/延焼)。 */
-export function stackTurns(s: ItemStack): number {
-  return 4 + s.q;
 }
 /** 障壁の水薬(rogue-21)が張る障壁量。品質+1ごとに+2。 */
 export function stackBarrier(s: ItemStack): number {
@@ -135,19 +122,6 @@ export function statLabel(s: ItemStack): string {
       return `回復${stackHeal(s)}`;
     case 'thrown':
       return `威力${stackDmg(s)}·射程${def.range}`;
-    case 'trap':
-      switch (def.trap) {
-        case 'spike':
-          return `威力${stackDmg(s)}`;
-        case 'fire':
-          return `延焼${stackTurns(s)}T`;
-        case 'confuse':
-          return `混乱${stackTurns(s)}T`;
-        case 'fear':
-          return `恐慌${stackTurns(s)}T`;
-        default:
-          return `昏睡${stackTurns(s)}T`;
-      }
     case 'turret':
       return `威力${stackDmg(s)}·${turretTurns(s)}T`;
     case 'relic':
@@ -203,9 +177,8 @@ function qualityFor(depth: number, rng: () => number): number {
   return q;
 }
 
-const GADGETS: ItemId[] = [
-  'trapSpike', 'trapFire', 'trapConfuse', 'trapFear', 'trapSleep', 'turret', 'decoy',
-];
+// rogue-27: 罠アイテム5種を廃止(罠は罠師「罠編み」のスキル化。装填制のためガジェット枠から抜ける)。
+const GADGETS: ItemId[] = ['turret', 'decoy'];
 
 /** 深度 D の広間に落ちるアイテム列(0〜2個)。深度2+ でガジェットが混ざる。 */
 export function lootTable(depth: number, rng: () => number): ItemStack[] {

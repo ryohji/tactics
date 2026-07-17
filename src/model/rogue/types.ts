@@ -5,9 +5,9 @@
 import type { Cell, CellKey } from '../fcc';
 import type { Chamber, Stub } from '../dungeon';
 import type { BeastKind } from '../beasts';
-import type { ItemId, ItemStack, TrapKind } from '../loot';
+import type { ItemStack } from '../loot';
 import type { SfxName } from '../../audio/sfx';
-import type { NodeId } from './mastery';
+import type { DraftEntry, EquippedSkill } from './mastery';
 
 /** rogue の表示倍率(固定)。 */
 export const ROGUE_S = 2;
@@ -24,7 +24,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r25';
+export const GAME_VERSION = 'r27';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -84,13 +84,15 @@ export interface GroundItem {
   pos: Cell;
 }
 
-/** 設置済みの罠。敵が踏むと発動して消える。 */
+/**
+ * 設置済みの罠(rogue-27: 罠編みで編む。敵が踏むと発動して消える)。品目・状態異常種別は
+ * 持たない — 威力はランクで決まる固定値、状態異常は結び(kakei/nemuriito)が発動時に付与する。
+ */
 export interface PlacedTrap {
   id: number;
-  item: ItemId;
-  kind: TrapKind;
-  q: number;
   pos: Cell;
+  /** 発動ダメージ(編んだ時点の罠編みランクで固定。8/10/12)。 */
+  power: number;
 }
 
 /** 魔導砲塔。毎ターン射程内の最も近い敵を撃つ(時限)。 */
@@ -159,12 +161,18 @@ export type GameEvent =
 export type ActionLogEntry = [number, string, ...(number | string)[]];
 
 /**
+ * 提示中の関門ドラフト(rogue-27: 天秤ドラフト)。配列=通常の3枠(縮退でそれ未満もありうる)、
+ * 'free'=見送り権を使った関門での自由選択(takeable 全提示)、null=非表示。
+ */
+export type SkillDraft = DraftEntry[] | 'free' | null;
+
+/**
  * localStorage(persist.ts)に置くスナップショット。Set/Map は配列化する。
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 6: rogue-23 マスタリー×スロット(skillSlots/skillEquipped/skillDraft を追加)。旧 v5 は非互換。 */
-  v: 6;
+  /** 7: rogue-27 スキル体系v2(ランク・結び・天秤ドラフト・見送り権・罠クールダウン)。旧 v6 は非互換。 */
+  v: 7;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;
@@ -185,12 +193,16 @@ export interface SaveData {
   maxDepth: number;
   /** 通過済みの層数(rogue-19b)。 */
   stratum: number;
-  /** スキルスロット数(rogue-23。初期2・関門+1・上限6)。 */
+  /** スキルスロット数(rogue-23。初期2・関門+1・門番+1・上限8)。 */
   skillSlots: number;
-  /** 装着中のスキルノード id 列。 */
-  skillEquipped: NodeId[];
-  /** 提示中の関門ドラフト候補(null=非表示)。 */
-  skillDraft: NodeId[] | null;
+  /** 装着中のスキル(id・ランク)。保存形式は [id, rank] のタプル配列。 */
+  skillEquipped: [EquippedSkill['id'], number][];
+  /** 提示中の関門ドラフト(rogue-27)。 */
+  skillDraft: SkillDraft;
+  /** 見送り権(rogue-27): true なら次の関門でドラフトの代わりに 'free'(自由選択)が出る。 */
+  skillFreePick: boolean;
+  /** 罠(罠編み)の装填クールダウン(rogue-27。S1 では常に0で保存し、S2 の設置/回収で使う)。 */
+  trapCooldown: number;
   actionLog: ActionLogEntry[];
   log: string[];
 }

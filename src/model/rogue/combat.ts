@@ -7,10 +7,9 @@
 import type { Cell } from '../fcc';
 import { distW } from '../dungeon';
 import { BEASTS } from '../beasts';
-import { stackDmg, stackTurns, type ItemStack, type TrapKind } from '../loot';
 import type { Beast, BeastStatus, Decoy, GameEvent, PlayerState, PlayerStatus, Turret } from './types';
 import { irnd, playerDef, playerEvade } from './rules';
-import type { NodeId } from './mastery';
+import type { EquippedSkill } from './mastery';
 
 /** 毒(rogue-21)の持続ターン(命中時)。 */
 const POISON_HIT_TURNS = 3;
@@ -49,13 +48,13 @@ const PLAYER_STATUS_TEXT: Record<PlayerStatus['kind'], { text: string; color: st
  * 乱数を一切引かない(盾を装備していない既存ランの乱数列を守るため)。回避成功は
  * ダメージ0・状態異常抽選なしで即返す。skills(rogue-23)は jutsu(盾術)の回避+5%に効く
  * (省略時は素の回避% — 既存呼び出し元・テストへの後方互換)。硬化(kouka)の被ダメ軽減や
- * 受け反撃(ukekaeshi)は store 側(state/rogue.ts)がこの返り値を見て配線する。
+ * 受け反撃(盾術II・rogue-27)は store 側(state/rogue/combatActions.ts)がこの返り値を見て配線する。
  */
 export function beastStrike(
   b: Beast,
   player: PlayerState,
   rng: () => number,
-  skills: readonly NodeId[] = [],
+  skills: readonly EquippedSkill[] = [],
   ranged = false,
 ): { dmg: number; events: GameEvent[]; status: PlayerStatus | null } {
   const def = BEASTS[b.kind];
@@ -139,35 +138,10 @@ export function damageEvents(at: Cell, dmg: number, color: string): GameEvent[] 
 }
 
 /**
- * 罠の効果(status 適用が要るものは呼び出し側が b.status に代入する)。
- * spike/fire はダメージ量のみ返し、実際の適用(hp 減算・死亡判定)は
- * 呼び出し側の damageBeast 相当に委ねる(killBeast が湧き・討伐数・掃討判定を
- * 広く扱うため、ここでは踏み込まない)。
+ * 罠が発動して敵が生存したときの状態異常通知(結び kakei/nemuriito・rogue-27)。
+ * ダメージ量自体は trap.power(呼び出し側の state/rogue/combatActions.ts の fireTrap が
+ * damageBeast へ渡す)なので、ここでは状態異常のログ/演出だけを担う。
  */
-export type TrapEffect =
-  | { kind: 'damage'; dmg: number; color: string; burnOnSurvive?: BeastStatus }
-  | { kind: 'status'; status: BeastStatus; awaken?: boolean };
-
-export function resolveTrapEffect(trapKind: TrapKind, stack: ItemStack): TrapEffect {
-  switch (trapKind) {
-    case 'spike':
-      return { kind: 'damage', dmg: stackDmg(stack), color: '#fecaca' };
-    case 'fire':
-      return {
-        kind: 'damage',
-        dmg: stackDmg(stack),
-        color: '#fdba74',
-        burnOnSurvive: { kind: 'burn', turns: stackTurns(stack) },
-      };
-    case 'confuse':
-      return { kind: 'status', status: { kind: 'confuse', turns: stackTurns(stack) } };
-    case 'fear':
-      return { kind: 'status', status: { kind: 'fear', turns: stackTurns(stack) }, awaken: true };
-    default: // sleep
-      return { kind: 'status', status: { kind: 'sleep', turns: stackTurns(stack) } };
-  }
-}
-
 const TRAP_STATUS_TEXT: Record<BeastStatus['kind'], { text: string; color: string; verb: string }> = {
   burn: { text: '延焼', color: '#fdba74', verb: '延焼した' },
   confuse: { text: '混乱', color: '#f472b6', verb: '混乱した' },

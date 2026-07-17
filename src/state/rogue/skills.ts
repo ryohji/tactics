@@ -1,8 +1,9 @@
-// スキル・マスタリー・実績のオーケストレーション(rogue.ts 分割A2)。
-// zustand ストアは1つのまま(state/rogue.ts の useRogue)。ここは共有コンテキスト
-// (set/get・pushLog・logAction・他モジュールへ回すアクション末尾処理)を受け取る
-// ファクトリとして切り出す。関数本文は rogue.ts に直書きされていた頃と1文字も
-// 変えていない — 参照だけ deps/戻り値経由に置き換えてある。
+// スキル・マスタリー・実績のオーケストレーション(rogue.ts 分割A2)。zustand ストアは1つのまま
+// (state/rogue.ts の useRogue)。ここは共有コンテキスト(set/get・pushLog・logAction・他モジュール
+// へ回すアクション末尾処理)を受け取るファクトリとして切り出す。関数本文は rogue.ts に直書き
+// されていた頃と1文字も変えていない — 参照だけ deps/戻り値経由に置き換えてある
+// (rogue-27 で装着スキルをランク付き(EquippedSkill)へ、装着ロジックを takeable/EXCLUDES 基準へ
+// 改訂。draftCandidates/unlockedNodes は削除し、mastery.ts の takeable/draftLanes へ移行)。
 //
 // recoverTrap は beastsTurn(A3で state/rogue/combatActions.ts へ)/endTurn(rogue.ts に
 // 残置。A5 で移設予定)を呼ぶため deps 経由で借りる。equipSkill の片手持ち(katate)解除・
@@ -19,14 +20,20 @@ import { FEATS, type FeatId } from '../../model/rogue/feats';
 import {
   MASTERY_NAME,
   SKILL_NODES,
-  COUNTER_NODES,
+  EXCLUDES,
   masteryLevels,
-  unlockedNodes,
+  takeable,
   equippedCost,
+  rankOf,
+  maxRank,
   type MasterySystem,
   type MasteryCounters,
   type NodeId,
+  type EquippedSkill,
 } from '../../model/rogue/mastery';
+
+/** ランク表示(装着済みノードを深めたときのログ用)。ランク1は「新規装着」側で扱う。 */
+const RANK_LABEL: Record<number, string> = { 2: 'Ⅱ', 3: 'Ⅲ' };
 
 export interface SkillsDeps {
   set: StoreApi<RogueState>['setState'];
@@ -85,20 +92,13 @@ export function createSkills(deps: SkillsDeps) {
     sfx.play('pickup');
   }
 
-  /** 現在のマスタリーで解禁済みかつ未装着のノード id 列。 */
-  function undraftedUnlockedNodes(): NodeId[] {
-    const levels = masteryLevels(masteryStore.readMastery());
-    const equipped = get().skillEquipped;
-    return unlockedNodes(levels).filter((id) => !equipped.includes(id));
-  }
-
   /** 「支度」パネルか関門ドラフトが開いている(rogue-23。ゲーム操作をブロックする)。 */
   function skillModalOpen(): boolean {
     const s = get();
     return s.skillOutfitting || s.skillDraft !== null;
   }
 
-  // --- スキル(マスタリー×スロット。rogue-23) ------------------------------------
+  // --- スキル(マスタリー×スロット。rogue-23。rogue-27でランク制へ) ------------------------
   // equipSkill/unequipSkill/finishOutfitting/skipDraft は「支度」「関門ドラフト」の
   // モーダル表示中だけ動く(busy 相当のゲーム操作ブロック中でも、この4つだけは通す)。
 
@@ -107,31 +107,50 @@ export function createSkills(deps: SkillsDeps) {
       logAction('SE', id);
       const s = get();
       const inOutfitting = s.skillOutfitting;
-      const inDraft = s.skillDraft !== null;
-      if (!inOutfitting && !inDraft) return;
-      // 支度中は解禁済み全ノードから、ドラフト中は提示された候補からのみ選べる。
-      if (inOutfitting) {
-        if (!unlockedNodes(masteryLevels(masteryStore.readMastery())).includes(id)) return;
-      } else if (!s.skillDraft!.includes(id)) {
+      const draftArray = Array.isArray(s.skillDraft) ? s.skillDraft : null;
+      const inFree = s.skillDraft === 'free';
+      if (!inOutfitting && !draftArray && !inFree) return;
+
+      // 支度中・見送り権('free')中は解禁済みの次ランク全体(takeable)から、
+      // 関門ドラフト(配列)中は提示された候補からのみ選べる。
+      const levels = masteryLevels(masteryStore.readMastery());
+      if (inOutfitting || inFree) {
+        if (!takeable(s.skillEquipped, levels).some((c) => c.id === id)) return;
+      } else if (draftArray) {
+        if (!draftArray.some((c) => c.id === id)) return;
+      }
+
+      const cur = rankOf(s.skillEquipped, id);
+      const target = cur + 1;
+      const node = SKILL_NODES[id];
+      if (target > maxRank(id)) return; // 安全弁(takeable/draft候補が既にここまで来ないはず)
+
+      // 排他(EXCLUDES・rogue-27): 両立しない相手ノードが該当ランク以上で装着中なら拒否。
+      const blocked = EXCLUDES.some(([[a, aMin], [b, bMin]]) => {
+        if (a === id && target >= aMin && rankOf(s.skillEquipped, b) >= bMin) return true;
+        if (b === id && target >= bMin && rankOf(s.skillEquipped, a) >= aMin) return true;
+        return false;
+      });
+      if (blocked) {
+        pushLog('両立しない心得だ');
         return;
       }
-      if (s.skillEquipped.includes(id)) return;
-      // 反撃系(受け反撃/見切り)は同時装着不可(rogue-24 の横断ルール)。
-      if (
-        COUNTER_NODES.includes(id) &&
-        s.skillEquipped.some((x) => COUNTER_NODES.includes(x) && x !== id)
-      ) {
-        pushLog('反撃の技はひとつしか身につけられない');
-        return;
-      }
-      if (equippedCost(s.skillEquipped) + SKILL_NODES[id].cost > s.skillSlots) {
+
+      // コスト差分(ランクアップは差分だけ、新規は costs[0] そのもの)。
+      const costDelta = node.costs[target - 1] - (target > 1 ? node.costs[target - 2] : 0);
+      if (equippedCost(s.skillEquipped) + costDelta > s.skillSlots) {
         pushLog('スロットが足りない(外して組み替える)');
         return;
       }
-      set({ skillEquipped: [...s.skillEquipped, id] });
-      pushLog(`${SKILL_NODES[id].name} を装着した`);
+
+      const already = s.skillEquipped.some((e) => e.id === id);
+      const nextEquipped: EquippedSkill[] = already
+        ? s.skillEquipped.map((e) => (e.id === id ? { id, rank: target } : e))
+        : [...s.skillEquipped, { id, rank: target }];
+      set({ skillEquipped: nextEquipped });
+      pushLog(already ? `${node.name} を深めた(${RANK_LABEL[target]})` : `${node.name} を装着した`);
       sfx.play('select');
-      if (inDraft) {
+      if (draftArray || inFree) {
         set({ skillDraft: null });
         settleAfterAction();
       }
@@ -141,7 +160,7 @@ export function createSkills(deps: SkillsDeps) {
       logAction('SU', id);
       const s = get();
       if (!s.skillOutfitting && s.skillDraft === null) return;
-      if (!s.skillEquipped.includes(id)) return;
+      if (!s.skillEquipped.some((e) => e.id === id)) return;
       const player = s.player;
       // 片手扱い(katate)を外すと、両手武器+盾の組み合わせが不整合になる — 盾を pack へ。
       if (id === 'katate' && player.weapon && ITEMS[player.weapon.item].twoHanded && player.shield) {
@@ -156,7 +175,8 @@ export function createSkills(deps: SkillsDeps) {
         pushLog('たいまつに火を戻した(絞る)');
         discover();
       }
-      set({ skillEquipped: get().skillEquipped.filter((x) => x !== id) });
+      // ノードごと外す(全ランク返却)。
+      set({ skillEquipped: get().skillEquipped.filter((e) => e.id !== id) });
       pushLog(`${SKILL_NODES[id].name} を外した`);
       sfx.play('cancel');
     },
@@ -165,14 +185,14 @@ export function createSkills(deps: SkillsDeps) {
       logAction('RT', id);
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
-      if (!s.skillEquipped.includes('wanaKaishu')) return;
+      // 罠を解く(rogue-24 の遠隔回収 → rogue-27: 罠編みランクII以上に統合)。
+      // アイテムには戻らず、装填クールダウンが0になる(=即座に編み直せる)。
+      if (rankOf(s.skillEquipped, 'wanaAmi') < 2) return;
       const t = s.traps.find((x) => x.id === id);
       if (!t) return;
-      const player = s.player;
-      player.pack.push({ item: t.item, q: t.q });
-      set({ traps: s.traps.filter((x) => x.id !== id), player: { ...player, pack: [...player.pack] } });
+      set({ traps: s.traps.filter((x) => x.id !== id), trapCooldown: 0 });
       sfx.play('pickup');
-      pushLog(`${ITEMS[t.item].name} を回収した`);
+      pushLog('罠を解いた(すぐ編み直せる)');
       // 回収も1ターン。
       beastsTurn();
       endTurn();
@@ -190,11 +210,11 @@ export function createSkills(deps: SkillsDeps) {
     skipDraft: () => {
       logAction('SX');
       if (get().skillDraft === null) return;
-      set({ skillDraft: null });
-      pushLog('スキルの選択を見送った。');
+      set({ skillDraft: null, skillFreePick: true });
+      pushLog('スキルの選択を見送った(次の関門で自由に選べる)');
       settleAfterAction();
     },
   };
 
-  return { incrementMastery, maybeUnlockFeat, undraftedUnlockedNodes, skillModalOpen, actions };
+  return { incrementMastery, maybeUnlockFeat, skillModalOpen, actions };
 }

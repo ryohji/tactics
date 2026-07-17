@@ -18,13 +18,21 @@
 import type { StoreApi } from 'zustand';
 import type { RogueState } from '../rogue';
 import * as scoreboard from '../scoreboard';
+import * as masteryStore from '../masteryStore';
 import * as bgm from '../../audio/bgm';
 import type { SfxName } from '../../audio/sfx';
 import { layer, keyToCell, type CellKey } from '../../model/fcc';
 import { collapseAbove } from '../../model/dungeon';
 import { LIGHT, STRATUM_DEPTH, isDimLight, type RogueFx } from '../../model/rogue/types';
 import { depthOf } from '../../model/rogue/rules';
-import { draftCandidates, type MasteryCounters, type NodeId } from '../../model/rogue/mastery';
+import {
+  draftLanes,
+  formatEquippedForRecord,
+  hasAnyMastery,
+  masteryLevels,
+  rankOf,
+  type MasteryCounters,
+} from '../../model/rogue/mastery';
 import type { FeatId } from '../../model/rogue/feats';
 
 // 現在の層で「もうすぐ崩落する」警告を出したか(層ごとに restart/崩落でリセット)。
@@ -50,7 +58,6 @@ export interface StratumDeps {
   skills: {
     maybeUnlockFeat(id: FeatId): void;
     incrementMastery(delta: Partial<MasteryCounters>): void;
-    undraftedUnlockedNodes(): NodeId[];
   };
   /** 到達範囲の再計算(state/rogue/moveActions.ts の createMove が返す。まだ存在しない
       ためサンクで渡す)。 */
@@ -105,13 +112,26 @@ export function createStratum(deps: StratumDeps) {
     sfx.play('death');
     stratumWarned = false;
 
-    // 関門(rogue-23): スロット+1(上限6)。解禁済み・未装着のノードから乱数3択
-    // (シード列 rand から引く)。候補ゼロなら乱数を引かず、ドラフトも出さない
-    // — マスタリー未育成のプレイヤーとゴールデンテストの経路で乱数列を守る。
-    const newSlots = Math.min(6, get().skillSlots + 1);
-    const draft = draftCandidates(skills.undraftedUnlockedNodes(), rand, 3);
-    set({ skillSlots: newSlots, skillDraft: draft.length > 0 ? draft : null });
-    if (draft.length > 0) pushLog('関門の先へ進む前に、新たな心得を選べる。');
+    // 関門(rogue-23。rogue-27でスロット上限8・天秤ドラフト+見送り権へ改訂):
+    // スロット+1(上限8)。見送り権(skillFreePick)を持っていればそれを消費して自由選択
+    // ('free')を出す(rng を引かない)。無ければ draftLanes で3枠を引く — 候補ゼロなら
+    // 乱数を一切引かず、ドラフトも出さない(マスタリー未育成のプレイヤーとゴールデン
+    // テストの経路で乱数列を守る既存規律)。
+    const newSlots = Math.min(8, get().skillSlots + 1);
+    set({ skillSlots: newSlots });
+    if (get().skillFreePick) {
+      set({ skillFreePick: false, skillDraft: 'free' });
+      pushLog('見送っていた選択の権利で、心得を自由に選べる。');
+    } else {
+      const levels = masteryLevels(masteryStore.readMastery());
+      // rogue-27: wanaAmi ランクIは系統レベル0でも常時候補になりうるため、
+      // hasAnyMastery(何か1つでも育っているか)が false なら draftLanes 自体を呼ばず
+      // rng を一切引かない(真にマスタリー0のプレイヤー・ゴールデンテストの乱数列を守る。
+      // mastery.ts の hasAnyMastery 参照)。
+      const draft = hasAnyMastery(levels) ? draftLanes(get().skillEquipped, levels, rand) : [];
+      set({ skillDraft: draft.length > 0 ? draft : null });
+      if (draft.length > 0) pushLog('関門の先へ進む前に、新たな心得を選べる。');
+    }
 
     // 共有スコアボード(rogue-26): 関門通過時点のスナップショットを送信(進行中=潜行中扱い)。
     // 死亡/生還の確定は runEnd.recordRun 側。fire-and-forget・URL 未設定は no-op。
@@ -125,7 +145,7 @@ export function createStratum(deps: StratumDeps) {
           maxDepth: s2.maxDepth,
           stratum: s2.stratum,
           deathCause: s2.deathCause,
-          skillEquipped: s2.skillEquipped,
+          skillEquipped: formatEquippedForRecord(s2.skillEquipped),
         },
         { runId: scoreboard.getRunId(), name: scoreboard.readPlayerName(), escaped: false, dead: false },
       ),
@@ -155,20 +175,22 @@ export function createStratum(deps: StratumDeps) {
     }
   }
 
-  /** ターン経過の帳尻(ターン数・自然回復)。明かりが強いほど回復が早い。 */
+  /** ターン経過の帳尻(ターン数・自然回復・罠の装填クールダウン)。明かりが強いほど回復が早い。 */
   function endTurn(): void {
     const turn = get().turn + 1;
     const { player, lightLevel, skillEquipped } = get();
+    // 罠編み(wanaAmi・rogue-27): 装填クールダウンをターンごとに1ずつ回復する。
+    if (get().trapCooldown > 0) set({ trapCooldown: get().trapCooldown - 1 });
     // 篝火(hiKagari・rogue-24): 「広げる」中は回復間隔−1(最低2)。
     const regenEvery =
-      lightLevel === 2 && get().skillEquipped.includes('hiKagari')
+      lightLevel === 2 && rankOf(skillEquipped, 'hiKagari') >= 1
         ? Math.max(2, LIGHT[lightLevel].regenEvery - 1)
         : LIGHT[lightLevel].regenEvery;
     if (turn % regenEvery === 0 && player.hp > 0) {
       if (player.hp < player.maxHp) {
         player.hp += 1;
         set({ player: { ...player } });
-      } else if (skillEquipped.includes('tenka') && player.barrier < 24) {
+      } else if (rankOf(skillEquipped, 'tenka') >= 1 && player.barrier < 24) {
         // 転化(rogue-23): HP満タン時の自然回復ティックが障壁+1に変わる(上限24)。
         player.barrier = Math.min(24, player.barrier + 1);
         pushFx({ kind: 'popup', at: player.pos, text: '障壁+1', color: '#67d3e0', dur: 700 });

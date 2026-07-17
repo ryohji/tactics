@@ -51,7 +51,7 @@ function sampleInput(): EncodeSaveInput {
       },
     ],
     items: [{ id: 2, stack: { item: 'amber', q: 0 }, pos: [1, 1, 0] }],
-    traps: [{ id: 1, item: 'trapSpike', kind: 'spike', q: 0, pos: [0, 1, 1] }],
+    traps: [{ id: 1, pos: [0, 1, 1], power: 10 }],
     turrets: [{ id: 2, q: 1, pos: [1, 0, 1], turns: 4 }],
     decoys: [{ id: 3, q: 0, pos: [2, 1, 1], hp: 3, maxHp: 5 }],
     turn: 123,
@@ -59,8 +59,10 @@ function sampleInput(): EncodeSaveInput {
     maxDepth: 11,
     stratum: 1,
     skillSlots: 3,
-    skillEquipped: ['kouka'],
+    skillEquipped: [{ id: 'kouka', rank: 2 }],
     skillDraft: null,
+    skillFreePick: false,
+    trapCooldown: 0,
     actionLog: [[1, 'C', 0, 0, 0], [2, 'W']],
     log: ['a', 'b', 'c'],
   };
@@ -103,7 +105,25 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(dec.skillSlots).toBe(input.skillSlots);
     expect(dec.skillEquipped).toEqual(input.skillEquipped);
     expect(dec.skillDraft).toEqual(input.skillDraft);
+    expect(dec.skillFreePick).toBe(input.skillFreePick);
+    expect(dec.trapCooldown).toBe(input.trapCooldown);
     expect(dec.log).toEqual(input.log);
+  });
+
+  it('rogue-27: ランク付きスキル(EquippedSkill)・見送り権(freeドラフト)・罠クールダウンも往復する', () => {
+    const input = sampleInput();
+    input.skillEquipped = [
+      { id: 'kensan', rank: 3 },
+      { id: 'wanaAmi', rank: 1 },
+    ];
+    input.skillDraft = 'free';
+    input.skillFreePick = true;
+    input.trapCooldown = 6;
+    const dec = decodeSave(encodeSave(input))!;
+    expect(dec.skillEquipped).toEqual(input.skillEquipped);
+    expect(dec.skillDraft).toBe('free');
+    expect(dec.skillFreePick).toBe(true);
+    expect(dec.trapCooldown).toBe(6);
   });
 
   it('JSON 化(localStorage 相当)を挟んでも往復できる', () => {
@@ -122,9 +142,9 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(encodeSave(input).log).toEqual(['3', '4', '5', '6', '7', '8', '9', '10']);
   });
 
-  it('バージョン不一致(v!==6)は null', () => {
+  it('バージョン不一致(v!==7)は null', () => {
     const data = encodeSave(sampleInput());
-    expect(decodeSave({ ...data, v: 5 as unknown as 6 })).toBeNull();
+    expect(decodeSave({ ...data, v: 6 as unknown as 7 })).toBeNull();
   });
 
   it('decode は dungeon.slots を chambers の center から再構築する', () => {
