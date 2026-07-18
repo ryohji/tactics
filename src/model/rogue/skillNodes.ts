@@ -306,7 +306,10 @@ export const SKILL_NODES: Record<NodeId, SkillNode> = {
     name: '背討ち',
     deed: { counter: 'stealthStrikes', at: [15] },
     costs: [2],
-    descs: ['未覚醒の敵への近接攻撃ダメージ×2(気配感知の敵には無効)'],
+    descs: [
+      '未覚醒の敵への近接攻撃ダメージ×2。装着中は未覚醒の敵の隣まで忍び寄っても気づかれない' +
+        '(いずれも気配感知の敵には無効)',
+    ],
   },
   hiShibori: {
     id: 'hiShibori',

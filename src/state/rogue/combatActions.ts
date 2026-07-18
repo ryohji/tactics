@@ -219,10 +219,26 @@ export function createCombat(deps: CombatDeps) {
     }
   }
 
-  /** ダメージ適用(死亡処理込み)。生存していれば false。 */
+  /**
+   * ダメージ適用(死亡処理込み)。生存していれば false。
+   * 障壁(rogue-36)がある敵はまず障壁から削れ、余りが HP へ抜ける。障壁が
+   * 削り切られた瞬間は「障壁が砕けた!」を出す(プレイヤー側と同じ演出)。
+   */
   function damageBeast(b: Beast, dmg: number, color = '#fecaca', kill?: KillCtx): boolean {
-    b.hp = Math.max(0, b.hp - dmg);
-    applyEvents(damageEvents(b.pos, dmg, color));
+    const hadBarrier = b.barrier;
+    if (hadBarrier > 0) {
+      const { barrier, hpDmg } = absorbBarrier(hadBarrier, dmg, false);
+      b.barrier = barrier;
+      b.hp = Math.max(0, b.hp - hpDmg);
+      applyEvents(damageEvents(b.pos, dmg, color));
+      if (barrier === 0) {
+        pushLog(`${BEASTS[b.kind].name} の障壁が砕けた!`);
+        pushFx({ kind: 'popup', at: b.pos, text: '障壁破壊', color: '#67d3e0', dur: 900 });
+      }
+    } else {
+      b.hp = Math.max(0, b.hp - dmg);
+      applyEvents(damageEvents(b.pos, dmg, color));
+    }
     if (b.hp === 0) {
       killBeast(b, kill);
       return true;
@@ -385,7 +401,11 @@ export function createCombat(deps: CombatDeps) {
       // 忍び足(shinShinobi・rogue-27): ランクIで−20%、ランクIIIで−35%(ランクIIは追跡距離のみ強化)。
       const shinShinobiRank = rankOf(get().skillEquipped, 'shinShinobi');
       const aggroFactor = shinShinobiRank >= 3 ? 0.65 : shinShinobiRank >= 1 ? 0.8 : 1;
-      if (!b.awake && checkAggro(b, def, player.pos, lightLevel, aggroFactor)) {
+      // 背討ちの接近パッシブ(rogue-37): 装着中は、気配感知(senses)でない未覚醒の敵の
+      // 隣(FCC距離√2)まで踏み込んでも気づかれない(覚醒判定そのものをスキップ)。
+      const shinSegiriRank = rankOf(get().skillEquipped, 'shinSegiri');
+      const shinSegiriPassive = shinSegiriRank >= 1 && !def.senses && adjacent(b.pos, player.pos);
+      if (!b.awake && !shinSegiriPassive && checkAggro(b, def, player.pos, lightLevel, aggroFactor)) {
         b.awake = true;
         interrupted = true;
         pushLog(`${def.name} がこちらに気づいた!`);
@@ -483,7 +503,7 @@ export function createCombat(deps: CombatDeps) {
       // 闇討ち(yamiuchi・rogue-27): 消灯中の背討ちは一般敵を即死させる
       // (門番・強化個体・気配感知の敵には効かない)。成立しなければ従来の背討ち×2へ。
       if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skillEquipped, 'yamiuchi')) {
-        dmg = b.hp;
+        dmg = b.hp + b.barrier; // 障壁ごと貫いて即死させる(rogue-36)
         pushLog('闇討ち!');
       } else if (!preAwake && !def.senses && rankOf(skillEquipped, 'shinSegiri') >= 1) {
         // 背討ち(shinSegiri): 未覚醒の敵へは×2。ただし気配感知(senses)の敵には無効。
@@ -760,7 +780,7 @@ export function createCombat(deps: CombatDeps) {
 
       // 各ヒットは meleeAttack と同じ計算(闇討ち・背討ちを含む)。
       if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skillEq, 'yamiuchi')) {
-        dmg = b.hp;
+        dmg = b.hp + b.barrier; // 障壁ごと貫いて即死させる(rogue-36)
         if (hitNum === 0) pushLog('闇討ち!');
       } else if (!preAwake && !def.senses && rankOf(skillEq, 'shinSegiri') >= 1) {
         dmg *= 2;
@@ -931,7 +951,7 @@ export function createCombat(deps: CombatDeps) {
       }
       const isElite = !!def.gatekeeper || b.atkOverride !== undefined || b.defOverride !== undefined;
       if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skillEq, 'yamiuchi')) {
-        dmg = b.hp;
+        dmg = b.hp + b.barrier; // 障壁ごと貫いて即死させる(rogue-36)
         pushLog('闇討ち!');
       } else if (!preAwake && !def.senses && rankOf(skillEq, 'shinSegiri') >= 1) {
         dmg *= 2;

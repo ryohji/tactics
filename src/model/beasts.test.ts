@@ -1,7 +1,7 @@
 // 敵ロスター(rogue-21)の湧きテーブルのテスト。
 import { describe, it, expect } from 'vitest';
 import { lcg } from './dungeon';
-import { BEASTS, spawnTable, ratPackSize, gatekeeperFor, depthScale, type BeastKind } from './beasts';
+import { BEASTS, spawnTable, ratPackSize, gatekeeperFor, depthScale, beastBarrier, type BeastKind } from './beasts';
 
 describe('spawnTable(rogue-21)', () => {
   it('minDepth は出現帯の設計どおり昇順', () => {
@@ -69,5 +69,24 @@ describe('rogue-24: 門番と深度係数', () => {
     expect(depthScale(24)).toBe(1);
     expect(depthScale(32)).toBeCloseTo(1.15);
     expect(depthScale(40)).toBeGreaterThan(depthScale(32));
+  });
+});
+
+describe('rogue-36: 深層の障壁(beastBarrier)', () => {
+  it('深度16未満は障壁なし', () => {
+    expect(beastBarrier(0)).toBe(0);
+    expect(beastBarrier(8)).toBe(0);
+    expect(beastBarrier(15)).toBe(0);
+  });
+
+  it('深度16(層3の入口)から現れ、深いほど厚く、上限12', () => {
+    expect(beastBarrier(16)).toBe(2);
+    expect(beastBarrier(22)).toBe(3);
+    expect(beastBarrier(28)).toBe(4);
+    // 単調非減少
+    for (let d = 16; d < 200; d++) {
+      expect(beastBarrier(d + 1)).toBeGreaterThanOrEqual(beastBarrier(d));
+    }
+    expect(beastBarrier(1000)).toBe(12); // 上限
   });
 });

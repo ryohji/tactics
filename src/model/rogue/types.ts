@@ -24,7 +24,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r35';
+export const GAME_VERSION = 'r37';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -63,6 +63,14 @@ export interface Beast {
   kind: BeastKind;
   pos: Cell;
   hp: number;
+  /** 湧き時の体力(深度係数込み)。HP バー・表示の分母。 */
+  maxHp: number;
+  /**
+   * 障壁(rogue-36)。深層の敵が持つ、HP の手前で削れる緩衝。プレイヤーの与ダメージは
+   * まず障壁から削り(absorbBarrier)、余りが HP へ抜ける。層の崩落等では復活しない
+   * (個体固有・湧き時に確定)。0 なら障壁なし。
+   */
+  barrier: number;
   home: Cell;
   /** ホームの広間 id(掃討判定に使う)。 */
   homeChamber: number;
@@ -173,8 +181,8 @@ export type SkillDraft = DraftEntry[] | 'free' | null;
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 11: rogue-35 マスタリーv3(四道)+seisui フラグ追加。skillEquipped の id 集合が変わるため旧 v10 は非互換。 */
-  v: 11;
+  /** 12: rogue-36 敵の maxHp/barrier 追加(深層の障壁)。Beast の形が変わるため旧 v11 は非互換。 */
+  v: 12;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;

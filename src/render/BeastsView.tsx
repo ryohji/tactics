@@ -175,17 +175,27 @@ function BeastItem({ b }: { b: Beast }) {
           </>
         )}
       </group>
-      {/* HP バー */}
-      {b.hp < def.hp && (
+      {/* HP バー(rogue-36: 分母は maxHp・障壁ありは満タンでも表示し、上縁にシアンの障壁帯) */}
+      {(b.hp < b.maxHp || b.barrier > 0) && (
         <Billboard position={[0, 0.72 * S, 0]}>
           <mesh>
             <planeGeometry args={[0.5 * S, 0.06 * S]} />
             <meshBasicMaterial color="#1e293b" />
           </mesh>
-          <mesh position={[(-0.25 + 0.25 * (b.hp / def.hp)) * S, 0, 0.001]}>
-            <planeGeometry args={[0.5 * S * (b.hp / def.hp), 0.05 * S]} />
+          <mesh position={[(-0.25 + 0.25 * (b.hp / b.maxHp)) * S, 0, 0.001]}>
+            <planeGeometry args={[0.5 * S * (b.hp / b.maxHp), 0.05 * S]} />
             <meshBasicMaterial color="#ef4444" />
           </mesh>
+          {b.barrier > 0 &&
+            (() => {
+              const bf = Math.min(b.barrier, b.maxHp) / b.maxHp;
+              return (
+                <mesh position={[(-0.25 + 0.25 * bf) * S, 0.02 * S, 0.002]}>
+                  <planeGeometry args={[0.5 * S * bf, 0.02 * S]} />
+                  <meshBasicMaterial color="#22d3ee" />
+                </mesh>
+              );
+            })()}
         </Billboard>
       )}
       {/* 投擲対象リング */}

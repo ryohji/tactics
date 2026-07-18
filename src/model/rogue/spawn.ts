@@ -4,7 +4,7 @@
 
 import { cellKey, keyToCell, layer, type Cell } from '../fcc';
 import { cellRng, type Chamber, type Dungeon } from '../dungeon';
-import { BEASTS, spawnTable, gatekeeperFor, depthScale } from '../beasts';
+import { BEASTS, spawnTable, gatekeeperFor, depthScale, beastBarrier } from '../beasts';
 import { lootTable, type ItemId } from '../loot';
 import { depthOf } from './rules';
 import { STRATUM_DEPTH } from './types';
@@ -37,11 +37,14 @@ export function spawnChamber(
     // 持ち物は湧きの時点で前倒し抽選する(rogue-19b)。倒したときの抽選(30%・
     // lootTable)と同じ確率・同じテーブルだが、rng はこの広間の湧き rng を使う。
     const carry = rng() < 0.3 ? (lootTable(Math.max(1, depth), rng)[0] ?? null) : null;
+    const hp = Math.ceil(def.hp * scale);
     beasts.push({
       id: nextBeastId(),
       kind,
       pos,
-      hp: Math.ceil(def.hp * scale),
+      hp,
+      maxHp: hp,
+      barrier: beastBarrier(depth),
       home: ch.center,
       homeChamber: ch.id,
       layerFloor: homeL - def.vBelow,
@@ -69,6 +72,10 @@ export function spawnChamber(
         kind: g.kind,
         pos,
         hp: g.hp,
+        maxHp: g.hp,
+        // 門番(層ボス)は装甲が厚い: 深層で障壁が現れる帯でのみ、通常の深層障壁に
+        // 層番号 k ぶんを上乗せ(rogue-36)。浅い層(障壁0の帯)の門番は障壁を持たない。
+        barrier: beastBarrier(depth) > 0 ? beastBarrier(depth) + k : 0,
         home: ch.center,
         homeChamber: ch.id,
         layerFloor: homeL - def.vBelow,

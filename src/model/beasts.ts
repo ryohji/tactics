@@ -180,6 +180,17 @@ export function depthScale(depth: number): number {
   return depth > 24 ? 1 + (0.15 * (depth - 24)) / 8 : 1;
 }
 
+/**
+ * 深層の敵が持つ障壁(rogue-36)。深度16(層3=高スタッツ帯の入口)から現れ、
+ * 深いほど厚くなる決定論値。プレイヤーの与ダメージはこの障壁からまず削れる
+ * (absorbBarrier)。深度係数(depthScale)と同じく「死は深さの必然」を支える調整軸。
+ * 数値はバランス調整の対象(閾値16・+2起点・6ごとに+1・上限12)。
+ */
+export function beastBarrier(depth: number): number {
+  if (depth < 16) return 0;
+  return Math.min(12, 2 + Math.floor((depth - 16) / 6));
+}
+
 /** 出現最低深度の昇順(spawnTable は「直近に解禁された4種」から引く)。 */
 const KINDS: BeastKind[] = [
   'bat', 'rat', 'spider', 'ghoul', 'snake', 'soldier',

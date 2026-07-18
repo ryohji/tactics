@@ -358,6 +358,8 @@ describe('dashCells(rogue-35: 突進の移動先候補)', () => {
           kind: 'bat',
           pos: c1,
           hp: 1,
+          maxHp: 1,
+          barrier: 0,
           home: c1,
           homeChamber: 0,
           layerFloor: -999,

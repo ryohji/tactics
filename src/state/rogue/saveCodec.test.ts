@@ -41,6 +41,8 @@ function sampleInput(): EncodeSaveInput {
         kind: 'rat',
         pos: [2, 0, 0],
         hp: 6,
+        maxHp: 6,
+        barrier: 0,
         home: [2, 0, 0],
         homeChamber: 0,
         layerFloor: 0,
@@ -162,9 +164,9 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(encodeSave(input).log).toEqual(['3', '4', '5', '6', '7', '8', '9', '10']);
   });
 
-  it('バージョン不一致(v!==11)は null', () => {
+  it('バージョン不一致(v!==12)は null', () => {
     const data = encodeSave(sampleInput());
-    expect(decodeSave({ ...data, v: 10 as unknown as 11 })).toBeNull();
+    expect(decodeSave({ ...data, v: 11 as unknown as 12 })).toBeNull();
   });
 
   it('decode は dungeon.slots を chambers の center から再構築する', () => {

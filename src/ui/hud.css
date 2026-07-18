@@ -105,6 +105,18 @@
   margin: 4px 0 8px;
 }
 .hud-hpbar > div { height: 100%; border-radius: 4px; }
+/* 敵の障壁セグメント(rogue-36): HP バー上縁に重ねるシアンの帯。 */
+.hud-hpbar.beast { position: relative; }
+.hud-hpbar.beast .barrier {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 3px;
+  background: linear-gradient(180deg, #a5f3fc, #22d3ee);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 0 5px rgba(34, 211, 238, 0.7);
+}
+.hud-stats .barrier-num { color: #a5f3fc; font-weight: 700; }
 .hud-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

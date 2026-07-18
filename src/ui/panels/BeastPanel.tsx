@@ -21,11 +21,20 @@ export function BeastPanel() {
           {b.awake ? '警戒' : 'まどろみ'}
         </span>
       </h3>
-      <div className="hud-hpbar">
-        <div style={{ width: `${(b.hp / def.hp) * 100}%`, background: '#ef4444' }} />
+      <div className="hud-hpbar beast">
+        <div style={{ width: `${(b.hp / b.maxHp) * 100}%`, background: '#ef4444' }} />
+        {b.barrier > 0 && (
+          <div
+            className="barrier"
+            style={{ width: `${(Math.min(b.barrier, b.maxHp) / b.maxHp) * 100}%` }}
+            title={`障壁 ${b.barrier}`}
+          />
+        )}
       </div>
       <div className="hud-stats">
-        <span>HP<b>{b.hp}/{Math.max(def.hp, b.hp)}</b></span>
+        <span>
+          HP<b>{b.hp}{b.barrier > 0 && <span className="barrier-num"> + {b.barrier}</span>} / {b.maxHp}</b>
+        </span>
         <span>攻<b>{b.atkOverride ?? def.atk}</b></span>
         <span>防<b>{b.defOverride ?? def.def}</b></span>
         <span>距離<b>{stepDist(playerPos, b.pos)}歩</b></span>

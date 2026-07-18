@@ -91,7 +91,7 @@ export interface DecodedSave {
 /** ストアの状態片+モジュール値から SaveData スナップショットを組み立てる。 */
 export function encodeSave(s: EncodeSaveInput): SaveData {
   return {
-    v: 11,
+    v: 12,
     seed: s.seed,
     rng: s.rng,
     seqs: s.seqs,
@@ -128,13 +128,13 @@ export function encodeSave(s: EncodeSaveInput): SaveData {
 }
 
 /**
- * SaveData から状態片を復元する。バージョン不一致(v!==11)は null。
+ * SaveData から状態片を復元する。バージョン不一致(v!==12)は null。
  * Set/Map の再構築・dungeon の slots 再構築(slotKeyOfCell)・rng 関数の
  * 再付与(生成はすべて座標導出 rng なのでこの値は使われない)を担う。
- * v10 からの移行: マスタリーv3(四道)で skillEquipped の id 集合が変わるため非互換。
+ * v11 からの移行: 敵に maxHp/barrier(rogue-36)が加わり Beast の形が変わるため非互換。
  */
 export function decodeSave(d: SaveData): DecodedSave | null {
-  if (d.v !== 11) return null;
+  if (d.v !== 12) return null;
   const dungeon: Dungeon = {
     open: new Set(d.dungeon.open),
     chambers: d.dungeon.chambers,

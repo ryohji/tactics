@@ -9,6 +9,8 @@ function bat(): Beast {
     kind: 'bat',
     pos: [0, 0, 0],
     hp: 5,
+    maxHp: 5,
+    barrier: 0,
     home: [0, 0, 0],
     homeChamber: 0,
     layerFloor: -999,
