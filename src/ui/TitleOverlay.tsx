@@ -56,17 +56,34 @@ export function TitleOverlay() {
   const [scoreboardOpen, setScoreboardOpen] = useState(false);
   // 共有スコアボード(rogue-26)の名前入力。未設定は空欄(プレースホルダで案内)。
   const [nameInput, setNameInput] = useState(() => readPlayerNameRaw());
+  // 中断データ破棄確認モーダル(rogue-31)
+  const [discardConfirm, setDiscardConfirm] = useState<null | 'new' | 'daily' | 'seed'>(null);
   if (entered) return null;
 
-  // 新しく潜る: シード入力があればその迷宮、無ければ起動時のランダム迷宮。
-  // どちらも前の保存は破棄される(restart が消す。起動時の仮ゲームは keepSave で温存済み)。
-  const enter = () => {
+  // 新規開始の実行(中断データ確認後の呼び出し用)
+  const doStart = (action: 'new' | 'daily' | 'seed') => {
     unlock();
     startBgm();
-    const seed = parseSeed(seedInput);
-    if (seed !== undefined) useRogue.getState().restart(seed);
-    else if (saved) useRogue.getState().restart();
+    if (action === 'new') {
+      useRogue.getState().restart();
+    } else if (action === 'daily') {
+      useRogue.getState().restart(dailySeed(new Date()));
+    } else if (action === 'seed') {
+      const seed = parseSeed(seedInput);
+      if (seed !== undefined) useRogue.getState().restart(seed);
+      else useRogue.getState().restart();
+    }
     setEntered(true);
+  };
+
+  // 新しく潜る: シード入力があればその迷宮、無ければ起動時のランダム迷宮。
+  // 前の保存があれば破棄確認を挟む。
+  const enter = () => {
+    if (saved) {
+      setDiscardConfirm('seed');
+    } else {
+      doStart('seed');
+    }
   };
   const resume = () => {
     unlock();
@@ -74,12 +91,13 @@ export function TitleOverlay() {
     if (useRogue.getState().resume()) setEntered(true);
     else setSaved(false); // 壊れた保存などで再開できなければボタンを引っ込める
   };
-  // 本日の迷宮: 「新しく潜る」と同じ扱い(restart が前の保存を破棄する)。
+  // 本日の迷宮: 前の保存があれば破棄確認を挟む。
   const enterDaily = () => {
-    unlock();
-    startBgm();
-    useRogue.getState().restart(dailySeed(new Date()));
-    setEntered(true);
+    if (saved) {
+      setDiscardConfirm('daily');
+    } else {
+      doStart('daily');
+    }
   };
   return (
     <div className="hud-title">
@@ -152,6 +170,26 @@ export function TitleOverlay() {
         </div>
         {codexOpen && <CodexModal onClose={() => setCodexOpen(false)} />}
         {scoreboardOpen && <ScoreboardModal onClose={() => setScoreboardOpen(false)} />}
+        {discardConfirm && (
+          <div className="hud-help" onClick={() => setDiscardConfirm(null)}>
+            <div className="hud-help-panel" onClick={(e) => e.stopPropagation()}>
+              <h2>中断中の冒険があります</h2>
+              <p>破棄して新しく潜りますか?</p>
+              <div className="hud-over-buttons">
+                <button
+                  className="primary"
+                  onClick={() => {
+                    setDiscardConfirm(null);
+                    doStart(discardConfirm);
+                  }}
+                >
+                  破棄して潜る
+                </button>
+                <button onClick={() => setDiscardConfirm(null)}>やめる</button>
+              </div>
+            </div>
+          </div>
+        )}
         {saved && (
           <button
             className="discard"

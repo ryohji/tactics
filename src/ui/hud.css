@@ -353,9 +353,46 @@
   border-color: #7c3aed;
   color: #d8b4fe;
 }
+.hud-pack .pack-row .drop {
+  padding: 5px 8px;
+  font-size: 11px;
+  border-color: #64748b;
+  color: #94a3b8;
+}
 .hud-pack h4 .full {
   margin-left: 4px;
   color: #ef4444;
+}
+
+/* 遺物袋(rogue-29): pack の下の小セクション。枠外なので所持 n/10 には数えない */
+.hud-pack .relic-head {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #fbbf24;
+  cursor: default;
+}
+.hud-pack .relic-row { align-items: center; }
+.hud-pack .relic-item {
+  flex: 1;
+  padding: 5px 10px;
+  font-size: 13px;
+  color: #fde68a;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.hud-pack .relic-item .use { font-size: 11px; color: #94a3b8; margin-left: 8px; white-space: nowrap; }
+.hud-pack .pack-row .crush {
+  padding: 5px 8px;
+  font-size: 11px;
+  border-color: #d9a441;
+  color: #fde68a;
+}
+.hud-pack .pack-row .dedicate {
+  padding: 5px 8px;
+  font-size: 11px;
+  border-color: #7c3aed;
+  color: #d8b4fe;
 }
 
 /* --- rogue: スコア表示(死亡オーバーレイ) --- */

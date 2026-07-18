@@ -22,7 +22,7 @@ import { BEASTS } from '../../model/beasts';
 import { ITEMS, stackDmg, stackCount, stackAtk, itemLabel } from '../../model/loot';
 import type { Beast, BeastStatus, Decoy, PlacedTrap, Turret, RogueFx, GameEvent } from '../../model/rogue/types';
 import { BURN_DMG, depthOf, playerAtk, weaponReach, weaponSweep } from '../../model/rogue/rules';
-import { knotActive, rankOf, type MasteryCounters } from '../../model/rogue/mastery';
+import { knotActive, rankOf, cdOf, type MasteryCounters } from '../../model/rogue/mastery';
 import type { FeatId } from '../../model/rogue/feats';
 import {
   beastStrike as beastStrikeCalc,
@@ -122,14 +122,18 @@ export function createCombat(deps: CombatDeps) {
       // jutsu>=2 と kenMigaru>=2 は EXCLUDES で同時装着できないため、同時成立はしない。
       // 隣接の攻撃者のみに反撃する(rogue-27の意図的差分: 遠隔への反撃は結び「矢返し」の役割)。
       // 矢返し(yagaeshi・rogue-27): jutsu 系の受け反撃に限り、遠隔攻撃なら非隣接の射手にも届く。
+      // rogue-30(二刀流): 盾スロットには左手武器も入りうる — 盾術の受け反撃は本物の盾
+      // (kind==='shield')を構えているときだけ(kenMigaru の見切りは素手条件のみで盾不要)。
+      const hasShield = player.shield !== null && ITEMS[player.shield.item].kind === 'shield';
       const jutsuRank = rankOf(skillEquipped, 'jutsu');
       const kenMigaruRank = rankOf(skillEquipped, 'kenMigaru');
       const adjacentAttacker = stepDist(b.pos, player.pos) === 1;
-      const yagaeshiReach = ranged && jutsuRank >= 2 && knotActive(skillEquipped, 'yagaeshi');
+      const jutsuCounter = jutsuRank >= 2 && hasShield;
+      const yagaeshiReach = ranged && jutsuCounter && knotActive(skillEquipped, 'yagaeshi');
       const counterActive =
-        (jutsuRank >= 2 || (kenMigaruRank >= 2 && player.weapon === null)) && (adjacentAttacker || yagaeshiReach);
+        (jutsuCounter || (kenMigaruRank >= 2 && player.weapon === null)) && (adjacentAttacker || yagaeshiReach);
       if (counterActive) {
-        const activeRank = jutsuRank >= 2 ? jutsuRank : kenMigaruRank;
+        const activeRank = jutsuCounter ? jutsuRank : kenMigaruRank;
         const atk = playerAtk(player, skillEquipped, get().lightLevel);
         const counter = activeRank >= 3 ? Math.floor((atk * 3) / 4) : Math.floor(atk / 2);
         if (counter > 0) {
@@ -429,19 +433,19 @@ export function createCombat(deps: CombatDeps) {
     let diedCount = 0; // 実績「群れ祓い」(rogue-25): 1回の近接攻撃での撃破数
     for (const b of targets) {
       const def = BEASTS[b.kind];
-      const skills = get().skillEquipped;
+      const skillEquipped = get().skillEquipped;
       // 攻撃前の覚醒状態を捕捉(rogue-24)— 背討ちの倍率と隠密マスタリーの両方がこの値を使う。
       const preAwake = b.awake;
       const lightLevel = get().lightLevel;
-      let dmg = Math.max(1, playerAtk(player, skills, lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
+      let dmg = Math.max(1, playerAtk(player, skillEquipped, lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
       // 個体の強化判定(門番・深度係数等による atk/defOverride 持ち)。闇討ちの除外条件。
       const isElite = !!def.gatekeeper || b.atkOverride !== undefined || b.defOverride !== undefined;
       // 闇討ち(yamiuchi・rogue-27): 消灯中の背討ちは一般敵を即死させる
       // (門番・強化個体・気配感知の敵には効かない)。成立しなければ従来の背討ち×2へ。
-      if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skills, 'yamiuchi')) {
+      if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skillEquipped, 'yamiuchi')) {
         dmg = b.hp;
         pushLog('闇討ち!');
-      } else if (!preAwake && !def.senses && rankOf(skills, 'shinSegiri') >= 1) {
+      } else if (!preAwake && !def.senses && rankOf(skillEquipped, 'shinSegiri') >= 1) {
         // 背討ち(shinSegiri): 未覚醒の敵へは×2。ただし気配感知(senses)の敵には無効。
         dmg *= 2;
         pushLog('背後から急所を突いた!');
@@ -449,12 +453,32 @@ export function createCombat(deps: CombatDeps) {
       b.awake = true;
       pushLog(`${def.name} に ${dmg}ダメージ`);
       const unarmed = player.weapon === null;
-      const died = damageBeast(b, dmg, '#fecaca', { weapon: !unarmed, unarmed, preAwake });
+      // 隠密マスタリー加算(rogue-32): 攻撃前に未覚醒なら加算(倒す必要なし)。
+      if (preAwake === false) skills.incrementMastery({ stealthKills: 1 });
+      const died = damageBeast(b, dmg, '#fecaca', { weapon: !unarmed, unarmed });
       if (died) diedCount++;
       // 延焼の刃(hiEnjin): 装着中のみ乱数を引く(30%で延焼2ターン)。倒した敵には不要。
-      if (!died && rankOf(skills, 'hiEnjin') >= 1 && rand() < 0.3) {
+      if (!died && rankOf(skillEquipped, 'hiEnjin') >= 1 && rand() < 0.3) {
         b.status = { kind: 'burn', turns: 2 };
         pushLog(`${def.name} に火が移った!`);
+      }
+      // 二刀流(nitoryu・rogue-30): 本手のダメージ適用後、対象が生存し、左手に武器があり、
+      // nitoryu ランク≥1 なら、左手の攻の半分の追撃ダメージを与える。
+      if (!died && player.shield && rankOf(skillEquipped, 'nitoryu') >= 1) {
+        const leftWeapon = player.shield;
+        if (ITEMS[leftWeapon.item].kind === 'weapon' && !ITEMS[leftWeapon.item].twoHanded) {
+          const leftAtk = stackAtk(leftWeapon);
+          const counterDmg = Math.max(1, Math.floor(leftAtk / 2 + 0.5));
+          const def_name = BEASTS[b.kind].name;
+          pushLog(`左手の${itemLabel(leftWeapon)}が追い打ち(${counterDmg}ダメージ)`);
+          const counterDied = damageBeast(b, counterDmg, '#fbbf24');
+          // 延焼の刃は追撃ヒットにも1回転がす。
+          if (!counterDied && rankOf(skillEquipped, 'hiEnjin') >= 1 && rand() < 0.3) {
+            b.status = { kind: 'burn', turns: 2 };
+            pushLog(`${def_name} に火が移った!`);
+          }
+          if (counterDied) diedCount++;
+        }
       }
     }
     if (diedCount >= 3) skills.maybeUnlockFeat('sweep3');
@@ -486,12 +510,12 @@ export function createCombat(deps: CombatDeps) {
       }
     }
     // マスタリー加算(rogue-24)。1回の討伐で複数系統に同時加算されうる
-    // (例: 素手で未覚醒の敵を倒す → 拳闘+隠密)。
+    // (例: 素手で敵を倒す → 拳闘)。隠密マスタリーは rogue-32 より
+    // 未覚醒への攻撃時に加算されるため、killBeast では加算しない。
     if (ctx) {
       const delta: Partial<MasteryCounters> = {};
       if (ctx.weapon) delta.weaponKills = 1;
       if (ctx.unarmed) delta.fistKills = 1;
-      if (ctx.preAwake === false) delta.stealthKills = 1;
       if (ctx.viaTrap) delta.trapKills = 1;
       if (Object.keys(delta).length > 0) skills.incrementMastery(delta);
     }
@@ -544,11 +568,14 @@ export function createCombat(deps: CombatDeps) {
     if (getRunSeq() !== run) return;
     const def = BEASTS[b.kind];
     const dmg = Math.max(1, stackDmg(knife) - Math.floor((b.defOverride ?? def.def) / 2) + irnd(-1, 1));
+    // 攻撃前の覚醒状態を捕捉(melee と同じ流儀)。
+    const preAwakeKnife = b.awake;
     b.awake = true;
     sfx.play('hit');
     pushLog(`投げナイフが ${def.name} に ${dmg}ダメージ`);
-    const preAwakeKnife = b.awake;
-    const diedByKnife = damageBeast(b, dmg, '#fecaca', { weapon: true, preAwake: preAwakeKnife });
+    // 隠密マスタリー加算(rogue-32): 攻撃前に未覚醒なら加算(倒す必要なし)。
+    if (preAwakeKnife === false) skills.incrementMastery({ stealthKills: 1 });
+    const diedByKnife = damageBeast(b, dmg, '#fecaca', { weapon: true });
     // 跳弾(knifeRico): 命中時、対象に隣接する敵1体(最小id)へ半分ダメージ(乱数なし)。
     if (rankOf(get().skillEquipped, 'knifeRico') >= 1) {
       const near = get()
@@ -559,8 +586,10 @@ export function createCombat(deps: CombatDeps) {
         if (rico > 0) {
           pushLog(`ナイフが跳ねて ${BEASTS[near.kind].name} へ!`);
           const preAwakeNear = near.awake;
+          // 跳弾も隠密マスタリーの対象(未覚醒への攻撃は1回数える)。
+          if (preAwakeNear === false) skills.incrementMastery({ stealthKills: 1 });
           near.awake = true;
-          damageBeast(near, rico, '#fecaca', { weapon: true, preAwake: preAwakeNear });
+          damageBeast(near, rico, '#fecaca', { weapon: true });
         }
       }
     }
@@ -614,6 +643,8 @@ export function createCombat(deps: CombatDeps) {
     await sleep(280);
     if (getRunSeq() !== run) return;
     const def = BEASTS[b.kind];
+    // 攻撃前の覚醒状態を捕捉(melee・throwKnife と同じ流儀)。
+    const preAwake = b.awake;
     b.awake = true;
     // ダメージ計算(固定値・乱数なし)。
     let dmg = 0;
@@ -627,8 +658,9 @@ export function createCombat(deps: CombatDeps) {
     sfx.play('hit');
     // ログは投げた1つ分のラベル(束の ×n を出さない)。
     pushLog(`${itemLabel({ item: item.item, q: item.q })} が ${def.name} に ${dmg}ダメージ`);
-    const preAwake = b.awake;
-    damageBeast(b, dmg, '#fecaca', { weapon: true, preAwake });
+    // 隠密マスタリー加算(rogue-32): 攻撃前に未覚醒なら加算(倒す必要なし)。
+    if (preAwake === false) skills.incrementMastery({ stealthKills: 1 });
+    damageBeast(b, dmg, '#fecaca', { weapon: true });
     // 武具は対象セルへ落ちる(倒しても落ちる=拾い直せる)。水薬は消滅。
     if (itemDef.kind !== 'potion') {
       get().items.push({ id: nextItemSeq(), stack: item, pos: b.pos });
@@ -636,6 +668,83 @@ export function createCombat(deps: CombatDeps) {
     }
     set({ beasts: [...get().beasts] });
     await sleep(200);
+    if (getRunSeq() !== run) return;
+    beastsTurn();
+    endTurn();
+    settleAfterAction();
+  }
+
+  /** 連撃(rengeki・rogue-30): 素手で隣接の敵へ2連撃。装填6ターン。 */
+  async function rengeki(clicked: Beast): Promise<void> {
+    const run = getRunSeq();
+    // 事前確認(rogue-30 spec): phase/busy/rank/CD/素手/隣接。
+    const s = get();
+    if (s.phase !== 'play' || s.busy) return;
+    if (rankOf(s.skillEquipped, 'rengeki') < 1 || cdOf(s.cooldowns, 'rengeki') > 0) return;
+    if (s.player.weapon !== null) return;
+    if (stepDist(s.player.pos, clicked.pos) > 1) return;
+
+    const b = s.beasts.find((x) => x.id === clicked.id && x.alive);
+    if (!b) return;
+
+    triggerPose('attack', 600);
+    set({ busy: true, reach: { cells: [], parent: new Map() } });
+    sfx.play('melee');
+    await sleep(140);
+    if (getRunSeq() !== run) return;
+
+    const player = get().player;
+    const skillEq = get().skillEquipped;
+    const def = BEASTS[b.kind];
+    // 覚醒判定(preAwake)は1回目の攻撃前に1度だけ捕捉して両ヒットで共有。
+    const preAwake = b.awake;
+    // 隠密マスタリー(rogue-32): 2ヒットでも1回だけ加算。
+    let stealthCounted = false;
+
+    // 個体の強化判定(門番・深度係数等)。闇討ちの除外条件は meleeAttack と同じ
+    // (preAwake/lightLevel は両ヒットで固定なので、hitNum に依らず一度だけ評価できるが、
+    // meleeAttack と同じ計算式であることを明示するためループ内でも再評価する)。
+    const isElite = !!def.gatekeeper || b.atkOverride !== undefined || b.defOverride !== undefined;
+
+    for (let hitNum = 0; hitNum < 2; hitNum++) {
+      if (!b.alive) break; // 1撃目で死んだら2撃目なし。
+
+      b.awake = true;
+      const lightLevel = get().lightLevel;
+      let dmg = Math.max(1, playerAtk(player, skillEq, lightLevel) - (b.defOverride ?? def.def) + irnd(-1, 1));
+
+      // 各ヒットは meleeAttack と同じ計算(闇討ち・背討ちを含む)。
+      if (!preAwake && !def.senses && !isElite && lightLevel === 3 && knotActive(skillEq, 'yamiuchi')) {
+        dmg = b.hp;
+        if (hitNum === 0) pushLog('闇討ち!');
+      } else if (!preAwake && !def.senses && rankOf(skillEq, 'shinSegiri') >= 1) {
+        dmg *= 2;
+        if (hitNum === 0) pushLog('背後から急所を突いた!');
+      }
+
+      pushLog(`${def.name} に ${dmg}ダメージ`);
+      // 隠密マスタリー加算: 1ヒット目で未覚醒なら1回だけ加算。
+      if (!stealthCounted && preAwake === false) {
+        skills.incrementMastery({ stealthKills: 1 });
+        stealthCounted = true;
+      }
+      const died = damageBeast(b, dmg, '#fecaca', { unarmed: true });
+
+      // 延焼の刃: 各ヒットごとに判定。
+      if (!died && rankOf(skillEq, 'hiEnjin') >= 1 && rand() < 0.3) {
+        b.status = { kind: 'burn', turns: 2 };
+        pushLog(`${def.name} に火が移った!`);
+      }
+    }
+    // 連撃は単体攻撃(最大1体撃破)— 群れ祓い(3体撃破)の対象外なので実績判定はしない。
+
+    // クールダウン設定。
+    const cd = { ...get().cooldowns, rengeki: 6 };
+    set({ cooldowns: cd });
+
+    sfx.play('hit');
+    set({ beasts: [...get().beasts] });
+    await sleep(240);
     if (getRunSeq() !== run) return;
     beastsTurn();
     endTurn();
@@ -655,6 +764,7 @@ export function createCombat(deps: CombatDeps) {
     stepCandidates,
     moveBeast,
     meleeAttack,
+    rengeki,
     throwKnife,
     throwItem,
   };

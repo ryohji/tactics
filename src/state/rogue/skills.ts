@@ -15,7 +15,7 @@ import type { RogueState } from '../rogue';
 import * as masteryStore from '../masteryStore';
 import * as codexStore from '../codexStore';
 import * as sfx from '../../audio/sfx';
-import { ITEMS } from '../../model/loot';
+import { ITEMS, itemLabel } from '../../model/loot';
 import { cellKey, neighbors, type CellKey } from '../../model/fcc';
 import { FEATS, type FeatId } from '../../model/rogue/feats';
 import {
@@ -50,10 +50,12 @@ export interface SkillsDeps {
   endTurn(): void;
   /** たいまつの明かりの再発見(state/rogue/moveActions.ts の createMove が返す。A4 で移設済み)。 */
   discover(): void;
+  /** 地上アイテムの id 採番(rogue.ts のモジュール変数 itemSeq。rogue-30: nitoryu 解除の足元落下用)。 */
+  nextItemSeq(): number;
 }
 
 export function createSkills(deps: SkillsDeps) {
-  const { set, get, pushLog, logAction, settleAfterAction, beastsTurn, endTurn, discover } = deps;
+  const { set, get, pushLog, logAction, settleAfterAction, beastsTurn, endTurn, discover, nextItemSeq } = deps;
 
   /**
    * マスタリー(永続カウンタ)を加算し、レベルアップしたらログを出す(rogue-23)。
@@ -170,6 +172,22 @@ export function createSkills(deps: SkillsDeps) {
         pushLog('盾を背負い直した(片手扱いを解除)');
         set({ player: { ...player, pack: [...player.pack] } });
       }
+      // 二刀流(nitoryu)を外すと左手の武器が不整合になる — pack へ退避する
+      // (katate の盾退避パターンと同じ。rogue-30)。pack が満杯なら足元へ落とす。
+      if (id === 'nitoryu' && player.shield && ITEMS[player.shield.item].kind === 'weapon') {
+        const leftWeapon = player.shield;
+        player.shield = null;
+        if (player.pack.length < 10) {
+          player.pack.push(leftWeapon);
+          pushLog(`${itemLabel(leftWeapon)} を仕舞った(二刀流を解除)`);
+        } else {
+          const items = get().items;
+          items.push({ id: nextItemSeq(), stack: leftWeapon, pos: player.pos });
+          set({ items: [...items] });
+          pushLog(`${itemLabel(leftWeapon)} が持ちきれず足元に落ちた(二刀流を解除)`);
+        }
+        set({ player: { ...player, pack: [...player.pack] } });
+      }
       // 消灯(hiShobo)を外したとき消灯状態なら「絞る」へ戻す(rogue-24)。
       if (id === 'hiShobo' && s.lightLevel === 3) {
         set({ lightLevel: 0 });
@@ -191,7 +209,8 @@ export function createSkills(deps: SkillsDeps) {
       if (rankOf(s.skillEquipped, 'wanaAmi') < 2) return;
       const t = s.traps.find((x) => x.id === id);
       if (!t) return;
-      set({ traps: s.traps.filter((x) => x.id !== id), trapCooldown: 0 });
+      const cd = { ...s.cooldowns, wanaAmi: 0 };
+      set({ traps: s.traps.filter((x) => x.id !== id), cooldowns: cd });
       sfx.play('pickup');
       pushLog('罠を解いた(すぐ編み直せる)');
       // 回収も1ターン。
@@ -230,7 +249,7 @@ export function createSkills(deps: SkillsDeps) {
       logAction('SF');
       if (!get().skillOutfitting) return;
       set({ skillOutfitting: false });
-      pushLog('準備を終えて潜った。');
+      pushLog('支度を整えた。');
       settleAfterAction();
     },
 

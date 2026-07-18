@@ -31,7 +31,7 @@ import * as codexStore from '../codexStore';
 import type { SfxName } from '../../audio/sfx';
 import { OFFSETS, cellKey, type Cell, type CellKey } from '../../model/fcc';
 import { maybeExpand, type Chamber } from '../../model/dungeon';
-import { itemLabel, stackable, stackCount } from '../../model/loot';
+import { itemLabel, stackable, stackCount, ITEMS } from '../../model/loot';
 import { spawnChamber } from '../../model/rogue/spawn';
 import { discoverInto } from '../../model/rogue/visibility';
 import {
@@ -246,6 +246,21 @@ export function createMove(deps: MoveDeps) {
       const pickedUpIndices = new Set<number>();
       for (const idx of foundIndices) {
         const f = items[idx];
+        // 遺物(rogue-29): relics へ拾得。pack の 10 枠制限を受けない。
+        if (ITEMS[f.stack.item].kind === 'relic') {
+          player.relics.push(f.stack);
+          pushFx({ kind: 'popup', at: next, text: itemLabel(f.stack), color: '#fde68a', dur: 900 });
+          pushLog(`${itemLabel(f.stack)} を拾った`);
+          codexStore.recordItemFound(f.stack.item, f.stack.q);
+          // 遺物「巣の琥珀」(rogue-25): 初めて拾うと実績解除+専用ログ。
+          if (f.stack.item === 'amber') {
+            pushLog('巣の琥珀を見つけた! 持ち帰れば宝物になる');
+            skills.maybeUnlockFeat('relic');
+          }
+          pickedUpIndices.add(idx);
+          pickedUp = true;
+          continue;
+        }
         // stackable かつ pack に同 (item, q) の既存スタックがあれば n を加算。
         if (stackable(f.stack.item)) {
           const existing = player.pack.findIndex(
@@ -277,11 +292,6 @@ export function createMove(deps: MoveDeps) {
         pushLog(`${itemLabel(f.stack)} を拾った`);
         // アイテム図鑑(rogue-25・永続): 入手数・最高品質。
         codexStore.recordItemFound(f.stack.item, f.stack.q);
-        // 遺物「巣の琥珀」(rogue-25): 初めて拾うと実績解除+専用ログ。
-        if (f.stack.item === 'amber') {
-          pushLog('巣の琥珀を見つけた! 持ち帰れば宝物になる');
-          skills.maybeUnlockFeat('relic');
-        }
         pickedUpIndices.add(idx);
         pickedUp = true;
       }
@@ -290,7 +300,7 @@ export function createMove(deps: MoveDeps) {
       }
       set({
         items: items.filter((_, i) => !pickedUpIndices.has(i)),
-        player: { ...player, pack: [...player.pack] },
+        player: { ...player, pack: [...player.pack], relics: [...player.relics] },
       });
     }
   }

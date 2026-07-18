@@ -2,6 +2,8 @@
 // (または maxTurns まで)ヘッドレスに実行し、結果を要約する。Three/React 非依存。
 
 import { useRogue, seedRogueRng } from '../state/rogue';
+import * as masteryStore from '../state/masteryStore';
+import { INITIAL_MASTERY } from '../model/rogue/mastery';
 import type { Policy } from './policies';
 
 export interface RunResult {
@@ -30,10 +32,18 @@ export async function runOne(
   policy: Policy,
   maxTurns = 1500,
 ): Promise<RunResult> {
+  // マスタリー(kvStore 永続)は同一プロセス内で前のシードから持ち越されるため、
+  // ラン開始前に必ず初期化する(rogue-32: 未覚醒への攻撃で育つようになり、
+  // 放置すると2シード目以降の開始時に支度モーダルが開いてボットが詰まる)。
+  masteryStore.writeMastery({ ...INITIAL_MASTERY });
   useRogue.getState().restart(seed);
   seedRogueRng(seed);
   let i = 0;
   while (useRogue.getState().phase === 'play' && i < maxTurns) {
+    // ラン中の成長で支度・関門ドラフトが開いたら常に見送る(ボットはスキルを使わない)。
+    const s0 = useRogue.getState();
+    if (s0.skillOutfitting) s0.finishOutfitting();
+    else if (s0.skillDraft !== null) s0.skipDraft();
     await policy(i);
     i++;
   }

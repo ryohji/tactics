@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useRogue, playerAtk, playerDef, playerEvade, SKILL_NODES, rankOf } from '../../state/rogue';
-import { ITEMS, itemLabel, statLabel, mergeable, type ItemStack } from '../../model/loot';
+import { ITEMS, itemLabel, statLabel, stackAtk, mergeable, type ItemStack } from '../../model/loot';
 
 const SLOT_NAME = { weapon: '武器', armor: '防具', shield: '盾' } as const;
 
@@ -43,7 +43,11 @@ function EquipSlot({
 export function PackPanel() {
   const player = useRogue((s) => s.player);
   const useItem = useRogue((s) => s.useItem);
+  const equipOffhand = useRogue((s) => s.equipOffhand);
   const mergeItem = useRogue((s) => s.mergeItem);
+  const dropItem = useRogue((s) => s.dropItem);
+  const crushRelic = useRogue((s) => s.crushRelic);
+  const dedicateRelic = useRogue((s) => s.dedicateRelic);
   const uiMode = useRogue((s) => s.uiMode);
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
@@ -98,7 +102,13 @@ export function PackPanel() {
       <EquipSlot
         slot="shield"
         stack={player.shield}
-        stat={`回避${playerEvade(player, skillEquipped)}%`}
+        // 二刀流(rogue-30): 左手に片手武器を持てる。盾スロットの中身が武器なら攻表記に切り替える。
+        stat={
+          player.shield && ITEMS[player.shield.item].kind === 'weapon'
+            ? `攻${stackAtk(player.shield)}`
+            : `回避${playerEvade(player, skillEquipped)}%`
+        }
+        tag={player.shield && ITEMS[player.shield.item].kind === 'weapon' ? '左手' : undefined}
         locked={locked}
         emptyHint={
           player.weapon && ITEMS[player.weapon.item].twoHanded && rankOf(skillEquipped, 'katate') < 1
@@ -137,11 +147,17 @@ export function PackPanel() {
                   ? '調べる'
                   : '設置';
         // 投げられる種類か(武具・水薬のみ)。装備中スロットは対象外。
+        // rogue-30: 武器は左手(盾スロット)にも装備されうる — その一致も見る。
         const isEquipped =
-          (def.kind === 'weapon' && player.weapon?.item === g.stack.item && player.weapon.q === g.stack.q) ||
+          (def.kind === 'weapon' &&
+            ((player.weapon?.item === g.stack.item && player.weapon.q === g.stack.q) ||
+              (player.shield?.item === g.stack.item && player.shield.q === g.stack.q))) ||
           (def.kind === 'armor' && player.armor?.item === g.stack.item && player.armor.q === g.stack.q) ||
           (def.kind === 'shield' && player.shield?.item === g.stack.item && player.shield.q === g.stack.q);
         const canThrow = ['weapon', 'armor', 'shield', 'potion'].includes(def.kind) && !isEquipped;
+        // 二刀流(rogue-30): nitoryu ランクI以上・片手武器・未装備なら左手にも装備できる。
+        const canOffhand =
+          def.kind === 'weapon' && !def.twoHanded && !isEquipped && rankOf(skillEquipped, 'nitoryu') >= 1;
         return (
           <div className="pack-row" key={`${g.stack.item}:${g.stack.q}`}>
             <button
@@ -165,14 +181,62 @@ export function PackPanel() {
                 投げる
               </button>
             )}
+            {canOffhand && (
+              <button
+                className="offhand"
+                disabled={locked}
+                onClick={() => equipOffhand(g.index)}
+                title="二刀流: 左手(盾スロット)に装備"
+              >
+                左手に
+              </button>
+            )}
             {g.count >= 2 && mergeable(g.stack.item) && (
               <button className="merge" disabled={locked} onClick={() => mergeItem(g.index)}>
                 合成
               </button>
             )}
+            <button
+              className="drop"
+              disabled={locked}
+              onClick={() => dropItem(g.index)}
+              title="束ごと足元に置く(ターン消費なし)"
+            >
+              捨てる
+            </button>
           </div>
         );
       })}
+      {/* 遺物袋(rogue-29): pack の10枠を使わない別枠。砕くと全回復するが持ち帰れなくなる。 */}
+      {player.relics.length > 0 && (
+        <>
+          <h4 className="relic-head">遺物</h4>
+          {player.relics.map((r, i) => (
+            <div className="pack-row relic-row" key={`relic:${i}`}>
+              <span className="relic-item">
+                {itemLabel(r)}
+                <span className="use">{statLabel(r)}</span>
+              </span>
+              <button
+                className="crush"
+                disabled={locked}
+                onClick={() => crushRelic(i)}
+                title="砕くと全回復(1ターン)。持ち帰れなくなる"
+              >
+                砕く
+              </button>
+              <button
+                className="dedicate"
+                disabled={locked}
+                onClick={() => dedicateRelic(i)}
+                title="心得を組み替える"
+              >
+                捧げる
+              </button>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

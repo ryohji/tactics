@@ -23,12 +23,13 @@ export const MASTERY_NAME: Record<MasterySystem, string> = {
   light: '灯火',
 };
 
-/** スキルノード id(rogue-27: ライン7 + 単発13 = 20個)。 */
+/** スキルノード id(rogue-30: ライン7 + 単発15 = 22個)。 */
 export type NodeId =
   // --- arms(武技) ---
   | 'kensan'
   | 'ryote'
   | 'katate'
+  | 'nitoryu'
   // --- guard(盾) ---
   | 'jutsu'
   | 'tateKakage'
@@ -40,6 +41,7 @@ export type NodeId =
   | 'kenMigaru'
   | 'kenMuku'
   | 'kenHaisui'
+  | 'rengeki'
   // --- stealth(隠密) ---
   | 'shinShinobi'
   | 'shinMekiki'
@@ -57,6 +59,7 @@ export const NODE_IDS: NodeId[] = [
   'kensan',
   'ryote',
   'katate',
+  'nitoryu',
   'jutsu',
   'tateKakage',
   'kouka',
@@ -65,6 +68,7 @@ export const NODE_IDS: NodeId[] = [
   'kenMigaru',
   'kenMuku',
   'kenHaisui',
+  'rengeki',
   'shinShinobi',
   'shinMekiki',
   'shinSegiri',
@@ -114,6 +118,14 @@ export const SKILL_NODES: Record<NodeId, SkillNode> = {
     costs: [2],
     // 命中制はまだ無いので攻撃減で代替する(将来、命中率を導入したら命中−へ置換する)。
     descs: ['両手武器でも盾を装備できる(その間、攻撃−2)'],
+  },
+  nitoryu: {
+    id: 'nitoryu',
+    system: 'arms',
+    name: '二刀流',
+    unlockLevels: [3],
+    costs: [3],
+    descs: ['左手(盾スロット)に片手武器を持てる。近接命中後、同じ対象へ左手の攻の半分の追撃'],
   },
 
   // --- guard(盾) -----------------------------------------------------------------
@@ -196,6 +208,14 @@ export const SKILL_NODES: Record<NodeId, SkillNode> = {
     unlockLevels: [3],
     costs: [3],
     descs: ['HP25%以下かつ障壁0のとき、回避+25%・攻撃+3'],
+  },
+  rengeki: {
+    id: 'rengeki',
+    system: 'fist',
+    name: '連撃',
+    unlockLevels: [2],
+    costs: [2],
+    descs: ['発動して隣接の敵へ素手で2連撃(1ターン)。装填6ターン'],
   },
 
   // --- stealth(隠密) ---------------------------------------------------------------
@@ -299,6 +319,11 @@ export function maxRank(id: NodeId): number {
 /** 装着中スキル列から id の現在ランクを引く(未装着=0)。 */
 export function rankOf(eq: readonly EquippedSkill[], id: NodeId): number {
   return eq.find((e) => e.id === id)?.rank ?? 0;
+}
+
+/** クールダウン map から id のクールダウンターンを引く(未定義=0)。 */
+export function cdOf(cooldowns: Partial<Record<NodeId, number>>, id: NodeId): number {
+  return cooldowns[id] ?? 0;
 }
 
 /**

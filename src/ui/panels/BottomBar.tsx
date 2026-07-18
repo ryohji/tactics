@@ -1,4 +1,4 @@
-import { useRogue, depthOf, STRATUM_DEPTH, rankOf } from '../../state/rogue';
+import { useRogue, depthOf, STRATUM_DEPTH, rankOf, cdOf } from '../../state/rogue';
 
 /** 脱出ボタン(rogue-25・push-your-luck の自発的終点)。警告帯(深度が
  * 8*(stratum+1) 以上・崩落ライン未満)に居る間だけ表示する。確認モーダルは
@@ -28,7 +28,7 @@ function EscapeButton({ busy, onClick }: { busy: boolean; onClick: () => void })
 /** 罠編みボタン(rogue-27)。wanaAmi ランクI以上で表示。装填中は無効化。 */
 function WeaveTrapButton({ busy }: { busy: boolean }) {
   const skillEquipped = useRogue((s) => s.skillEquipped);
-  const trapCooldown = useRogue((s) => s.trapCooldown);
+  const cooldowns = useRogue((s) => s.cooldowns);
   const traps = useRogue((s) => s.traps);
   const weaveTrap = useRogue((s) => s.weaveTrap);
   const uiMode = useRogue((s) => s.uiMode);
@@ -38,7 +38,8 @@ function WeaveTrapButton({ busy }: { busy: boolean }) {
   const maxSimultaneous = rank;
   const atCapacity = traps.length >= maxSimultaneous;
   const isActive = uiMode === 'place';
-  const isDisabled = busy || trapCooldown > 0 || atCapacity;
+  const cd = cdOf(cooldowns, 'wanaAmi');
+  const isDisabled = busy || cd > 0 || atCapacity;
 
   return (
     <button
@@ -48,7 +49,40 @@ function WeaveTrapButton({ busy }: { busy: boolean }) {
       title={`罠を編む(同時${maxSimultaneous}個)`}
     >
       🕸
-      {trapCooldown > 0 && <span className="cooldown">{trapCooldown}</span>}
+      {cd > 0 && <span className="cooldown">{cd}</span>}
+    </button>
+  );
+}
+
+/** 連撃ボタン(rogue-30)。rengeki ランクI以上で表示。装填中・武器持ち・敵が隣接していないときは無効化。 */
+function RengekiButton({ busy }: { busy: boolean }) {
+  const skillEquipped = useRogue((s) => s.skillEquipped);
+  const cooldowns = useRogue((s) => s.cooldowns);
+  const rengeki = useRogue((s) => s.rengeki);
+  const playerWeapon = useRogue((s) => s.player.weapon);
+  const beasts = useRogue((s) => s.beasts);
+  const hoverBeastId = useRogue((s) => s.hoverBeastId);
+
+  const rank = rankOf(skillEquipped, 'rengeki');
+  if (rank < 1) return null;
+
+  const cd = cdOf(cooldowns, 'rengeki');
+  const hasWeapon = playerWeapon !== null;
+
+  // 隣接敵がいるかチェック
+  const hoverBeast = hoverBeastId !== null ? beasts.find((b) => b.id === hoverBeastId && b.alive) : null;
+  const canUse = hoverBeast !== null && !hasWeapon && cd === 0 && !busy;
+
+  const disabledReason = hasWeapon ? '武器を装備している' : cd > 0 ? '装填中' : '隣接敵なし';
+
+  return (
+    <button
+      disabled={!canUse}
+      onClick={() => hoverBeast && rengeki(hoverBeast.id)}
+      title={`連撃: 素手で2連撃(${disabledReason})`}
+    >
+      👊
+      {cd > 0 && <span className="cooldown">{cd}</span>}
     </button>
   );
 }
@@ -115,6 +149,7 @@ export function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
             待機
           </button>
           <WeaveTrapButton busy={busy} />
+          <RengekiButton busy={busy} />
           <button onClick={toggleMap} title="マップ(M)">
             🗺
           </button>

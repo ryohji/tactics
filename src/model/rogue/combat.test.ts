@@ -29,6 +29,7 @@ function basePlayer(overrides: Partial<PlayerState> = {}): PlayerState {
     armor: null,
     shield: null,
     pack: [],
+    relics: [],
     barrier: 0,
     status: null,
     immune: 0,
@@ -101,5 +102,29 @@ describe('beastStrike の回避判定(rogue-22)', () => {
     expect(withoutJutsu.dmg).toBeGreaterThan(0);
     const withJutsu = beastStrike(bat(), player, rng, [{ id: 'jutsu', rank: 1 }]);
     expect(withJutsu.dmg).toBe(0);
+  });
+
+  it('二刀流(rogue-30): 盾スロットに武器が入っていても盾ボーナスは乗らない(kind ガード)', () => {
+    // 盾10%+jutsuII8%=18%なら rng*100=12 でヒットするはずの値だが、盾スロットの中身が
+    // 武器(kind==='weapon')なら playerEvade は0を返すので回避判定の乱数自体を引かない。
+    let calls = 0;
+    const rng = () => {
+      calls++;
+      return 0.12;
+    };
+    const player = basePlayer({ shield: { item: 'dagger', q: 0 } });
+    const { dmg } = beastStrike(bat(), player, rng, [{ id: 'jutsu', rank: 2 }]);
+    expect(dmg).toBeGreaterThan(0); // 回避が発生しない
+    expect(calls).toBe(1); // ダメージの irnd(-1,1) のみ(盾なし相当・回避判定の乱数を引かない)
+  });
+
+  it('二刀流(rogue-30): 盾スロットの武器では回避成功時のログが「盾で受け流した」にならない', () => {
+    // kenMigaru(素手回避)で盾を使わずに回避を成立させ、ログ文言が「かわした」側になることを見る。
+    const rng = () => 0; // 必ず回避成功
+    const player = basePlayer({ shield: { item: 'dagger', q: 0 }, weapon: null });
+    const { dmg, events } = beastStrike(bat(), player, rng, [{ id: 'kenMigaru', rank: 1 }]);
+    expect(dmg).toBe(0);
+    expect(events.some((e) => e.kind === 'log' && e.msg.includes('かわした'))).toBe(true);
+    expect(events.some((e) => e.kind === 'log' && e.msg.includes('盾で受け流した'))).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import type { Chamber, Stub } from '../dungeon';
 import type { BeastKind } from '../beasts';
 import type { ItemStack } from '../loot';
 import type { SfxName } from '../../audio/sfx';
-import type { DraftEntry, EquippedSkill } from './mastery';
+import type { DraftEntry, EquippedSkill, NodeId } from './mastery';
 
 /** rogue の表示倍率(固定)。 */
 export const ROGUE_S = 2;
@@ -24,7 +24,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r28';
+export const GAME_VERSION = 'r31';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
@@ -133,6 +133,8 @@ export interface PlayerState {
   /** 盾(rogue-22)。両手武器(twoHanded)とは併用不可 — 装備の排他は store 側で保証する。 */
   shield: ItemStack | null;
   pack: ItemStack[];
+  /** 遺物袋(rogue-29)。上限なし、拾得時に pack の枠を消費しない。 */
+  relics: ItemStack[];
   /** 上書き式シールド(rogue-21)。張り直しは加算せず新しい値で置き換える。層の崩落で消える。 */
   barrier: number;
   status: PlayerStatus | null;
@@ -171,8 +173,8 @@ export type SkillDraft = DraftEntry[] | 'free' | null;
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 8: rogue-28 アイテムの束ね(ItemStack.n が保存に乗る)。旧 v7 は非互換。 */
-  v: 8;
+  /** 10: rogue-30 cooldowns 一般化(trapCooldown → cooldowns.wanaAmi / cooldowns.rengeki)。旧 v9 は非互換。 */
+  v: 10;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;
@@ -201,8 +203,8 @@ export interface SaveData {
   skillDraft: SkillDraft;
   /** 見送り権(rogue-27): true なら次の関門でドラフトの代わりに 'free'(自由選択)が出る。 */
   skillFreePick: boolean;
-  /** 罠(罠編み)の装填クールダウン(rogue-27。S1 では常に0で保存し、S2 の設置/回収で使う)。 */
-  trapCooldown: number;
+  /** スキルのクールダウン(rogue-30)。wanaAmi=罠編み・rengeki=連撃(rogue-30)。 */
+  cooldowns: Partial<Record<NodeId, number>>;
   actionLog: ActionLogEntry[];
   log: string[];
 }

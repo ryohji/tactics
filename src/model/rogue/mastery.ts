@@ -20,6 +20,7 @@ export {
   type EquippedSkill,
   maxRank,
   rankOf,
+  cdOf,
   type KnotId,
   type Knot,
   KNOTS,
@@ -40,7 +41,7 @@ export interface MasteryCounters {
   absorbed: number;
   /** 素手(武器null)討伐(rogue-24: 拳闘)。 */
   fistKills: number;
-  /** 未覚醒の敵の討伐(rogue-24: 隠密)。 */
+  /** 未覚醒の敵への攻撃命中(rogue-32: 隠密)。 */
   stealthKills: number;
   /** 罠(triggerTrap 経由)での討伐(rogue-24: 罠師)。 */
   trapKills: number;

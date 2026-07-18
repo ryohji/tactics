@@ -32,6 +32,7 @@ import {
   masteryLevels,
   rankOf,
   type MasteryCounters,
+  type NodeId,
 } from '../../model/rogue/mastery';
 import type { FeatId } from '../../model/rogue/feats';
 
@@ -89,7 +90,7 @@ export function createStratum(deps: StratumDeps) {
       cellChamber: new Map([...s.cellChamber].filter(([k]) => alive(k))),
       items: s.items.filter((i) => layer(i.pos) <= cutLayer),
       traps: remainingTraps,
-      trapCooldown: trapRemoved ? 0 : s.trapCooldown,
+      cooldowns: trapRemoved ? { ...s.cooldowns, wanaAmi: 0 } : s.cooldowns,
       turrets: s.turrets.filter((t) => layer(t.pos) <= cutLayer),
       decoys: s.decoys.filter((d) => layer(d.pos) <= cutLayer),
       beasts: s.beasts.filter((b) => layer(b.pos) <= cutLayer),
@@ -185,8 +186,13 @@ export function createStratum(deps: StratumDeps) {
   function endTurn(): void {
     const turn = get().turn + 1;
     const { player, lightLevel, skillEquipped } = get();
-    // 罠編み(wanaAmi・rogue-27): 装填クールダウンをターンごとに1ずつ回復する。
-    if (get().trapCooldown > 0) set({ trapCooldown: get().trapCooldown - 1 });
+    // スキルのクールダウン(rogue-30): 全クールダウンをターンごとに1ずつ減算する。
+    const cds = get().cooldowns;
+    const newCds: typeof cds = {};
+    for (const [id, val] of Object.entries(cds)) {
+      if (val > 1) newCds[id as NodeId] = val - 1;
+    }
+    set({ cooldowns: newCds });
     // 篝火(hiKagari・rogue-24): 「広げる」中は回復間隔−1(最低2)。
     const regenEvery =
       lightLevel === 2 && rankOf(skillEquipped, 'hiKagari') >= 1

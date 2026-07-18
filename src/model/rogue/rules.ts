@@ -92,20 +92,23 @@ export function playerDef(p: PlayerState): number {
 /**
  * 盾の回避%(rogue-22)。盾なしは 0(=beastStrike が回避判定の乱数を引かない)。
  * jutsu(盾術・rogue-23): 盾装備中、回避+ランク段階(5/8/12。rogue-27)。
+ * rogue-30(二刀流): 盾スロットには片手武器も入りうる — 盾装備中の判定は
+ * kind==='shield' のときだけ有効にする(左手武器では盾ボーナスが乗らない)。
  */
 export function playerEvade(
   p: PlayerState,
   eq: readonly EquippedSkill[] = [],
   ranged = false,
 ): number {
-  let evade = p.shield ? stackEvade(p.shield) : 0;
+  const hasShield = p.shield !== null && ITEMS[p.shield.item].kind === 'shield';
+  let evade = hasShield ? stackEvade(p.shield!) : 0;
   const jutsuRank = rankOf(eq, 'jutsu');
-  if (p.shield && jutsuRank > 0) evade += [5, 8, 12][jutsuRank - 1];
+  if (hasShield && jutsuRank > 0) evade += [5, 8, 12][jutsuRank - 1];
   // rogue-24: 拳闘・盾の補正(rogue-27: 身軽はランク制。10/10/15)。
   const kenMigaruRank = rankOf(eq, 'kenMigaru');
   if (!p.weapon && kenMigaruRank > 0) evade += [10, 10, 15][kenMigaruRank - 1]; // 身軽(素手・盾不要)
   if (p.hp * 4 <= p.maxHp && p.barrier === 0 && rankOf(eq, 'kenHaisui') >= 1) evade += 25; // 背水
-  if (ranged && p.shield && rankOf(eq, 'tateKakage') >= 1) evade += 20; // 掲盾(遠隔のみ)
+  if (ranged && hasShield && rankOf(eq, 'tateKakage') >= 1) evade += 20; // 掲盾(遠隔のみ)
   return evade;
 }
 

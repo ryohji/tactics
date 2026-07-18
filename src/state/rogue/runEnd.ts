@@ -104,7 +104,7 @@ export function createRunEnd(deps: RunEndDeps) {
       const depth = depthOf(s.player.pos);
       const warnAt = STRATUM_DEPTH * (s.stratum + 1);
       if (depth < warnAt || depth >= warnAt + 2) return; // 警告帯限定(HUD のボタンも同条件)
-      const amberCount = s.player.pack.filter((it) => it.item === 'amber').length;
+      const amberCount = s.player.relics.filter((it) => it.item === 'amber').length;
       codexStore.recordEscape(amberCount, s.stratum + 1); // 展示棚: 琥珀加算・最深生還層更新
       set({ phase: 'escaped', busy: false, reach: { cells: [], parent: new Map() } });
       persist.clearSave(); // dead と同じく、ローグライクの掟: 終えた冒険は再開できない

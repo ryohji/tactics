@@ -10,6 +10,7 @@ import { BEASTS } from '../beasts';
 import type { Beast, BeastStatus, Decoy, GameEvent, PlayerState, PlayerStatus, Turret } from './types';
 import { irnd, playerDef, playerEvade } from './rules';
 import type { EquippedSkill } from './mastery';
+import { ITEMS } from '../loot';
 
 /** 毒(rogue-21)の持続ターン(命中時)。 */
 const POISON_HIT_TURNS = 3;
@@ -61,12 +62,15 @@ export function beastStrike(
   // ranged(rogue-24): 遠隔攻撃なら掲盾(tateKakage)の回避が上乗せされる。
   const evade = playerEvade(player, skills, ranged);
   if (evade > 0 && rng() * 100 < evade) {
+    // rogue-30(二刀流): 盾スロットに左手武器が入っている場合は「盾で受け流した」と言わない
+    // (playerEvade も kind==='shield' のときだけ盾ボーナスを乗せるため、ログ文言も揃える)。
+    const hasShield = player.shield !== null && ITEMS[player.shield.item].kind === 'shield';
     return {
       dmg: 0,
       events: [
         { kind: 'fx', fx: { kind: 'popup', at: player.pos, text: '回避!', color: '#93c5fd', dur: 900 } },
         { kind: 'sfx', name: 'cancel' },
-        { kind: 'log', msg: `${def.name} の攻撃を${player.shield ? '盾で受け流した' : 'かわした'}!` },
+        { kind: 'log', msg: `${def.name} の攻撃を${hasShield ? '盾で受け流した' : 'かわした'}!` },
       ],
       status: player.status,
     };

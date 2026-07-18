@@ -7,6 +7,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { cellKey, layer } from '../model/fcc';
 import { distW, stepDist } from '../model/dungeon';
 import { useRogue, seedRogueRng } from './rogue';
+import * as masteryStore from './masteryStore';
+import { INITIAL_MASTERY } from '../model/rogue/mastery';
 
 async function run(ms = 3000) {
   await vi.advanceTimersByTimeAsync(ms);
@@ -14,6 +16,11 @@ async function run(ms = 3000) {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  // 同一ワーカーの永続層(kvStore のインメモリフォールバック)を他テストと共有
+  // しうるため、マスタリーを必ず初期値へ戻す。rogue-32 で「未覚醒への攻撃」でも
+  // マスタリーが育つようになり、汚染があるとボットの初回ランに支度モーダルが
+  // 開いて固定方針が詰まる(全体実行時のみ落ちる flake の根)。
+  masteryStore.writeMastery({ ...INITIAL_MASTERY });
 });
 
 /** 隣接して生きている敵のうち最小 id(いなければ null)。 */
