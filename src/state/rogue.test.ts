@@ -2859,8 +2859,262 @@ describe('アイテムの束ね(rogue-28)', () => {
   });
 });
 
+describe('rogue-34: 武具は束ねない・上限', () => {
+  it('満杯(10枠)でも同 (item,q) の砲塔が加算で拾える(turret は stackable のまま)', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'turret', q: 0 },
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 3101, stack: { item: 'turret', q: 0 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    expect(player().pack).toHaveLength(10); // 枠数は変わらない
+    const turret = player().pack.find((x) => x.item === 'turret');
+    expect(turret?.n ?? 1).toBe(2); // 初期1 + 拾得1
+  });
+
+  it('満杯(10枠)で同 (item,q) の武器は加算されず拾えない(rogue-33版の反転)', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'dagger', q: 0 },
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 3102, stack: { item: 'dagger', q: 0 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    expect(player().pack).toHaveLength(10);
+    const dagger0 = player().pack.find((x) => x.item === 'dagger' && x.q === 0);
+    expect(dagger0?.n ?? 1).toBe(1); // 武具は束ねない → 加算されない
+    expect(useRogue.getState().items.length).toBe(1); // 拾えず床に残る
+    expect(useRogue.getState().log.at(-1)).toContain('これ以上持てない');
+  });
+
+  it('満杯(10枠)で q が違う武器は拾えず床に残る', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'dagger', q: 0 },
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 3103, stack: { item: 'dagger', q: 10 }, pos }], // q=10 は既存スタックにない
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    expect(player().pack).toHaveLength(10);
+    expect(useRogue.getState().items.length).toBe(1); // 床に残る
+    expect(useRogue.getState().log.at(-1)).toContain('これ以上持てない');
+  });
+
+  it('装備: 武具は n を持たない — 同(item,q)の武器2本は2枠のまま、装備往復でも合流しない', () => {
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'sword', q: 0 }, { item: 'sword', q: 0 }] },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'sword');
+    useRogue.getState().useItem(idx);
+    expect(player().weapon).toEqual({ item: 'sword', q: 0 });
+    const remaining = player().pack.filter((x) => x.item === 'sword' && x.q === 0);
+    expect(remaining).toHaveLength(1); // 装備した1本は pack から splice、もう1本だけ残る
+    expect(remaining[0].n).toBeUndefined();
+    useRogue.getState().unequip('weapon');
+    const afterUnequip = player().pack.filter((x) => x.item === 'sword' && x.q === 0);
+    expect(afterUnequip).toHaveLength(2); // 合流せず新枠として push される
+    expect(afterUnequip.every((x) => x.n === undefined)).toBe(true);
+  });
+
+  it('装備: 両手武器を構えて押し出された盾は pack へ新しい1枠として push される(合流しない)', () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        shield: { item: 'shield', q: 0 }, // 装備中の盾
+        pack: [...player().pack, { item: 'shield', q: 0 }, { item: 'maul', q: 0 }], // 予備の盾1枚+両手武器
+      },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'maul');
+    useRogue.getState().useItem(idx);
+    expect(player().weapon?.item).toBe('maul');
+    expect(player().shield).toBeNull();
+    // 押し出された盾(装備していたもの)は pack へ別枠として push される(合流しない)。
+    const shields = player().pack.filter((x) => x.item === 'shield' && x.q === 0);
+    expect(shields).toHaveLength(2);
+    expect(shields.every((x) => x.n === undefined)).toBe(true);
+  });
+
+  it('設置: 砲塔 n=2 から設置すると n=1 が pack に残る(turret は stackable のまま)', async () => {
+    useRogue.setState({
+      player: { ...player(), pack: [...player().pack, { item: 'turret', q: 0, n: 2 }] },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'turret');
+    useRogue.getState().useItem(idx);
+    await run(2000);
+    const remaining = player().pack.find((x) => x.item === 'turret');
+    expect(remaining?.n ?? 1).toBe(1);
+    expect(useRogue.getState().turrets).toHaveLength(1);
+  });
+
+  it('合成: 同 (item,q) の別枠2つを消費してq+1が1個できる(2枠方式のみで成立)', () => {
+    useRogue.getState().unequip('weapon'); // 初期武器 dagger q0 を pack へ(空にしてから積む)
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: player().pack.filter((x) => x.item !== 'dagger').concat([{ item: 'dagger', q: 0 }, { item: 'dagger', q: 0 }]),
+      },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'dagger');
+    useRogue.getState().mergeItem(idx);
+    const daggers = player().pack.filter((x) => x.item === 'dagger');
+    expect(daggers).toHaveLength(1);
+    expect(daggers[0].q).toBe(1);
+    expect(daggers[0].n).toBeUndefined();
+  });
+
+  it('合成: 別枠が無ければ拒否される(1枠 n>=2 の経路は武具に存在しない)', () => {
+    useRogue.getState().unequip('weapon');
+    useRogue.setState({
+      player: { ...player(), pack: player().pack.filter((x) => x.item !== 'dagger').concat([{ item: 'dagger', q: 0 }]) },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'dagger' && x.q === 0);
+    const before = player().pack.length;
+    useRogue.getState().mergeItem(idx);
+    expect(player().pack).toHaveLength(before); // 変化なし
+    expect(useRogue.getState().log.at(-1)).toContain('もう一つ必要');
+  });
+
+  it('拾得の分割: 砲塔×10のスロットへ11個目を拾うと新枠ができる', async () => {
+    const pos = freeNeighbor();
+    useRogue.setState({
+      player: { ...player(), pack: [{ item: 'turret', q: 0, n: 10 }] },
+      items: [{ id: 3110, stack: { item: 'turret', q: 0 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const turretSlots = player().pack.filter((x) => x.item === 'turret' && x.q === 0);
+    expect(turretSlots).toHaveLength(2);
+    expect(turretSlots[0].n ?? 1).toBe(10);
+    expect(turretSlots[1].n ?? 1).toBe(1);
+    expect(useRogue.getState().items).toHaveLength(0); // 全部拾えたので床から消える
+  });
+
+  it('拾得の部分回収: 既存スロットに空きがあり・新枠が作れない(pack満杯)なら上限まで拾って残りは床に残る', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'turret', q: 0, n: 7 }, // 上限10まで残り3個分の空きがある
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 3111, stack: { item: 'turret', q: 0, n: 5 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const turret = player().pack.find((x) => x.item === 'turret' && x.q === 0);
+    expect(turret?.n ?? 1).toBe(10); // 空きの3個分だけ上限まで加算
+    const ground = useRogue.getState().items.find((i) => i.stack.item === 'turret');
+    expect(ground).toBeDefined();
+    expect(ground?.stack.n ?? 1).toBe(2); // 5 - 3 = 2 個が床に残る(新枠は作れない)
+    expect(useRogue.getState().log.at(-1)).toContain('残りは床に');
+  });
+
+  it('拾得の分割: 水薬は5個で分割される', async () => {
+    const pos = freeNeighbor();
+    useRogue.setState({
+      player: { ...player(), pack: [{ item: 'potion', q: 0, n: 4 }] },
+      items: [{ id: 3112, stack: { item: 'potion', q: 0, n: 3 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const slots = player().pack.filter((x) => x.item === 'potion' && x.q === 0);
+    expect(slots).toHaveLength(2);
+    expect(slots[0].n ?? 1).toBe(5); // 4 + 1 = 5(上限)
+    expect(slots[1].n ?? 1).toBe(2); // 残り 2 個は新枠
+    expect(useRogue.getState().items).toHaveLength(0);
+  });
+
+  it('拾得の分割: ナイフは10個で分割される', async () => {
+    const pos = freeNeighbor();
+    useRogue.setState({
+      player: { ...player(), pack: [{ item: 'knife', q: 0, n: 8 }] },
+      items: [{ id: 3113, stack: { item: 'knife', q: 0, n: 5 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const slots = player().pack.filter((x) => x.item === 'knife' && x.q === 0);
+    expect(slots).toHaveLength(2);
+    expect(slots[0].n ?? 1).toBe(10); // 8 + 2 = 10(上限)
+    expect(slots[1].n ?? 1).toBe(3); // 残り 3 個は新枠
+    expect(useRogue.getState().items).toHaveLength(0);
+  });
+
+  it('拾得: 1個も拾えないときは従来の「これ以上持てない」ログ', async () => {
+    const pos = freeNeighbor();
+    const fullPack: ItemStack[] = [
+      { item: 'potion', q: 0, n: 5 },
+      { item: 'dagger', q: 1 },
+      { item: 'dagger', q: 2 },
+      { item: 'dagger', q: 3 },
+      { item: 'dagger', q: 4 },
+      { item: 'dagger', q: 5 },
+      { item: 'dagger', q: 6 },
+      { item: 'dagger', q: 7 },
+      { item: 'dagger', q: 8 },
+      { item: 'dagger', q: 9 },
+    ];
+    useRogue.setState({
+      player: { ...player(), pack: fullPack },
+      items: [{ id: 3114, stack: { item: 'potion', q: 0, n: 2 }, pos }],
+    });
+    useRogue.getState().clickCell(pos);
+    await run(3000);
+    const potion = player().pack.find((x) => x.item === 'potion' && x.q === 0);
+    expect(potion?.n ?? 1).toBe(5); // 変化なし(満杯・空き枠なし)
+    expect(useRogue.getState().items.length).toBe(1); // 床に残る
+    const ground = useRogue.getState().items.find((i) => i.stack.item === 'potion');
+    expect(ground?.stack.n ?? 1).toBe(2); // 床の n も変化なし
+    expect(useRogue.getState().log.at(-1)).toContain('これ以上持てない');
+  });
+});
+
 describe('アイテム投擲(rogue-28)', () => {
-  it('weapon 投擲: ダメージ=floor(stackAtk/2)+2、床に落ちる、n消費なし(武具は枠単位)', async () => {
+  it('weapon 投擲: ダメージ=floor(stackAtk/2)+2、床に落ちる、n===1 は枠ごと削除', async () => {
     const target = placeBeastAdjacent('rat', 100);
     useRogue.setState({
       player: {
@@ -2876,7 +3130,7 @@ describe('アイテム投擲(rogue-28)', () => {
     expect(useRogue.getState().turn).toBe(turn0 + 1);
     // 敵がダメージを受ける
     expect(target.hp).toBe(100 - 5);
-    // pack から削除(武具は枠ごと)
+    // pack から削除(n===1 は枠ごと)
     expect(player().pack).toHaveLength(0);
     // 敵の位置に落ちる
     const items = useRogue.getState().items;
@@ -3175,9 +3429,24 @@ describe('捨てる・遺物・砕く(rogue-29)', () => {
     expect(useRogue.getState().turn).toBe(1); // ターン+1
   });
 
-  it('dedicateRelic(rogue-32): 遺物が消え・turn+1・skillOutfitting=true になる', async () => {
+  it('crushRelic(rogue-34): amber 以外(royalJelly・mandible)は拒否される(変化なし)', async () => {
+    for (const item of ['royalJelly', 'mandible'] as const) {
+      useRogue.setState({
+        player: { ...player(), hp: 5, maxHp: 24, relics: [{ item, q: 0 }] },
+        turn: 0,
+      });
+      useRogue.getState().crushRelic(0);
+      await run(3000);
+      const s = useRogue.getState();
+      expect(s.player.hp).toBe(5); // 回復しない
+      expect(s.player.relics.length).toBe(1); // 消えない
+      expect(s.turn).toBe(0); // ターン不変
+    }
+  });
+
+  it('dedicateRelic(rogue-32・rogue-34): 遺物が消え・turn+1・skillOutfitting=true になる', async () => {
     useRogue.setState({
-      player: { ...player(), relics: [{ item: 'amber', q: 0 }] },
+      player: { ...player(), relics: [{ item: 'royalJelly', q: 0 }] },
     });
     useRogue.getState().dedicateRelic(0);
     await run(3000);
@@ -3185,7 +3454,23 @@ describe('捨てる・遺物・砕く(rogue-29)', () => {
     expect(s.player.relics.length).toBe(0); // 遺物消滅
     expect(s.turn).toBe(1); // ターン+1(先に消費)
     expect(s.skillOutfitting).toBe(true); // 支度パネルが開く
-    expect(s.log.some((m) => m.includes('琥珀を捧げた'))).toBe(true);
+    expect(s.log.some((m) => m.includes('王乳を捧げた'))).toBe(true);
+  });
+
+  it('dedicateRelic(rogue-34): royalJelly 以外(amber・mandible)は拒否される(変化なし)', async () => {
+    for (const item of ['amber', 'mandible'] as const) {
+      useRogue.setState({
+        player: { ...player(), relics: [{ item, q: 0 }] },
+        turn: 0,
+        skillOutfitting: false,
+      });
+      useRogue.getState().dedicateRelic(0);
+      await run(3000);
+      const s = useRogue.getState();
+      expect(s.player.relics.length).toBe(1); // 消えない
+      expect(s.turn).toBe(0); // ターン不変
+      expect(s.skillOutfitting).toBe(false);
+    }
   });
 
   it('dedicateRelic(rogue-32): 支度中の装着/解除が動き、finishOutfitting で「支度を整えた。」', async () => {
@@ -3193,7 +3478,7 @@ describe('捨てる・遺物・砕く(rogue-29)', () => {
     try {
       masteryStore.writeMastery({ ...INITIAL_MASTERY, weaponKills: 10 }); // arms lv1 → kensan 解禁
       useRogue.setState({
-        player: { ...player(), relics: [{ item: 'amber', q: 0 }] },
+        player: { ...player(), relics: [{ item: 'royalJelly', q: 0 }] },
       });
       useRogue.getState().dedicateRelic(0);
       await run(3000);
@@ -3225,6 +3510,74 @@ describe('捨てる・遺物・砕く(rogue-29)', () => {
     expect(s.skillOutfitting).toBe(false);
   });
 
+  it('sharpenWithRelic(rogue-34): mandible所持+装備中武器のqが条件内→+1・遺物消費・1ターン消費', async () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        weapon: { item: 'sword', q: 1 },
+        relics: [{ item: 'mandible', q: 1 }], // 層数=q+1=2 → q<=2 まで研げる
+      },
+    });
+    useRogue.getState().sharpenWithRelic(0, { slot: 'weapon' });
+    await run(3000);
+    const s = useRogue.getState();
+    expect(s.player.weapon).toEqual({ item: 'sword', q: 2 });
+    expect(s.player.relics.length).toBe(0); // 遺物消費
+    expect(s.turn).toBe(1); // 1ターン消費
+    expect(s.log.at(-1)).toContain('大顎で');
+  });
+
+  it('sharpenWithRelic(rogue-34): pack の武具を対象にした場合も同様に+1する', async () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        pack: [...player().pack, { item: 'chain', q: 0 }],
+        relics: [{ item: 'mandible', q: 0 }], // 層数=1 → q<=1 まで研げる
+      },
+    });
+    const idx = player().pack.findIndex((x) => x.item === 'chain');
+    useRogue.getState().sharpenWithRelic(0, { index: idx });
+    await run(3000);
+    const s = useRogue.getState();
+    const chain = s.player.pack.find((x) => x.item === 'chain');
+    expect(chain).toEqual({ item: 'chain', q: 1 });
+    expect(s.player.relics.length).toBe(0);
+    expect(s.turn).toBe(1);
+  });
+
+  it('sharpenWithRelic(rogue-34): 対象の q が遺物の層数を超えると拒否される(変化なし)', async () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        weapon: { item: 'sword', q: 3 }, // 層数=1 では q<=1 までしか研げない
+        relics: [{ item: 'mandible', q: 0 }],
+      },
+    });
+    useRogue.getState().sharpenWithRelic(0, { slot: 'weapon' });
+    await run(3000);
+    const s = useRogue.getState();
+    expect(s.player.weapon).toEqual({ item: 'sword', q: 3 }); // 変化なし
+    expect(s.player.relics.length).toBe(1); // 消費されない
+    expect(s.turn).toBe(0); // ターン不変
+    expect(s.log.at(-1)).toContain('これ以上研げない');
+  });
+
+  it('sharpenWithRelic(rogue-34): mandible 以外の遺物を渡すと拒否される(変化なし)', async () => {
+    useRogue.setState({
+      player: {
+        ...player(),
+        weapon: { item: 'sword', q: 0 },
+        relics: [{ item: 'amber', q: 5 }],
+      },
+    });
+    useRogue.getState().sharpenWithRelic(0, { slot: 'weapon' });
+    await run(3000);
+    const s = useRogue.getState();
+    expect(s.player.weapon).toEqual({ item: 'sword', q: 0 });
+    expect(s.player.relics.length).toBe(1);
+    expect(s.turn).toBe(0);
+  });
+
   it('escape: relics の amber が展示棚に加算される', () => {
     codexStore.clearCodexForTest();
     useRogue.setState({
@@ -3243,6 +3596,31 @@ describe('捨てる・遺物・砕く(rogue-29)', () => {
     useRogue.getState().escape();
     const newAmbers = codexStore.readCodex().ambers;
     expect(newAmbers).toBe(initialAmbers + 2); // 2個の amber が加算される
+    expect(useRogue.getState().phase).toBe('escaped');
+  });
+
+  it('escape(rogue-34): royalJelly/mandible も種別ごとに展示棚へ加算される', () => {
+    codexStore.clearCodexForTest();
+    useRogue.setState({
+      phase: 'play',
+      stratum: 0,
+      player: {
+        ...player(),
+        pos: [0, -64, 0],
+        relics: [
+          { item: 'amber', q: 0 },
+          { item: 'royalJelly', q: 0 },
+          { item: 'royalJelly', q: 1 },
+          { item: 'mandible', q: 0 },
+        ],
+      },
+    });
+    const before = codexStore.readCodex();
+    useRogue.getState().escape();
+    const after = codexStore.readCodex();
+    expect(after.ambers).toBe(before.ambers + 1);
+    expect(after.jellies).toBe(before.jellies + 2);
+    expect(after.mandibles).toBe(before.mandibles + 1);
     expect(useRogue.getState().phase).toBe('escaped');
   });
 });

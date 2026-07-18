@@ -1,5 +1,6 @@
 import {
   MASTERY_NAME,
+  MASTERY_DEED,
   MASTERY_THRESHOLDS,
   SKILL_NODES,
   NODE_IDS,
@@ -56,7 +57,8 @@ export function MasteryTree({
         if (onlyLocked && tiers.every((tier) => tier <= level)) return null;
         return (
           <div className="mastery-system" key={system}>
-            <div className="mastery-head">
+            {/* 習得条件はツールチップで(rogue-34続き): 育て方+Lv閾値。 */}
+            <div className="mastery-head" title={`${MASTERY_DEED[system]}(Lv1:${th[0]} / Lv2:${th[1]} / Lv3:${th[2]})`}>
               <span className="mastery-sys-name">{MASTERY_NAME[system]}</span>
               <span className="mastery-lv">Lv.{level}</span>
               <span className="mastery-progress">{nextTh !== null ? `${count}/${nextTh}` : '習熟済み'}</span>

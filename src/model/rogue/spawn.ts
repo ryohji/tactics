@@ -5,7 +5,7 @@
 import { cellKey, keyToCell, layer, type Cell } from '../fcc';
 import { cellRng, type Chamber, type Dungeon } from '../dungeon';
 import { BEASTS, spawnTable, gatekeeperFor, depthScale } from '../beasts';
-import { lootTable } from '../loot';
+import { lootTable, type ItemId } from '../loot';
 import { depthOf } from './rules';
 import { STRATUM_DEPTH } from './types';
 import type { Beast, GroundItem } from './types';
@@ -90,13 +90,18 @@ export function spawnChamber(
     items.push({ id: nextItemId(), stack, pos });
   }
 
-  // 遺物「巣の琥珀」(rogue-25): 層の中間帯(8k−5〜8k−3, k≥1)の広間は 30% で
-  // 地面に琥珀(q=k−1=拾った層番号0始まり)が1個落ちる。抽選はこの広間 rng の
-  // **末尾**で行い、帯以外の広間は乱数を余分に引かない(門番と同じ構造)。
+  // 遺物(rogue-25・rogue-34で3種化): 層の中間帯(8k−5〜8k−3, k≥1)の広間は 30% で
+  // 地面に遺物(q=k−1=拾った層番号0始まり)が1個落ちる。抽選はこの広間 rng の
+  // **末尾**で行い、帯以外の広間は乱数を余分に引かない(門番と同じ構造)。種別は
+  // r<0.5: 巣の琥珀 / r<0.75: 女王の王乳 / else: 王蟻の大顎(pos が取れたときのみ1回抽選)。
   const ka = Math.round((depth + 4) / STRATUM_DEPTH);
   if (ka >= 1 && depth >= STRATUM_DEPTH * ka - 5 && depth <= STRATUM_DEPTH * ka - 3 && rng() < 0.3) {
     const pos = takeSpot();
-    if (pos) items.push({ id: nextItemId(), stack: { item: 'amber', q: ka - 1 }, pos });
+    if (pos) {
+      const r = rng();
+      const item: ItemId = r < 0.5 ? 'amber' : r < 0.75 ? 'royalJelly' : 'mandible';
+      items.push({ id: nextItemId(), stack: { item, q: ka - 1 }, pos });
+    }
   }
 
   return { beasts, items };

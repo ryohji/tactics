@@ -104,13 +104,19 @@ export function createRunEnd(deps: RunEndDeps) {
       const depth = depthOf(s.player.pos);
       const warnAt = STRATUM_DEPTH * (s.stratum + 1);
       if (depth < warnAt || depth >= warnAt + 2) return; // 警告帯限定(HUD のボタンも同条件)
-      const amberCount = s.player.relics.filter((it) => it.item === 'amber').length;
-      codexStore.recordEscape(amberCount, s.stratum + 1); // 展示棚: 琥珀加算・最深生還層更新
+      const relicCounts = { ambers: 0, jellies: 0, mandibles: 0 };
+      for (const it of s.player.relics) {
+        if (it.item === 'amber') relicCounts.ambers++;
+        else if (it.item === 'royalJelly') relicCounts.jellies++;
+        else if (it.item === 'mandible') relicCounts.mandibles++;
+      }
+      codexStore.recordEscape(relicCounts, s.stratum + 1); // 展示棚: 遺物種別ごと加算・最深生還層更新
       set({ phase: 'escaped', busy: false, reach: { cells: [], parent: new Map() } });
       persist.clearSave(); // dead と同じく、ローグライクの掟: 終えた冒険は再開できない
       bgm.setBgmScene('dead');
       sfx.play('heal');
-      pushLog(`地表へ生還した。琥珀${amberCount}個が展示棚に加わった。`);
+      const totalRelics = relicCounts.ambers + relicCounts.jellies + relicCounts.mandibles;
+      pushLog(`地表へ生還した。遺物${totalRelics}個が展示棚に加わった。`);
       recordRun(true);
     },
   };

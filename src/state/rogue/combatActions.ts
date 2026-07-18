@@ -623,18 +623,12 @@ export function createCombat(deps: CombatDeps) {
     triggerPose('throw', 500);
     // throwItemIndex を残すと次のナイフ投擲モードで武具を投げてしまう — ここで必ず消す。
     set({ busy: true, uiMode: 'walk', throwItemIndex: undefined, reach: { cells: [], parent: new Map() } });
-    // アイテムを pack から除去。
+    // アイテムを pack から1個だけ消費(rogue-33: 武具も n 消費。n>=2 なら枠は残る)。
     const newPack = [...player.pack];
-    if (itemDef.kind === 'potion') {
-      // 水薬は n 消費。
-      const n = stackCount(item);
-      if (n >= 2) {
-        newPack[index] = { ...item, n: n - 1 };
-      } else {
-        newPack.splice(index, 1);
-      }
+    const n = stackCount(item);
+    if (n >= 2) {
+      newPack[index] = { ...item, n: n - 1 };
     } else {
-      // 武具は枠ごと削除。
       newPack.splice(index, 1);
     }
     set({ player: { ...player, pack: newPack } });
@@ -661,9 +655,9 @@ export function createCombat(deps: CombatDeps) {
     // 隠密マスタリー加算(rogue-32): 攻撃前に未覚醒なら加算(倒す必要なし)。
     if (preAwake === false) skills.incrementMastery({ stealthKills: 1 });
     damageBeast(b, dmg, '#fecaca', { weapon: true });
-    // 武具は対象セルへ落ちる(倒しても落ちる=拾い直せる)。水薬は消滅。
+    // 武具は対象セルへ落ちる(倒しても落ちる=拾い直せる)。落ちるのは単品。水薬は消滅。
     if (itemDef.kind !== 'potion') {
-      get().items.push({ id: nextItemSeq(), stack: item, pos: b.pos });
+      get().items.push({ id: nextItemSeq(), stack: { item: item.item, q: item.q }, pos: b.pos });
       set({ items: [...get().items] });
     }
     set({ beasts: [...get().beasts] });

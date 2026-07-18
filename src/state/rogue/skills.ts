@@ -173,7 +173,7 @@ export function createSkills(deps: SkillsDeps) {
         set({ player: { ...player, pack: [...player.pack] } });
       }
       // 二刀流(nitoryu)を外すと左手の武器が不整合になる — pack へ退避する
-      // (katate の盾退避パターンと同じ。rogue-30)。pack が満杯なら足元へ落とす。
+      // (katate の盾退避パターンと同じ。rogue-30)。
       if (id === 'nitoryu' && player.shield && ITEMS[player.shield.item].kind === 'weapon') {
         const leftWeapon = player.shield;
         player.shield = null;

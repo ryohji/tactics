@@ -135,6 +135,11 @@ export function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
           <span className="hint">罠の設置: 足元か隣の橙マーカーをクリック</span>
           <button onClick={cancelThrow}>やめる</button>
         </>
+      ) : uiMode === 'sharpen' ? (
+        <>
+          <span className="hint">研ぐ: 装備枠か所持品の武具をクリック</span>
+          <button onClick={cancelThrow}>やめる</button>
+        </>
       ) : (
         <>
           {/* 敵への視線巡回(TAB / Shift+TAB のボタン代替) */}

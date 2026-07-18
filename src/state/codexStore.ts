@@ -15,13 +15,23 @@ export interface Codex {
   items: Partial<Record<ItemId, { found: number; bestQ: number }>>;
   /** 達成済み実績id。 */
   feats: FeatId[];
-  /** 遺物「巣の琥珀」の持ち帰り確定累計(rogue-25 後半・展示棚)。 */
+  /** 琥珀/王乳/大顎の持ち帰り確定累計(rogue-25 後半・展示棚。rogue-34 で3種化)。 */
   ambers: number;
+  jellies: number;
+  mandibles: number;
   /** 脱出(生還)で確定した最深の層番号(1始まり。0=未生還)。 */
   bestStratumEscape: number;
 }
 
-export const INITIAL_CODEX: Codex = { beasts: {}, items: {}, feats: [], ambers: 0, bestStratumEscape: 0 };
+export const INITIAL_CODEX: Codex = {
+  beasts: {},
+  items: {},
+  feats: [],
+  ambers: 0,
+  jellies: 0,
+  mandibles: 0,
+  bestStratumEscape: 0,
+};
 
 function isCodex(v: unknown): v is Codex {
   if (typeof v !== 'object' || v === null) return false;
@@ -104,14 +114,19 @@ export function unlockFeat(id: FeatId): void {
 }
 
 /**
- * 展示棚(rogue-25 後半): 脱出(生還)の確定時に呼ぶ。持ち帰った琥珀を累計へ
- * 加算し、最深生還層(1始まりの層番号)を更新する。
+ * 展示棚(rogue-25 後半): 脱出(生還)の確定時に呼ぶ。持ち帰った遺物(種別ごと)を
+ * 累計へ加算し、最深生還層(1始まりの層番号)を更新する(rogue-34 で3種化)。
  */
-export function recordEscape(ambersGained: number, stratum: number): void {
+export function recordEscape(
+  counts: { ambers: number; jellies: number; mandibles: number },
+  stratum: number,
+): void {
   const codex = readCodex();
   writeCodex({
     ...codex,
-    ambers: codex.ambers + ambersGained,
+    ambers: codex.ambers + counts.ambers,
+    jellies: codex.jellies + counts.jellies,
+    mandibles: codex.mandibles + counts.mandibles,
     bestStratumEscape: Math.max(codex.bestStratumEscape, stratum),
   });
 }

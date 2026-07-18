@@ -3,7 +3,19 @@
 
 import { describe, it, expect } from 'vitest';
 import { lcg } from './dungeon';
-import { lootTable, stackEvade, statLabel, stackCount, stackable, mergeable, itemLabel } from './loot';
+import {
+  lootTable,
+  stackEvade,
+  statLabel,
+  stackCount,
+  stackable,
+  STACK_MAX,
+  mergeable,
+  mergeIntoPack,
+  takeOneFromPack,
+  itemLabel,
+  type ItemStack,
+} from './loot';
 import { spawnTable } from './beasts';
 
 describe('lootTable(深度スケーリング)', () => {
@@ -92,15 +104,29 @@ describe('stackable・mergeable(rogue-28)', () => {
     expect(stackCount({ item: 'knife', q: 0, n: 2 })).toBe(2);
   });
 
-  it('stackable は potion と thrown のみ', () => {
+  it('stackable は potion/thrown/turret/decoy のみ(rogue-34: 武具は束ねない)', () => {
     expect(stackable('potion')).toBe(true);
     expect(stackable('barrierPotion')).toBe(true);
     expect(stackable('antidote')).toBe(true);
     expect(stackable('knife')).toBe(true);
+    expect(stackable('turret')).toBe(true);
+    expect(stackable('decoy')).toBe(true);
+    // 武具は1枠1個に戻す(rogue-33 では true だったが rogue-34 で false に修正)。
     expect(stackable('dagger')).toBe(false);
     expect(stackable('shield')).toBe(false);
-    expect(stackable('turret')).toBe(false);
+    expect(stackable('leather')).toBe(false);
     expect(stackable('amber')).toBe(false);
+    expect(stackable('royalJelly')).toBe(false);
+    expect(stackable('mandible')).toBe(false);
+  });
+
+  it('STACK_MAX(rogue-34): turret/decoy/knife=10・potion=5', () => {
+    expect(STACK_MAX('turret')).toBe(10);
+    expect(STACK_MAX('decoy')).toBe(10);
+    expect(STACK_MAX('knife')).toBe(10);
+    expect(STACK_MAX('potion')).toBe(5);
+    expect(STACK_MAX('barrierPotion')).toBe(5);
+    expect(STACK_MAX('antidote')).toBe(5);
   });
 
   it('mergeable は weapon・armor・shield のみ', () => {
@@ -135,5 +161,36 @@ describe('stackable・mergeable(rogue-28)', () => {
     // n=2 と n=3 の両方が出ている(統計的に)
     expect(knives.some((s) => (s.n ?? 1) === 2)).toBe(true);
     expect(knives.some((s) => (s.n ?? 1) === 3)).toBe(true);
+  });
+});
+
+describe('mergeIntoPack・takeOneFromPack(rogue-33: 全アイテムの束ね化)', () => {
+  it('mergeIntoPack: 同 (item,q) の既存スタックがあれば n を加算して true', () => {
+    const pack: ItemStack[] = [{ item: 'dagger', q: 0, n: 2 }, { item: 'sword', q: 1 }];
+    const ok = mergeIntoPack(pack, { item: 'dagger', q: 0 });
+    expect(ok).toBe(true);
+    expect(pack).toHaveLength(2);
+    expect(pack[0]).toEqual({ item: 'dagger', q: 0, n: 3 });
+  });
+
+  it('mergeIntoPack: 一致がなければ false(呼び出し側で push するか判断)', () => {
+    const pack: ItemStack[] = [{ item: 'sword', q: 1 }];
+    const ok = mergeIntoPack(pack, { item: 'dagger', q: 0 });
+    expect(ok).toBe(false);
+    expect(pack).toHaveLength(1);
+  });
+
+  it('takeOneFromPack: n>=2 は n-1 して単品を返す(枠は残る)', () => {
+    const pack: ItemStack[] = [{ item: 'turret', q: 2, n: 2 }];
+    const taken = takeOneFromPack(pack, 0);
+    expect(taken).toEqual({ item: 'turret', q: 2 });
+    expect(pack).toEqual([{ item: 'turret', q: 2, n: 1 }]);
+  });
+
+  it('takeOneFromPack: n===1 は枠ごと削除', () => {
+    const pack: ItemStack[] = [{ item: 'turret', q: 2 }];
+    const taken = takeOneFromPack(pack, 0);
+    expect(taken).toEqual({ item: 'turret', q: 2 });
+    expect(pack).toHaveLength(0);
   });
 });

@@ -3,9 +3,9 @@ import { useRogue } from '../../state/rogue';
 /** 脱出の確認モーダル(rogue-25。スキルパネルの流儀)。トップレベルに置き、
     hud-bottomarea の transform に巻き込まれず常に画面中央に出るようにする。 */
 export function EscapeConfirmModal({ onClose }: { onClose: () => void }) {
-  const pack = useRogue((s) => s.player.pack);
+  // 遺物(rogue-25・rogue-34で3種化)は pack ではなく relics に入る(既存バグ修正)。
+  const relicCount = useRogue((s) => s.player.relics.length);
   const escape = useRogue((s) => s.escape);
-  const amberCount = pack.filter((it) => it.item === 'amber').length;
   return (
     <div className="hud-help" onClick={onClose}>
       <div className="hud-help-panel escape-panel" onClick={(e) => e.stopPropagation()}>
@@ -13,7 +13,7 @@ export function EscapeConfirmModal({ onClose }: { onClose: () => void }) {
         <p>
           地表へ戻って収集を確定する。今回のランはここで終わる。
           <br />
-          持ち物の琥珀 {amberCount} 個が展示棚に加わる。
+          持ち物の遺物 {relicCount} 個が展示棚に加わる。
         </p>
         <div className="hud-over-buttons">
           <button

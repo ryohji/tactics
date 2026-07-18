@@ -12,6 +12,8 @@ function EquipSlot({
   locked,
   tag,
   emptyHint,
+  sharpenTargetRelic,
+  onSharpen,
 }: {
   slot: 'weapon' | 'armor' | 'shield';
   stack: ItemStack | null;
@@ -21,8 +23,12 @@ function EquipSlot({
   tag?: string;
   /** 未装備時の代替表示(盾の「両手がふさがっている」など)。省略時は「(なし)」。 */
   emptyHint?: string;
+  /** 研ぐ対象選択モード中(rogue-34)。選択中の大顎(mandible)遺物。未選択時は undefined。 */
+  sharpenTargetRelic?: ItemStack;
+  onSharpen?: () => void;
 }) {
   const unequip = useRogue((s) => s.unequip);
+  const eligible = !!sharpenTargetRelic && !!stack && stack.q <= sharpenTargetRelic.q + 1;
   return (
     <div className="equip-slot">
       <span className="slot-name">{SLOT_NAME[slot]}</span>
@@ -34,6 +40,16 @@ function EquipSlot({
       {stack && (
         <button className="unequip" disabled={locked} onClick={() => unequip(slot)}>
           外す
+        </button>
+      )}
+      {sharpenTargetRelic && stack && (
+        <button
+          className="sharpen"
+          disabled={locked || !eligible}
+          onClick={onSharpen}
+          title={eligible ? '研いで+1する' : 'この武具はこれ以上研げない(より深い大顎が要る)'}
+        >
+          研ぐ対象に
         </button>
       )}
     </div>
@@ -48,6 +64,9 @@ export function PackPanel() {
   const dropItem = useRogue((s) => s.dropItem);
   const crushRelic = useRogue((s) => s.crushRelic);
   const dedicateRelic = useRogue((s) => s.dedicateRelic);
+  const setSharpenMode = useRogue((s) => s.setSharpenMode);
+  const sharpenWithRelic = useRogue((s) => s.sharpenWithRelic);
+  const sharpenRelicIndex = useRogue((s) => s.sharpenRelicIndex);
   const uiMode = useRogue((s) => s.uiMode);
   const phase = useRogue((s) => s.phase);
   const busy = useRogue((s) => s.busy);
@@ -58,6 +77,16 @@ export function PackPanel() {
   const [open, setOpen] = useState(true);
   if (mapMode) return null;
   const pack = player.pack;
+  // 研ぐ対象選択モード(rogue-34): 選択中の大顎(mandible)遺物。未選択時は undefined。
+  const sharpenTargetRelic =
+    uiMode === 'sharpen' && sharpenRelicIndex !== undefined ? player.relics[sharpenRelicIndex] : undefined;
+  // 遺物袋の (item, q) グルーピング(表示だけ束ねる。relics 配列自体は平坦のまま)。
+  const relicGroups: { item: ItemStack['item']; q: number; count: number; firstIndex: number }[] = [];
+  player.relics.forEach((r, i) => {
+    const g = relicGroups.find((x) => x.item === r.item && x.q === r.q);
+    if (g) g.count++;
+    else relicGroups.push({ item: r.item, q: r.q, count: 1, firstIndex: i });
+  });
 
   // 閉じているときは小さなボタンだけ(画面を奪わない)。
   if (!open) {
@@ -68,17 +97,12 @@ export function PackPanel() {
     );
   }
 
-  // 同種・同品質をまとめて表示(クリックは最初の1個に対して)。
-  const groups: { stack: ItemStack; count: number; index: number }[] = [];
-  pack.forEach((stack, index) => {
-    const g = groups.find((x) => x.stack.item === stack.item && x.stack.q === stack.q);
-    if (g) g.count++;
-    else groups.push({ stack, count: 1, index });
-  });
-
-  // kind 順にグルーピング: weapon → shield → armor → potion → thrown → turret → decoy → relic
+  // 各枠は既に実スタック化されている(rogue-33: 同一 (item,q) は1枠に n で束ねる)ので、
+  // ここでの見た目上のグルーピングは不要 — itemLabel の「×n」表示に一本化する。
+  // kind 順で並べる: weapon → shield → armor → potion → thrown → turret → decoy → relic
   const kindOrder = ['weapon', 'shield', 'armor', 'potion', 'thrown', 'turret', 'decoy', 'relic'];
-  groups.sort((a, b) => {
+  const rows: { stack: ItemStack; index: number }[] = pack.map((stack, index) => ({ stack, index }));
+  rows.sort((a, b) => {
     const kindA = ITEMS[a.stack.item].kind;
     const kindB = ITEMS[b.stack.item].kind;
     return kindOrder.indexOf(kindA) - kindOrder.indexOf(kindB);
@@ -98,6 +122,8 @@ export function PackPanel() {
         stat={`攻${playerAtk(player, skillEquipped, lightLevel)}`}
         locked={locked}
         tag={player.weapon && ITEMS[player.weapon.item].twoHanded ? '両手' : undefined}
+        sharpenTargetRelic={sharpenTargetRelic}
+        onSharpen={() => sharpenRelicIndex !== undefined && sharpenWithRelic(sharpenRelicIndex, { slot: 'weapon' })}
       />
       <EquipSlot
         slot="shield"
@@ -115,8 +141,17 @@ export function PackPanel() {
             ? '(両手がふさがっている)'
             : undefined
         }
+        sharpenTargetRelic={sharpenTargetRelic}
+        onSharpen={() => sharpenRelicIndex !== undefined && sharpenWithRelic(sharpenRelicIndex, { slot: 'shield' })}
       />
-      <EquipSlot slot="armor" stack={player.armor} stat={`防${playerDef(player)}`} locked={locked} />
+      <EquipSlot
+        slot="armor"
+        stack={player.armor}
+        stat={`防${playerDef(player)}`}
+        locked={locked}
+        sharpenTargetRelic={sharpenTargetRelic}
+        onSharpen={() => sharpenRelicIndex !== undefined && sharpenWithRelic(sharpenRelicIndex, { slot: 'armor' })}
+      />
       {skillEquipped.length > 0 && (
         <div className="skill-row">
           {skillEquipped.map((e) => (
@@ -127,9 +162,10 @@ export function PackPanel() {
           ))}
         </div>
       )}
-      {groups.length === 0 && <div className="empty">(なし)</div>}
-      {groups.map((g) => {
-        const def = ITEMS[g.stack.item];
+      {rows.length === 0 && <div className="empty">(なし)</div>}
+      {rows.map((row) => {
+        const { stack, index } = row;
+        const def = ITEMS[stack.item];
         const throwing = def.kind === 'thrown' && uiMode === 'throw';
         const isThrowItemMode = uiMode === 'throw' && setThrowMode !== undefined;
         // 罠(trapSpike等)は rogue-27 で廃止(罠師「罠編み」のスキル化)。ここに残るのは
@@ -150,32 +186,37 @@ export function PackPanel() {
         // rogue-30: 武器は左手(盾スロット)にも装備されうる — その一致も見る。
         const isEquipped =
           (def.kind === 'weapon' &&
-            ((player.weapon?.item === g.stack.item && player.weapon.q === g.stack.q) ||
-              (player.shield?.item === g.stack.item && player.shield.q === g.stack.q))) ||
-          (def.kind === 'armor' && player.armor?.item === g.stack.item && player.armor.q === g.stack.q) ||
-          (def.kind === 'shield' && player.shield?.item === g.stack.item && player.shield.q === g.stack.q);
+            ((player.weapon?.item === stack.item && player.weapon.q === stack.q) ||
+              (player.shield?.item === stack.item && player.shield.q === stack.q))) ||
+          (def.kind === 'armor' && player.armor?.item === stack.item && player.armor.q === stack.q) ||
+          (def.kind === 'shield' && player.shield?.item === stack.item && player.shield.q === stack.q);
         const canThrow = ['weapon', 'armor', 'shield', 'potion'].includes(def.kind) && !isEquipped;
         // 二刀流(rogue-30): nitoryu ランクI以上・片手武器・未装備なら左手にも装備できる。
         const canOffhand =
           def.kind === 'weapon' && !def.twoHanded && !isEquipped && rankOf(skillEquipped, 'nitoryu') >= 1;
+        // 合成できるか(rogue-34: 武具は束ねないので2枠方式のみ)。別枠に同 (item,q) がある行にだけ表示。
+        const canMerge =
+          mergeable(stack.item) && pack.some((x, i) => i !== index && x.item === stack.item && x.q === stack.q);
+        // 研ぐ対象選択中(rogue-34)。対象は武具のみ、遺物の層数(q+1)以下の品質まで。
+        const sharpenEligible =
+          !!sharpenTargetRelic && mergeable(stack.item) && stack.q <= sharpenTargetRelic.q + 1;
         return (
-          <div className="pack-row" key={`${g.stack.item}:${g.stack.q}`}>
+          <div className="pack-row" key={`${stack.item}:${stack.q}:${index}`}>
             <button
               className={throwing || isThrowItemMode ? 'active' : ''}
               disabled={locked}
-              onClick={() => useItem(g.index)}
+              onClick={() => useItem(index)}
             >
-              {itemLabel(g.stack)}
-              {g.count > 1 ? ` ×${g.count}` : ''}
+              {itemLabel(stack)}
               <span className="use">
-                {statLabel(g.stack)}·{verb}
+                {statLabel(stack)}·{verb}
               </span>
             </button>
             {canThrow && (
               <button
                 className="throw"
                 disabled={locked}
-                onClick={() => setThrowMode(g.index)}
+                onClick={() => setThrowMode(index)}
                 title="敵をクリックして投擲"
               >
                 投げる
@@ -185,21 +226,31 @@ export function PackPanel() {
               <button
                 className="offhand"
                 disabled={locked}
-                onClick={() => equipOffhand(g.index)}
+                onClick={() => equipOffhand(index)}
                 title="二刀流: 左手(盾スロット)に装備"
               >
                 左手に
               </button>
             )}
-            {g.count >= 2 && mergeable(g.stack.item) && (
-              <button className="merge" disabled={locked} onClick={() => mergeItem(g.index)}>
+            {canMerge && (
+              <button className="merge" disabled={locked} onClick={() => mergeItem(index)}>
                 合成
+              </button>
+            )}
+            {sharpenTargetRelic && mergeable(stack.item) && (
+              <button
+                className="sharpen"
+                disabled={locked || !sharpenEligible}
+                onClick={() => sharpenRelicIndex !== undefined && sharpenWithRelic(sharpenRelicIndex, { index })}
+                title={sharpenEligible ? '研いで+1する' : 'この武具はこれ以上研げない(より深い大顎が要る)'}
+              >
+                研ぐ対象に
               </button>
             )}
             <button
               className="drop"
               disabled={locked}
-              onClick={() => dropItem(g.index)}
+              onClick={() => dropItem(index)}
               title="束ごと足元に置く(ターン消費なし)"
             >
               捨てる
@@ -207,34 +258,52 @@ export function PackPanel() {
           </div>
         );
       })}
-      {/* 遺物袋(rogue-29): pack の10枠を使わない別枠。砕くと全回復するが持ち帰れなくなる。 */}
-      {player.relics.length > 0 && (
+      {/* 遺物袋(rogue-29・rogue-34で3種化): pack の10枠を使わない別枠。(item,q) でグルーピングして
+          ×n 表示するが、relics 配列自体は平坦のまま — ボタンは1回の操作で1個消費する。 */}
+      {relicGroups.length > 0 && (
         <>
           <h4 className="relic-head">遺物</h4>
-          {player.relics.map((r, i) => (
-            <div className="pack-row relic-row" key={`relic:${i}`}>
-              <span className="relic-item">
-                {itemLabel(r)}
-                <span className="use">{statLabel(r)}</span>
-              </span>
-              <button
-                className="crush"
-                disabled={locked}
-                onClick={() => crushRelic(i)}
-                title="砕くと全回復(1ターン)。持ち帰れなくなる"
-              >
-                砕く
-              </button>
-              <button
-                className="dedicate"
-                disabled={locked}
-                onClick={() => dedicateRelic(i)}
-                title="心得を組み替える"
-              >
-                捧げる
-              </button>
-            </div>
-          ))}
+          {relicGroups.map((g) => {
+            const label = `${ITEMS[g.item].name}${g.count > 1 ? ` ×${g.count}` : ''}`;
+            return (
+              <div className="pack-row relic-row" key={`relic:${g.item}:${g.q}`}>
+                <span className="relic-item">
+                  {label}
+                  <span className="use">{statLabel({ item: g.item, q: g.q })}</span>
+                </span>
+                {g.item === 'amber' && (
+                  <button
+                    className="crush"
+                    disabled={locked}
+                    onClick={() => crushRelic(g.firstIndex)}
+                    title="砕いて全回復(毒・混乱も治す)。展示棚には飾れなくなる"
+                  >
+                    砕く
+                  </button>
+                )}
+                {g.item === 'royalJelly' && (
+                  <button
+                    className="dedicate"
+                    disabled={locked}
+                    onClick={() => dedicateRelic(g.firstIndex)}
+                    title="捧げて心得を組み替える(支度をやり直す)"
+                  >
+                    捧げる
+                  </button>
+                )}
+                {g.item === 'mandible' && (
+                  <button
+                    className={`sharpen${uiMode === 'sharpen' && sharpenRelicIndex === g.firstIndex ? ' active' : ''}`}
+                    disabled={locked}
+                    onClick={() => setSharpenMode(g.firstIndex)}
+                    title="武具ひとつを+1する(この遺物の層数以下の品質まで)"
+                  >
+                    研ぐ
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </>
       )}
     </div>

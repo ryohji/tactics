@@ -24,7 +24,7 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r31';
+export const GAME_VERSION = 'r34';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [

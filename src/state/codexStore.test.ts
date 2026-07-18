@@ -6,6 +6,7 @@ import {
   readCodex,
   recordBeastKill,
   recordItemFound,
+  recordEscape,
   unlockFeat,
   clearCodexForTest,
   setCodexStorageForTest,
@@ -99,10 +100,39 @@ describe('codexStore(図鑑・実績の永続化)', () => {
     expect('trapSpike' in c.items).toBe(false); // 未知 id は落とす
   });
 
+  it('recordEscape(rogue-34): ambers/jellies/mandibles が種別ごとに加算され、最深生還層が更新される', () => {
+    setCodexStorageForTest(memStorage());
+    recordEscape({ ambers: 2, jellies: 1, mandibles: 0 }, 3);
+    recordEscape({ ambers: 0, jellies: 1, mandibles: 2 }, 1); // 最深生還層は最大値のまま
+    const c = readCodex();
+    expect(c.ambers).toBe(2);
+    expect(c.jellies).toBe(2);
+    expect(c.mandibles).toBe(2);
+    expect(c.bestStratumEscape).toBe(3);
+  });
+
+  it('recordEscape(rogue-34): 旧データ(jellies/mandiblesキー無し)は0補完されてから加算される', () => {
+    const s = memStorage();
+    s.setItem(
+      'fcc-rogue-codex-v1',
+      JSON.stringify({ beasts: {}, items: {}, feats: [], ambers: 5, bestStratumEscape: 2 }),
+    );
+    setCodexStorageForTest(s);
+    // 補完前提の確認: 読み込み時点で jellies/mandibles が 0 になっている。
+    expect(readCodex().jellies).toBe(0);
+    expect(readCodex().mandibles).toBe(0);
+    recordEscape({ ambers: 0, jellies: 3, mandibles: 1 }, 2);
+    const c = readCodex();
+    expect(c.ambers).toBe(5); // 既存値は保持
+    expect(c.jellies).toBe(3); // 0 + 3
+    expect(c.mandibles).toBe(1); // 0 + 1
+  });
+
   it('storage が無い(Node 環境相当)なら no-op で例外を投げない', () => {
     setCodexStorageForTest(null);
     expect(() => recordBeastKill('bat', 1)).not.toThrow();
     expect(() => recordItemFound('sword', 0)).not.toThrow();
+    expect(() => recordEscape({ ambers: 1, jellies: 1, mandibles: 1 }, 1)).not.toThrow();
     expect(() => unlockFeat('firstGate')).not.toThrow();
     expect(readCodex()).toEqual(INITIAL_CODEX);
     expect(() => clearCodexForTest()).not.toThrow();

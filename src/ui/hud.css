@@ -771,7 +771,7 @@
 .codex-feat .feat-desc { color: #94a3b8; }
 .codex-row.codex-feat.locked { opacity: 0.42; }
 .codex-row.codex-feat.locked .feat-name { color: #cbd5e1; }
-/* --- rogue-25 後半: 展示棚(琥珀・最深生還層) --- */
+/* --- rogue-25 後半・rogue-34で3種化: 展示棚(琥珀・王乳・大顎・最深生還層) --- */
 .codex-shelf {
   display: flex;
   gap: 18px;
@@ -781,6 +781,8 @@
   margin-bottom: 4px;
 }
 .codex-shelf .ambers { color: #fde68a; letter-spacing: 0.05em; }
+.codex-shelf .jellies { color: #fcd34d; letter-spacing: 0.05em; }
+.codex-shelf .mandibles { color: #d6d3d1; letter-spacing: 0.05em; }
 
 /* --- rogue-23: HUD 常時表示(所持品の装備枠の下に装着スキルの小さな行) --- */
 .skill-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 4px; }

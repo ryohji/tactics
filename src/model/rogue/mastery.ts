@@ -13,6 +13,7 @@ import { EXCLUDES, KNOTS, NODE_IDS, SKILL_NODES, rankOf } from './skillNodes';
 export {
   type MasterySystem,
   MASTERY_NAME,
+  MASTERY_DEED,
   type NodeId,
   NODE_IDS,
   type SkillNode,

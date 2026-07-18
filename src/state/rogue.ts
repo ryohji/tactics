@@ -53,6 +53,7 @@ import {
   stackImmune,
   stackCount,
   mergeable,
+  takeOneFromPack,
   turretTurns,
   decoyHp,
   type ItemStack,
@@ -130,6 +131,7 @@ export { parseSeed } from '../model/rogue/rules';
 // 直接参照するのでここから再輸出する。
 export {
   MASTERY_NAME,
+  MASTERY_DEED,
   SKILL_NODES,
   NODE_IDS,
   MASTERY_THRESHOLDS,
@@ -200,10 +202,12 @@ export interface RogueState {
   /** escaped(rogue-25): 脱出(生還)で終えたラン。dead と同様に操作停止・セーブ破棄。 */
   phase: 'play' | 'dead' | 'escaped';
   busy: boolean;
-  /** walk=移動 / throw=投擲対象選択 / place=罠を編む先の選択(足元+隣接。rogue-27)。 */
-  uiMode: 'walk' | 'throw' | 'place';
+  /** walk=移動 / throw=投擲対象選択 / place=罠を編む先の選択(足元+隣接。rogue-27) / sharpen=研ぐ対象選択(rogue-34)。 */
+  uiMode: 'walk' | 'throw' | 'place' | 'sharpen';
   /** 武具投擲時の対象アイテム index(uiMode=throw かつ throwItemIndex が undefined なら投げナイフ)。 */
   throwItemIndex?: number;
+  /** 研ぐ(rogue-34): uiMode=sharpen 中に選択されている遺物(relics)の index。 */
+  sharpenRelicIndex?: number;
   /** クリック可能な移動先(BFS≤REACH_STEPS)。 */
   reach: { cells: Cell[]; parent: Map<CellKey, CellKey> };
   /** ホバー中の移動マーカーのセル(同レベルのヘックスオーバーレイ表示に使う)。 */
@@ -278,6 +282,11 @@ export interface RogueState {
   crushRelic: (index: number) => void;
   /** 捧げる(rogue-32): relics[index] を消費して心得を組み替える。1ターン消費してから支度パネルを開く。 */
   dedicateRelic: (index: number) => void;
+  /** 研ぐ(rogue-34): relics[relicIndex](王蟻の大顎)を消費して武具1つを+1する。1ターン消費。 */
+  sharpenWithRelic: (
+    relicIndex: number,
+    target: { slot: 'weapon' | 'armor' | 'shield' } | { index: number },
+  ) => void;
   /** 「支度」を終えてそのまま潜る。 */
   finishOutfitting: () => void;
   /** 関門のドラフトを見送る(何も選ばず閉じる)。 */
@@ -294,6 +303,8 @@ export interface RogueState {
   cancelThrow: () => void;
   /** 武具投擲モードへ進入(PackPanel で「投げる」ボタンクリック)。敵クリックで throwItem を呼ぶ。 */
   setThrowMode: (index: number) => void;
+  /** 研ぐモードへ進入(PackPanel の遺物「研ぐ」ボタン)。装備枠/pack の武具クリックで sharpenWithRelic を呼ぶ。 */
+  setSharpenMode: (relicIndex: number) => void;
   /** 発見済みセルへのファストトラベル(1歩=1ターンの自動歩行。敵の覚醒/被弾で中断)。 */
   travelTo: (c: Cell) => void;
   /** 進行中のファストトラベルを中断する(タップ/クリック/ESC)。歩行中でなければ無視。 */
@@ -918,22 +929,23 @@ export const useRogue = create<RogueState>((set, get) => {
           pushLog('ここには既に設置物がある');
           return;
         }
-        player.pack.splice(index, 1);
+        // 束(n>=2)からの設置は1個だけ(rogue-33): n-1 して枠は残す。
+        const placedStack = takeOneFromPack(player.pack, index);
         if (def.kind === 'turret') {
           set({
             turrets: [
               ...s2.turrets,
-              { id: deviceSeq++, q: stack.q, pos: player.pos, turns: turretTurns(stack) },
+              { id: deviceSeq++, q: placedStack.q, pos: player.pos, turns: turretTurns(placedStack) },
             ],
           });
         } else {
-          const hp = decoyHp(stack);
+          const hp = decoyHp(placedStack);
           set({
-            decoys: [...s2.decoys, { id: deviceSeq++, q: stack.q, pos: player.pos, hp, maxHp: hp }],
+            decoys: [...s2.decoys, { id: deviceSeq++, q: placedStack.q, pos: player.pos, hp, maxHp: hp }],
           });
         }
         sfx.play('place');
-        pushLog(`${itemLabel(stack)} を設置した`);
+        pushLog(`${itemLabel(placedStack)} を設置した`);
         set({ player: { ...player, pack: [...player.pack] }, uiMode: 'walk' });
         combat.beastsTurn();
         stratum.endTurn();
@@ -1058,17 +1070,19 @@ export const useRogue = create<RogueState>((set, get) => {
         pushLog('武具しか鍛えられない');
         return;
       }
+      // 合成材料は「同 (item,q) の別枠」(rogue-34: 武具は束ねないため2枠方式のみ)。
       const j = s.player.pack.findIndex((x, i) => i !== index && x.item === a.item && x.q === a.q);
       if (j < 0) {
         pushLog('合成には同じ品質の同じアイテムがもう一つ必要');
         return;
       }
       const player = s.player;
+      // 別枠2つを消費。
       const [hi, lo] = index > j ? [index, j] : [j, index];
       player.pack.splice(hi, 1);
       player.pack.splice(lo, 1);
       const merged: ItemStack = { item: a.item, q: a.q + 1 };
-      player.pack.push(merged);
+      player.pack.push(merged); // mergeIntoPack ではなくプレーン push(武具は束ねないため)
       sfx.play('heal');
       pushFx({ kind: 'popup', at: player.pos, text: `${itemLabel(merged)}!`, color: '#fde68a', dur: 900 });
       pushLog(`合成: ${itemLabel(merged)} になった`);
@@ -1101,7 +1115,7 @@ export const useRogue = create<RogueState>((set, get) => {
       logAction('X');
       if (get().uiMode === 'walk') return;
       sfx.play('cancel');
-      set({ uiMode: 'walk', throwItemIndex: undefined });
+      set({ uiMode: 'walk', throwItemIndex: undefined, sharpenRelicIndex: undefined });
     },
 
     setThrowMode: (index) => {
@@ -1112,6 +1126,21 @@ export const useRogue = create<RogueState>((set, get) => {
       sfx.play('select');
       pushLog('クリックで対象の敵を選ぶ');
       set({ uiMode: 'throw', throwItemIndex: index });
+    },
+
+    setSharpenMode: (relicIndex) => {
+      logAction('SM', relicIndex);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (relicIndex < 0 || relicIndex >= s.player.relics.length) return;
+      if (s.player.relics[relicIndex].item !== 'mandible') return;
+      if (s.uiMode === 'sharpen' && s.sharpenRelicIndex === relicIndex) {
+        get().cancelThrow(); // 同じ遺物を再クリック→解除(既存の解除経路を再利用)
+        return;
+      }
+      sfx.play('select');
+      pushLog('研ぐ対象を選ぶ: 装備枠か所持品の武具をクリック(ESCで解除)');
+      set({ uiMode: 'sharpen', sharpenRelicIndex: relicIndex });
     },
 
     setArmed: (key) => {

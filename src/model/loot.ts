@@ -6,7 +6,7 @@ export type ItemId =
   | 'dagger' | 'sword' | 'waraxe' | 'spear' | 'maul'
   | 'leather' | 'chain' | 'plate' | 'shield'
   | 'potion' | 'barrierPotion' | 'antidote' | 'knife'
-  | 'turret' | 'decoy' | 'amber';
+  | 'turret' | 'decoy' | 'amber' | 'royalJelly' | 'mandible';
 
 /** relic(rogue-25): 遺物。使用・装備・合成できず、脱出で持ち帰ると展示棚に飾られる。
     rogue-27 で罠アイテム5種を廃止(罠は罠師「罠編み」のスキル化。state/rogue/types.ts の PlacedTrap 参照)。 */
@@ -40,7 +40,7 @@ export interface ItemDef {
 export interface ItemStack {
   item: ItemId;
   q: number;
-  /** 個数(省略時1)。水薬・投げナイフだけが2以上になる(同一 item+q で束ねる)。 */
+  /** 個数(省略時1)。遺物以外は全種、同一 item+q で束ねて2以上になる(rogue-33)。 */
   n?: number;
 }
 
@@ -62,6 +62,8 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   decoy: { name: '囮人形', kind: 'decoy' },
   // 遺物(rogue-25)。q は「拾った層番号(0始まり)」を表す — 品質強化の意味ではない。
   amber: { name: '巣の琥珀', kind: 'relic' },
+  royalJelly: { name: '女王の王乳', kind: 'relic' },
+  mandible: { name: '王蟻の大顎', kind: 'relic' },
 };
 
 /** 個数(s.n ?? 1)。 */
@@ -69,10 +71,45 @@ export function stackCount(s: ItemStack): number {
   return s.n ?? 1;
 }
 
-/** 束ねられる種類か(potion / thrown)。武具・装置・遺物は常に n=1。 */
+/** 束ねられる種類か(rogue-34: potion/thrown/turret/decoy のみ。武具と遺物は束ねない)。 */
 export function stackable(item: ItemId): boolean {
   const kind = ITEMS[item].kind;
-  return kind === 'potion' || kind === 'thrown';
+  return kind === 'potion' || kind === 'thrown' || kind === 'turret' || kind === 'decoy';
+}
+
+/** スタック上限(rogue-34): turret/decoy=10, thrown=10, potion=5。それ以外は無制限扱い。 */
+export function STACK_MAX(item: ItemId): number {
+  const kind = ITEMS[item].kind;
+  if (kind === 'turret' || kind === 'decoy' || kind === 'thrown') return 10;
+  if (kind === 'potion') return 5;
+  return Infinity;
+}
+
+/**
+ * stack を pack の同一 (item, q) スタックへ合流させる(n を加算)。
+ * 既存があれば true(呼び出し側は新枠を作らない)、無ければ false(呼び出し側で
+ * push するか判断する。装備の退避系は無条件 push、二刀流解除の退避は満杯チェック後に push)。
+ */
+export function mergeIntoPack(pack: ItemStack[], stack: ItemStack): boolean {
+  const idx = pack.findIndex((x) => x.item === stack.item && x.q === stack.q);
+  if (idx < 0) return false;
+  pack[idx] = { ...pack[idx], n: stackCount(pack[idx]) + stackCount(stack) };
+  return true;
+}
+
+/**
+ * pack[index] から1個だけ取り出す(n>=2 なら n-1 して残し、n===1 なら枠を削除)。
+ * 取り出した単品 {item, q}(n なし=1個)を返す。装備・設置で「1個だけ使う」ときに使う。
+ */
+export function takeOneFromPack(pack: ItemStack[], index: number): ItemStack {
+  const stack = pack[index];
+  const n = stackCount(stack);
+  if (n >= 2) {
+    pack[index] = { ...stack, n: n - 1 };
+  } else {
+    pack.splice(index, 1);
+  }
+  return { item: stack.item, q: stack.q };
 }
 
 /** 合成可の種類か(weapon / armor / shield のみ)。 */

@@ -24,6 +24,8 @@ export function CodexModal({ onClose }: { onClose: () => void }) {
         <h3>展示棚</h3>
         <div className="codex-shelf">
           <span className="ambers">🟡×{codex.ambers}</span>
+          <span className="jellies">🍯×{codex.jellies}</span>
+          <span className="mandibles">🦴×{codex.mandibles}</span>
           <span>
             最深生還層 {codex.bestStratumEscape > 0 ? `層${codex.bestStratumEscape}` : '未生還'}
           </span>

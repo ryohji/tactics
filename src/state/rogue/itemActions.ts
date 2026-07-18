@@ -5,7 +5,7 @@
 import type { StoreApi } from 'zustand';
 import type { RogueState } from '../rogue';
 import type { SfxName } from '../../audio/sfx';
-import { itemLabel } from '../../model/loot';
+import { itemLabel, mergeable, type ItemStack } from '../../model/loot';
 import type { RogueFx } from '../../model/rogue/types';
 
 export interface ItemActionsDeps {
@@ -66,7 +66,7 @@ export function createItemActions(deps: ItemActionsDeps) {
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       const stack = s.player.relics[index];
-      if (!stack) return;
+      if (!stack || stack.item !== 'amber') return;
 
       const player = s.player;
 
@@ -108,14 +108,14 @@ export function createItemActions(deps: ItemActionsDeps) {
       const s = get();
       if (s.phase !== 'play' || s.busy) return;
       const stack = s.player.relics[index];
-      if (!stack) return;
+      if (!stack || stack.item !== 'royalJelly') return;
 
       const player = s.player;
 
       // relics から除去。
       player.relics.splice(index, 1);
 
-      pushLog('琥珀を捧げた — 巣の記憶が心得を解きほぐす');
+      pushLog('王乳を捧げた — 女王の恵みが心得を解きほぐす');
       sfx.play('heal');
 
       set({ player: { ...player, relics: [...player.relics] } });
@@ -127,6 +127,45 @@ export function createItemActions(deps: ItemActionsDeps) {
       // 支度パネルを開く(装着/解除が自由になる既存機構)。
       set({ skillOutfitting: true });
 
+      settleAfterAction();
+    },
+
+    /**
+     * 研ぐ(rogue-34): relics[relicIndex](王蟻の大顎)を消費して武具1つを+1する。
+     * 対象は装備中の武器/防具/盾、または pack の武具。対象の q は遺物の q+1(=表示層数)まで。
+     * 1ターン消費。
+     */
+    sharpenWithRelic: (
+      relicIndex: number,
+      target: { slot: 'weapon' | 'armor' | 'shield' } | { index: number },
+    ) => {
+      logAction('SR', relicIndex, 'slot' in target ? target.slot : target.index);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      const relic = s.player.relics[relicIndex];
+      if (!relic || relic.item !== 'mandible') return;
+      const player = s.player;
+      const stack: ItemStack | null | undefined =
+        'slot' in target ? player[target.slot] : player.pack[target.index];
+      if (!stack) return;
+      if (!mergeable(stack.item)) return;
+      if (stack.q > relic.q + 1) {
+        pushLog('この武具はこれ以上研げない(より深い大顎が要る)');
+        return;
+      }
+      const sharpened: ItemStack = { ...stack, q: stack.q + 1 };
+      if ('slot' in target) {
+        player[target.slot] = sharpened;
+      } else {
+        player.pack[target.index] = sharpened;
+      }
+      player.relics.splice(relicIndex, 1);
+      sfx.play('heal');
+      pushFx({ kind: 'popup', at: player.pos, text: `${itemLabel(sharpened)}!`, color: '#fde68a', dur: 900 });
+      pushLog(`大顎で${itemLabel(sharpened)}を研いだ(+1)`);
+      set({ player: { ...player, pack: [...player.pack], relics: [...player.relics] } });
+      combat.beastsTurn();
+      endTurn();
       settleAfterAction();
     },
   };

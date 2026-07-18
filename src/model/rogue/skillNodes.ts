@@ -12,6 +12,17 @@
 /** マスタリー系統。 */
 export type MasterySystem = 'arms' | 'guard' | 'carapace' | 'fist' | 'stealth' | 'trapper' | 'light';
 
+/** 系統の育て方(ツールチップ・UI表示用)。閾値は MASTERY_THRESHOLDS を併記して使う。 */
+export const MASTERY_DEED: Record<MasterySystem, string> = {
+  arms: '武器での討伐で深まる',
+  guard: '盾での回避成功で深まる',
+  carapace: '障壁で受け止めた累計ダメージで深まる',
+  fist: '素手での討伐で深まる',
+  stealth: '未覚醒の敵への攻撃で深まる',
+  trapper: '罠での討伐で深まる',
+  light: '「絞る」以下の明かりで関門を通過すると深まる',
+};
+
 /** 系統名(ログ・UI表示用)。 */
 export const MASTERY_NAME: Record<MasterySystem, string> = {
   arms: '武技',

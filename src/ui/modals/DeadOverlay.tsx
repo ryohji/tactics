@@ -15,7 +15,8 @@ export function DeadOverlay() {
   const [seedInput, setSeedInput] = useState('');
   if (phase !== 'dead' && phase !== 'escaped') return null;
   const escaped = phase === 'escaped';
-  const amberCount = player.pack.filter((it) => it.item === 'amber').length;
+  // 遺物(rogue-25・rogue-34で3種化)は pack ではなく relics に入る(既存バグ修正)。
+  const relicCount = player.relics.length;
   const result = {
     maxDepth,
     kills,
@@ -34,7 +35,7 @@ export function DeadOverlay() {
         最深到達 深度{maxDepth} ／ 討伐 {kills} ／ {turn}ターン
       </div>
       {escaped ? (
-        <div className="hud-score-sub">琥珀 {amberCount} 個を持ち帰った</div>
+        <div className="hud-score-sub">遺物 {relicCount} 個を持ち帰った</div>
       ) : (
         <div className="hud-score-sub">
           死因: {deathCause ?? '不明'} ／ 武器: {equip(player.weapon)} ／ 防具: {equip(player.armor)}

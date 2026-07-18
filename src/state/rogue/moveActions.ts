@@ -31,7 +31,7 @@ import * as codexStore from '../codexStore';
 import type { SfxName } from '../../audio/sfx';
 import { OFFSETS, cellKey, type Cell, type CellKey } from '../../model/fcc';
 import { maybeExpand, type Chamber } from '../../model/dungeon';
-import { itemLabel, stackable, stackCount, ITEMS } from '../../model/loot';
+import { itemLabel, stackable, stackCount, STACK_MAX, ITEMS } from '../../model/loot';
 import { spawnChamber } from '../../model/rogue/spawn';
 import { discoverInto } from '../../model/rogue/visibility';
 import {
@@ -244,6 +244,7 @@ export function createMove(deps: MoveDeps) {
     if (foundIndices.length > 0) {
       let pickedUp = false;
       const pickedUpIndices = new Set<number>();
+      const updatedItems = [...items];
       for (const idx of foundIndices) {
         const f = items[idx];
         // 遺物(rogue-29): relics へ拾得。pack の 10 枠制限を受けない。
@@ -261,27 +262,50 @@ export function createMove(deps: MoveDeps) {
           pickedUp = true;
           continue;
         }
-        // stackable かつ pack に同 (item, q) の既存スタックがあれば n を加算。
+        // stackable(rogue-34: potion/thrown/turret/decoy)は上限まで既存スロットへ加算し、
+        // あふれた分は新規スロットへ(複数枠に分割可)。空きが無ければ拾えた分だけ持って
+        // 残りは床(GroundItem の n)へ残す。
         if (stackable(f.stack.item)) {
-          const existing = player.pack.findIndex(
-            (x) => x.item === f.stack.item && x.q === f.stack.q,
-          );
-          if (existing >= 0) {
-            // 既存スタックに加算。
-            const n = stackCount(f.stack);
-            player.pack[existing] = {
-              ...player.pack[existing],
-              n: (stackCount(player.pack[existing]) + n),
-            };
-            pushFx({ kind: 'popup', at: next, text: itemLabel(player.pack[existing]), color: '#fde68a', dur: 900 });
-            pushLog(`${itemLabel(player.pack[existing])} に加わった`);
-            codexStore.recordItemFound(f.stack.item, f.stack.q);
-            pickedUpIndices.add(idx);
-            pickedUp = true;
+          const total = stackCount(f.stack);
+          const max = STACK_MAX(f.stack.item);
+          let remaining = total;
+          let picked = 0;
+          for (let i = 0; i < player.pack.length && remaining > 0; i++) {
+            const slot = player.pack[i];
+            if (slot.item !== f.stack.item || slot.q !== f.stack.q) continue;
+            const room = max - stackCount(slot);
+            if (room <= 0) continue;
+            const add = Math.min(room, remaining);
+            player.pack[i] = { ...slot, n: stackCount(slot) + add };
+            remaining -= add;
+            picked += add;
+          }
+          while (remaining > 0 && player.pack.length < 10) {
+            const take = Math.min(remaining, max);
+            player.pack.push({ item: f.stack.item, q: f.stack.q, n: take > 1 ? take : undefined });
+            remaining -= take;
+            picked += take;
+          }
+          if (picked === 0) {
+            pushLog('これ以上持てない(使うか投げて空ける)');
             continue;
           }
+          codexStore.recordItemFound(f.stack.item, f.stack.q);
+          if (remaining === 0) {
+            pickedUpIndices.add(idx);
+            const gotLabel = itemLabel({ item: f.stack.item, q: f.stack.q, n: total > 1 ? total : undefined });
+            pushFx({ kind: 'popup', at: next, text: gotLabel, color: '#fde68a', dur: 900 });
+            pushLog(`${gotLabel} を拾った`);
+          } else {
+            updatedItems[idx] = { ...f, stack: { ...f.stack, n: remaining } };
+            const gotLabel = itemLabel({ item: f.stack.item, q: f.stack.q, n: picked > 1 ? picked : undefined });
+            pushFx({ kind: 'popup', at: next, text: gotLabel, color: '#fde68a', dur: 900 });
+            pushLog(`${gotLabel} を拾った(残りは床に)`);
+          }
+          pickedUp = true;
+          continue;
         }
-        // 新しい枠が要る場合、pack.length >= 10 なら拾えない。
+        // 武具(weapon/armor/shield): 束ねない。1枠1個の従来どおり。
         if (player.pack.length >= 10) {
           pushLog('これ以上持てない(使うか投げて空ける)');
           continue;
@@ -299,7 +323,7 @@ export function createMove(deps: MoveDeps) {
         sfx.play('pickup');
       }
       set({
-        items: items.filter((_, i) => !pickedUpIndices.has(i)),
+        items: updatedItems.filter((_, i) => !pickedUpIndices.has(i)),
         player: { ...player, pack: [...player.pack], relics: [...player.relics] },
       });
     }
