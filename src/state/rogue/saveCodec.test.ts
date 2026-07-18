@@ -64,6 +64,7 @@ function sampleInput(): EncodeSaveInput {
     skillDraft: null,
     skillFreePick: false,
     cooldowns: {},
+    seisuiCharge: false,
     actionLog: [[1, 'C', 0, 0, 0], [2, 'W']],
     log: ['a', 'b', 'c'],
   };
@@ -108,6 +109,7 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(dec.skillDraft).toEqual(input.skillDraft);
     expect(dec.skillFreePick).toBe(input.skillFreePick);
     expect(dec.cooldowns).toEqual(input.cooldowns);
+    expect(dec.seisuiCharge).toBe(input.seisuiCharge);
     expect(dec.log).toEqual(input.log);
   });
 
@@ -124,7 +126,7 @@ describe('saveCodec(保存コーデックの純関数)', () => {
   it('rogue-30: ランク付きスキル(EquippedSkill)・見送り権(freeドラフト)・クールダウンも往復する', () => {
     const input = sampleInput();
     input.skillEquipped = [
-      { id: 'kensan', rank: 3 },
+      { id: 'kenPunch', rank: 3 },
       { id: 'wanaAmi', rank: 1 },
     ];
     input.skillDraft = 'free';
@@ -135,6 +137,13 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(dec.skillDraft).toBe('free');
     expect(dec.skillFreePick).toBe(true);
     expect(dec.cooldowns).toEqual({ wanaAmi: 6 });
+  });
+
+  it('rogue-35: 静水(seisui)フラグも往復する', () => {
+    const input = sampleInput();
+    input.seisuiCharge = true;
+    const dec = decodeSave(encodeSave(input))!;
+    expect(dec.seisuiCharge).toBe(true);
   });
 
   it('JSON 化(localStorage 相当)を挟んでも往復できる', () => {
@@ -153,9 +162,9 @@ describe('saveCodec(保存コーデックの純関数)', () => {
     expect(encodeSave(input).log).toEqual(['3', '4', '5', '6', '7', '8', '9', '10']);
   });
 
-  it('バージョン不一致(v!==10)は null', () => {
+  it('バージョン不一致(v!==11)は null', () => {
     const data = encodeSave(sampleInput());
-    expect(decodeSave({ ...data, v: 9 as unknown as 10 })).toBeNull();
+    expect(decodeSave({ ...data, v: 10 as unknown as 11 })).toBeNull();
   });
 
   it('decode は dungeon.slots を chambers の center から再構築する', () => {

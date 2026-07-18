@@ -1,4 +1,5 @@
 import { useRogue, depthOf, STRATUM_DEPTH, rankOf, cdOf } from '../../state/rogue';
+import { ITEMS } from '../../model/loot';
 
 /** 脱出ボタン(rogue-25・push-your-luck の自発的終点)。警告帯(深度が
  * 8*(stratum+1) 以上・崩落ライン未満)に居る間だけ表示する。確認モーダルは
@@ -87,6 +88,91 @@ function RengekiButton({ busy }: { busy: boolean }) {
   );
 }
 
+/** 盾打ちボタン(rogue-35)。tateuchi ランクI以上・盾装備中で表示。隣接敵をホバーで有効化。 */
+function TateuchiButton({ busy }: { busy: boolean }) {
+  const skillEquipped = useRogue((s) => s.skillEquipped);
+  const cooldowns = useRogue((s) => s.cooldowns);
+  const tateuchi = useRogue((s) => s.tateuchi);
+  const playerShield = useRogue((s) => s.player.shield);
+  const beasts = useRogue((s) => s.beasts);
+  const hoverBeastId = useRogue((s) => s.hoverBeastId);
+
+  const rank = rankOf(skillEquipped, 'tateuchi');
+  if (rank < 1) return null;
+  const hasShield = playerShield !== null && ITEMS[playerShield.item].kind === 'shield';
+  if (!hasShield) return null;
+
+  const cd = cdOf(cooldowns, 'tateuchi');
+  const hoverBeast = hoverBeastId !== null ? beasts.find((b) => b.id === hoverBeastId && b.alive) : null;
+  const canUse = hoverBeast !== null && cd === 0 && !busy;
+  const disabledReason = cd > 0 ? '装填中' : '隣接敵なし';
+
+  return (
+    <button
+      disabled={!canUse}
+      onClick={() => hoverBeast && tateuchi(hoverBeast.id)}
+      title={`盾打ち: 隣接敵をノックバック+ダメージ(${disabledReason})`}
+    >
+      🛡
+      {cd > 0 && <span className="cooldown">{cd}</span>}
+    </button>
+  );
+}
+
+/** 突進ボタン(rogue-35)。tosshin ランクI以上で表示。dash モードへの入退場を切り替える。 */
+function TosshinButton({ busy }: { busy: boolean }) {
+  const skillEquipped = useRogue((s) => s.skillEquipped);
+  const cooldowns = useRogue((s) => s.cooldowns);
+  const tosshin = useRogue((s) => s.tosshin);
+  const uiMode = useRogue((s) => s.uiMode);
+
+  const rank = rankOf(skillEquipped, 'tosshin');
+  if (rank < 1) return null;
+
+  const cd = cdOf(cooldowns, 'tosshin');
+  const isActive = uiMode === 'dash';
+
+  return (
+    <button
+      className={isActive ? 'active' : ''}
+      disabled={busy || cd > 0}
+      onClick={tosshin}
+      title={`突進: 直線に最大2マス移動して終点で攻撃(${cd > 0 ? '装填中' : '対象方向を選ぶ'})`}
+    >
+      💨
+      {cd > 0 && <span className="cooldown">{cd}</span>}
+    </button>
+  );
+}
+
+/** 替り身ボタン(rogue-35)。kawarimi ランクI以上で表示。隣接敵をホバーで有効化。 */
+function KawarimiButton({ busy }: { busy: boolean }) {
+  const skillEquipped = useRogue((s) => s.skillEquipped);
+  const cooldowns = useRogue((s) => s.cooldowns);
+  const kawarimi = useRogue((s) => s.kawarimi);
+  const beasts = useRogue((s) => s.beasts);
+  const hoverBeastId = useRogue((s) => s.hoverBeastId);
+
+  const rank = rankOf(skillEquipped, 'kawarimi');
+  if (rank < 1) return null;
+
+  const cd = cdOf(cooldowns, 'kawarimi');
+  const hoverBeast = hoverBeastId !== null ? beasts.find((b) => b.id === hoverBeastId && b.alive) : null;
+  const canUse = hoverBeast !== null && cd === 0 && !busy;
+  const disabledReason = cd > 0 ? '装填中' : '隣接敵なし';
+
+  return (
+    <button
+      disabled={!canUse}
+      onClick={() => hoverBeast && kawarimi(hoverBeast.id)}
+      title={`替り身: 隣接敵と位置を入れ替える(${disabledReason})`}
+    >
+      👥
+      {cd > 0 && <span className="cooldown">{cd}</span>}
+    </button>
+  );
+}
+
 /** 下中央バー: よく使う操作(マップ・フォーカス巡回・待機)+ 深度/討伐/ターン。 */
 export function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
   const phase = useRogue((s) => s.phase);
@@ -140,6 +226,11 @@ export function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
           <span className="hint">研ぐ: 装備枠か所持品の武具をクリック</span>
           <button onClick={cancelThrow}>やめる</button>
         </>
+      ) : uiMode === 'dash' ? (
+        <>
+          <span className="hint">突進: 直線上の水色マーカーをクリック</span>
+          <button onClick={cancelThrow}>やめる</button>
+        </>
       ) : (
         <>
           {/* 敵への視線巡回(TAB / Shift+TAB のボタン代替) */}
@@ -155,6 +246,9 @@ export function BottomBar({ onEscapeClick }: { onEscapeClick: () => void }) {
           </button>
           <WeaveTrapButton busy={busy} />
           <RengekiButton busy={busy} />
+          <TateuchiButton busy={busy} />
+          <TosshinButton busy={busy} />
+          <KawarimiButton busy={busy} />
           <button onClick={toggleMap} title="マップ(M)">
             🗺
           </button>

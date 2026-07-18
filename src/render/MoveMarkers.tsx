@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { cellKey, keyToCell, layer, worldPos, type Cell } from '../model/fcc';
-import { useRogue, placeableCells, ROGUE_S } from '../state/rogue';
+import { useRogue, placeableCells, dashCells, ROGUE_S } from '../state/rogue';
 import { consumeSuppressedClick } from '../input/suppress';
 import { tapAction } from '../input/touch';
 import { buildHexTile, buildHexEdges } from './hex';
@@ -17,6 +17,7 @@ const R_MARKER = 0.14;
 const C_NEAR = new THREE.Color('#38bdf8');
 const C_FAR = new THREE.Color('#1d6a96');
 const C_PLACE = new THREE.Color('#f59e0b'); // 罠の設置候補(橙)
+const C_DASH = new THREE.Color('#2dd4bf'); // 突進の移動先候補(青緑・rogue-35)
 
 /** ホバー中マーカーと同じ層の移動可能セルにヘックスタイルを重ねる。 */
 function HoverLevelHexes({ cells }: { cells: Cell[] }) {
@@ -85,13 +86,19 @@ export function MoveMarkers() {
   const clickCell = useRogue((s) => s.clickCell);
   const setHoverMarker = useRogue((s) => s.setHoverMarker);
 
-  // place モードでは移動先の代わりに罠の設置候補(足元+隣接)を出す。
+  // place モードでは移動先の代わりに罠の設置候補(足元+隣接)を、dash モードでは
+  // 突進の移動先候補(直線最大2マス)を出す(rogue-35)。
   const placeCells = useMemo(
     () => (uiMode === 'place' ? placeableCells(useRogue.getState()) : []),
     [uiMode, player],
   );
-  const cells: Cell[] = uiMode === 'walk' ? reach.cells : placeCells;
+  const dashTargetCells = useMemo(
+    () => (uiMode === 'dash' ? dashCells(useRogue.getState()) : []),
+    [uiMode, player],
+  );
+  const cells: Cell[] = uiMode === 'walk' ? reach.cells : uiMode === 'dash' ? dashTargetCells : placeCells;
   const placing = uiMode === 'place';
+  const dashing = uiMode === 'dash';
 
   // 歩数(親を辿った深さ)で色を変える。
   const depths = useMemo(() => {
@@ -127,6 +134,8 @@ export function MoveMarkers() {
       m.setMatrixAt(i, mat);
       if (placing) {
         m.setColorAt(i, col.copy(C_PLACE));
+      } else if (dashing) {
+        m.setColorAt(i, col.copy(C_DASH));
       } else {
         const t = ((depths.get(cellKey(c)) ?? 1) - 1) / 2;
         m.setColorAt(i, col.copy(C_NEAR).lerp(C_FAR, t));
@@ -136,7 +145,7 @@ export function MoveMarkers() {
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
     m.computeBoundingSphere();
-  }, [cells, depths, placing]);
+  }, [cells, depths, placing, dashing]);
 
   useFrame(({ clock }) => {
     if (matRef.current) {
@@ -178,7 +187,7 @@ export function MoveMarkers() {
         <sphereGeometry args={[1, 10, 10]} />
         <meshStandardMaterial ref={matRef} roughness={0.4} emissive="#ffffff" emissiveIntensity={0.5} />
       </instancedMesh>
-      {!placing && <HoverLevelHexes cells={cells} />}
+      {!placing && !dashing && <HoverLevelHexes cells={cells} />}
     </>
   );
 }

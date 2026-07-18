@@ -31,34 +31,41 @@ describe('masteryStore(永続カウンタの保存)', () => {
 
   it('書き込んだ値がそのまま読み戻る', () => {
     setMasteryStorageForTest(memStorage());
-    writeMastery({ ...INITIAL_MASTERY, weaponKills: 12, evades: 3, absorbed: 40 });
-    expect(readMastery()).toEqual({ ...INITIAL_MASTERY, weaponKills: 12, evades: 3, absorbed: 40 });
+    writeMastery({ ...INITIAL_MASTERY, fistKills: 12, evades: 3, absorbed: 40 });
+    expect(readMastery()).toEqual({ ...INITIAL_MASTERY, fistKills: 12, evades: 3, absorbed: 40 });
   });
 
   it('clearMasteryForTest で初期値に戻る', () => {
     setMasteryStorageForTest(memStorage());
-    writeMastery({ ...INITIAL_MASTERY, weaponKills: 12, evades: 3, absorbed: 40 });
+    writeMastery({ ...INITIAL_MASTERY, fistKills: 12, evades: 3, absorbed: 40 });
     clearMasteryForTest();
     expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
   it('壊れた JSON でも初期値を返す(例外を投げない)', () => {
     const s = memStorage();
-    s.setItem('fcc-rogue-mastery-v1', '{not json');
+    s.setItem('fcc-rogue-mastery-v2','{not json');
     setMasteryStorageForTest(s);
     expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
   it('形の合わないデータでも初期値を返す', () => {
     const s = memStorage();
-    s.setItem('fcc-rogue-mastery-v1', '{"foo":"bar"}');
+    s.setItem('fcc-rogue-mastery-v2','{"foo":"bar"}');
     setMasteryStorageForTest(s);
     expect(readMastery()).toEqual(INITIAL_MASTERY);
   });
 
+  it('旧v1キーは読まない(rogue-35: カウンタv2でリセット)', () => {
+    const s = memStorage();
+    s.setItem('fcc-rogue-mastery-v1', JSON.stringify({ ...INITIAL_MASTERY, fistKills: 99 }));
+    setMasteryStorageForTest(s);
+    expect(readMastery()).toEqual(INITIAL_MASTERY); // v1 の値は無視され初期値
+  });
+
   it('storage が無い(Node 環境相当)なら no-op で例外を投げない', () => {
     setMasteryStorageForTest(null);
-    expect(() => writeMastery({ ...INITIAL_MASTERY, weaponKills: 1, evades: 1, absorbed: 1 })).not.toThrow();
+    expect(() => writeMastery({ ...INITIAL_MASTERY, fistKills: 1, evades: 1, absorbed: 1 })).not.toThrow();
     expect(readMastery()).toEqual(INITIAL_MASTERY);
     expect(() => clearMasteryForTest()).not.toThrow();
   });

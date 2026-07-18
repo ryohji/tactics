@@ -7,8 +7,8 @@
 //
 // recoverTrap は beastsTurn(A3で state/rogue/combatActions.ts へ)/endTurn(rogue.ts に
 // 残置。A5 で移設予定)を呼ぶため deps 経由で借りる。equipSkill の片手持ち(katate)解除・
-// unequipSkill の消灯(hiShobo)解除も同様に deps(discover。A4で state/rogue/moveActions.ts
-// へ)経由。
+// unequipSkill の消灯(心眼 shingan・rogue-35)解除も同様に deps(discover。A4で
+// state/rogue/moveActions.ts へ)経由。
 
 import type { StoreApi } from 'zustand';
 import type { RogueState } from '../rogue';
@@ -19,15 +19,15 @@ import { ITEMS, itemLabel } from '../../model/loot';
 import { cellKey, neighbors, type CellKey } from '../../model/fcc';
 import { FEATS, type FeatId } from '../../model/rogue/feats';
 import {
-  MASTERY_NAME,
+  ROAD_NAME,
   SKILL_NODES,
   EXCLUDES,
-  masteryLevels,
   takeable,
+  unlockedRank,
   equippedCost,
   rankOf,
   maxRank,
-  type MasterySystem,
+  NODE_IDS,
   type MasteryCounters,
   type NodeId,
   type EquippedSkill,
@@ -58,28 +58,25 @@ export function createSkills(deps: SkillsDeps) {
   const { set, get, pushLog, logAction, settleAfterAction, beastsTurn, endTurn, discover, nextItemSeq } = deps;
 
   /**
-   * マスタリー(永続カウンタ)を加算し、レベルアップしたらログを出す(rogue-23)。
-   * カウンタは死んでも残る(masteryStore.ts が localStorage に保存)。
+   * マスタリー(永続カウンタ)を加算し、ノードの解禁ランクが上がったらログを出す
+   * (rogue-23。rogue-35でノード単位の deed へ再編: 系統Lvの前後比較 → 全ノードの
+   * unlockedRank 前後比較へ)。カウンタは死んでも残る(masteryStore.ts が localStorage に保存)。
    */
   function incrementMastery(delta: Partial<MasteryCounters>): void {
     const cur = masteryStore.readMastery();
-    const before = masteryLevels(cur);
-    const next: MasteryCounters = {
-      weaponKills: cur.weaponKills + (delta.weaponKills ?? 0),
-      evades: cur.evades + (delta.evades ?? 0),
-      absorbed: cur.absorbed + (delta.absorbed ?? 0),
-      fistKills: cur.fistKills + (delta.fistKills ?? 0),
-      stealthKills: cur.stealthKills + (delta.stealthKills ?? 0),
-      trapKills: cur.trapKills + (delta.trapKills ?? 0),
-      dimCollapses: cur.dimCollapses + (delta.dimCollapses ?? 0),
-    };
-    masteryStore.writeMastery(next);
-    const after = masteryLevels(next);
-    (Object.keys(after) as MasterySystem[]).forEach((sys) => {
-      if (after[sys] > before[sys]) {
-        pushLog(`${MASTERY_NAME[sys]}の心得が深まった(Lv${after[sys]})`);
-      }
+    const next: MasteryCounters = { ...cur };
+    (Object.keys(delta) as (keyof MasteryCounters)[]).forEach((k) => {
+      next[k] = cur[k] + (delta[k] ?? 0);
     });
+    masteryStore.writeMastery(next);
+    for (const id of NODE_IDS) {
+      const before = unlockedRank(id, cur);
+      const after = unlockedRank(id, next);
+      if (after > before) {
+        const node = SKILL_NODES[id];
+        pushLog(`${ROAD_NAME[node.road]}の域に達した: ${node.name}`);
+      }
+    }
     // 実績「罠師の誇り」(rogue-25): 罠での討伐が累計5に達した瞬間だけ解除。
     if (delta.trapKills && cur.trapKills < 5 && next.trapKills >= 5) maybeUnlockFeat('trapper5');
   }
@@ -116,9 +113,9 @@ export function createSkills(deps: SkillsDeps) {
 
       // 支度中・見送り権('free')中は解禁済みの次ランク全体(takeable)から、
       // 関門ドラフト(配列)中は提示された候補からのみ選べる。
-      const levels = masteryLevels(masteryStore.readMastery());
+      const counters = masteryStore.readMastery();
       if (inOutfitting || inFree) {
-        if (!takeable(s.skillEquipped, levels).some((c) => c.id === id)) return;
+        if (!takeable(s.skillEquipped, counters).some((c) => c.id === id)) return;
       } else if (draftArray) {
         if (!draftArray.some((c) => c.id === id)) return;
       }
@@ -188,8 +185,8 @@ export function createSkills(deps: SkillsDeps) {
         }
         set({ player: { ...player, pack: [...player.pack] } });
       }
-      // 消灯(hiShobo)を外したとき消灯状態なら「絞る」へ戻す(rogue-24)。
-      if (id === 'hiShobo' && s.lightLevel === 3) {
+      // 心眼(shingan)を外したとき消灯状態なら「絞る」へ戻す(rogue-24。rogue-35: hiShobo→shingan)。
+      if (id === 'shingan' && s.lightLevel === 3) {
         set({ lightLevel: 0 });
         pushLog('たいまつに火を戻した(絞る)');
         discover();

@@ -34,6 +34,8 @@ function pickTarget(): number | null {
 
 /**
  * 固定方針(下手だが決定的):
+ * 0. 支度・関門ドラフトが開いたら見送る(rogue-35: ボットの討伐で新カウンタが増え、
+ *    関門で takeable が非空になりドラフトが開きうる — 開いたら skipDraft/finishOutfitting)
  * 1. 隣接する敵がいれば最小 id を殴る
  * 2. HP が半分未満で水薬があれば飲む
  * 3. こちらに気づいた敵がいれば待って迎え撃つ
@@ -43,6 +45,14 @@ function pickTarget(): number | null {
  */
 async function playTurn(_i: number): Promise<void> {
   const s = useRogue.getState();
+  if (s.skillOutfitting) {
+    s.finishOutfitting();
+    return run(500);
+  }
+  if (s.skillDraft !== null) {
+    s.skipDraft();
+    return run(500);
+  }
   const target = pickTarget();
   if (target !== null) {
     s.clickBeast(target);

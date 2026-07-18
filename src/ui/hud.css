@@ -718,8 +718,11 @@
 .skill-card.locked .skill-name { color: #cbd5e1; }
 .mastery-req { font-size: 10px; color: #fbbf24; letter-spacing: 0.03em; }
 
-/* --- 心得(マスタリー)の系統×ティア一覧。図鑑・支度画面から共用(MasteryTree) --- */
+/* --- 心得(マスタリー)四道一覧。図鑑・支度画面から共用(MasteryTree・rogue-35) --- */
 .mastery-tree { display: flex; flex-direction: column; gap: 14px; margin-bottom: 8px; }
+.mastery-roads { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.mastery-roads .mastery-system { grid-column: auto; }
+.mastery-roads .mastery-tier { grid-template-columns: 1fr; }
 .mastery-system { border-left: 2px solid rgba(128, 118, 210, 0.35); padding-left: 10px; }
 .mastery-head {
   display: flex;

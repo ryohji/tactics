@@ -41,8 +41,8 @@ import {
   pathFromReach,
   type Reach,
 } from '../../model/rogue/reach';
-import { LIGHT, PLAYER_ID, EXPAND_R, REACH_STEPS, type RogueFx } from '../../model/rogue/types';
-import { depthOf, beastAt } from '../../model/rogue/rules';
+import { PLAYER_ID, EXPAND_R, REACH_STEPS, type RogueFx } from '../../model/rogue/types';
+import { depthOf, beastAt, sightRadius } from '../../model/rogue/rules';
 import { STEP_MS } from '../unitAnim';
 import type { FeatId } from '../../model/rogue/feats';
 
@@ -88,6 +88,8 @@ export interface MoveDeps {
   nextItemSeq(): number;
   /** place モードでの罠編み設置(rogue-27。rogue.ts 側に残置)。 */
   weaveTrapAt(c: Cell): void;
+  /** dash モードでの突進の発動(rogue-35。combatActions.ts の createCombat が返す)。 */
+  tosshinAt(c: Cell): void;
 }
 
 export function createMove(deps: MoveDeps) {
@@ -108,6 +110,7 @@ export function createMove(deps: MoveDeps) {
     nextBeastSeq,
     nextItemSeq,
     weaveTrapAt,
+    tosshinAt,
   } = deps;
 
   // ファストトラベル(walkPath)が進行中か。cancelTravel はこのときだけ runSeq を進めて
@@ -115,10 +118,13 @@ export function createMove(deps: MoveDeps) {
   let traveling = false;
 
   /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
-  /** たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。 */
+  /**
+   * たいまつの明かり: プレイヤーから空洞づたいに(明かり段階の半径)以内を発見済みに。
+   * 心眼(shingan・rogue-35): 「絞る」以下の明かりでは視界+1(sightRadius が吸収)。
+   */
   function discover(): void {
-    const { dungeon, discovered, player, lightLevel } = get();
-    const grew = discoverInto(dungeon, player.pos, LIGHT[lightLevel].see, discovered);
+    const { dungeon, discovered, player, lightLevel, skillEquipped } = get();
+    const grew = discoverInto(dungeon, player.pos, sightRadius(lightLevel, skillEquipped), discovered);
     if (grew) set({ discoveredRev: get().discoveredRev + 1 });
   }
 
@@ -368,6 +374,10 @@ export function createMove(deps: MoveDeps) {
       if (s.uiMode === 'throw') return;
       if (s.uiMode === 'place') {
         weaveTrapAt(c);
+        return;
+      }
+      if (s.uiMode === 'dash') {
+        tosshinAt(c);
         return;
       }
       const k = cellKey(c);

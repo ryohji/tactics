@@ -29,7 +29,6 @@ import {
   draftLanes,
   formatEquippedForRecord,
   hasAnyMastery,
-  masteryLevels,
   rankOf,
   type MasteryCounters,
   type NodeId,
@@ -104,10 +103,10 @@ export function createStratum(deps: StratumDeps) {
     skills.maybeUnlockFeat('firstGate');
     // 実績「無傷の関門」(rogue-25): HP満タンで関門を通過する。
     if (get().player.hp === get().player.maxHp) skills.maybeUnlockFeat('pureGate');
-    // 灯火マスタリー(rogue-24): 「絞る」以下の暗さで関門を通過した実績。
+    // 実績「暗闇行」(rogue-25): 「絞る」以下の暗さで関門を通過する。
+    // rogue-35: dimCollapses カウンタは廃止(darkKills に統合)。判定だけ残す。
     if (isDimLight(get().lightLevel)) {
-      skills.incrementMastery({ dimCollapses: 1 });
-      skills.maybeUnlockFeat('darkGate'); // 実績「暗闇行」(rogue-25)
+      skills.maybeUnlockFeat('darkGate');
     }
     // 崩落の衝撃で障壁は剥がれる(rogue-21。層を跨いだ持ち越しをさせない)。
     const p = get().player;
@@ -130,12 +129,12 @@ export function createStratum(deps: StratumDeps) {
       set({ skillFreePick: false, skillDraft: 'free' });
       pushLog('見送っていた選択の権利で、心得を自由に選べる。');
     } else {
-      const levels = masteryLevels(masteryStore.readMastery());
-      // rogue-27: wanaAmi ランクIは系統レベル0でも常時候補になりうるため、
+      const counters = masteryStore.readMastery();
+      // rogue-27: wanaAmi ランクIはカウンタ0でも常時候補になりうるため、
       // hasAnyMastery(何か1つでも育っているか)が false なら draftLanes 自体を呼ばず
       // rng を一切引かない(真にマスタリー0のプレイヤー・ゴールデンテストの乱数列を守る。
       // mastery.ts の hasAnyMastery 参照)。
-      const draft = hasAnyMastery(levels) ? draftLanes(get().skillEquipped, levels, rand) : [];
+      const draft = hasAnyMastery(counters) ? draftLanes(get().skillEquipped, counters, rand) : [];
       set({ skillDraft: draft.length > 0 ? draft : null });
       if (draft.length > 0) pushLog('関門の先へ進む前に、新たな心得を選べる。');
     }

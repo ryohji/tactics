@@ -2,10 +2,9 @@ import { useState } from 'react';
 import {
   useRogue,
   SKILL_NODES,
-  MASTERY_NAME,
+  ROAD_NAME,
   equippedCost,
   takeable,
-  masteryLevels,
   readMastery,
   knotActive,
   KNOTS,
@@ -55,7 +54,7 @@ function SkillCard({
           {RANK_LABEL[rank] ?? ''}
         </span>
         {lane && <span className={`lane-badge lane-${lane}`}>{LANE_LABEL[lane]}</span>}
-        <span className="skill-sys">{MASTERY_NAME[node.system]}</span>
+        <span className="skill-sys">{ROAD_NAME[node.road]}</span>
         <span className="skill-cost">コスト{node.costs[rank - 1]}</span>
       </div>
       <p className="skill-desc">{node.descs[rank - 1]}</p>
@@ -89,9 +88,7 @@ export function SkillModal() {
   const used = equippedCost(skillEquipped);
   const mastery = outfitting || isFree ? readMastery() : null;
   // 支度・見送り権中は takeable(次に装着できる候補)、ドラフト中は提示された配列。
-  const candidates: EquippedSkill[] = mastery
-    ? takeable(skillEquipped, masteryLevels(mastery))
-    : (draftArray ?? []);
+  const candidates: EquippedSkill[] = mastery ? takeable(skillEquipped, mastery) : (draftArray ?? []);
 
   // 発動中の結び一覧
   const activeKnots = Object.values(KNOTS).filter((knot) => knotActive(skillEquipped, knot.id));

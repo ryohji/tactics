@@ -10,14 +10,15 @@ function isMasteryCounters(v: unknown): v is MasteryCounters {
   return (
     typeof v === 'object' &&
     v !== null &&
-    typeof (v as MasteryCounters).weaponKills === 'number' &&
+    typeof (v as MasteryCounters).fistKills === 'number' &&
     typeof (v as MasteryCounters).evades === 'number' &&
     typeof (v as MasteryCounters).absorbed === 'number'
   );
 }
 
+// rogue-35: カウンタ v2(四道 deed 再編)。旧 v1 は読まない(リセット。移行コードなし)。
 const store: KvStore<MasteryCounters> = makeKvStore(
-  'fcc-rogue-mastery-v1',
+  'fcc-rogue-mastery-v2',
   () => ({ ...INITIAL_MASTERY }),
   {
     validate: isMasteryCounters,

@@ -24,14 +24,14 @@ export const STRATUM_DEPTH = 8;
  * 改訂のたびに手動で上げる。ラン履歴(state/history.ts)に記録し、旧バージョンの
  * 記録をタイトル画面で見分けるのに使う。
  */
-export const GAME_VERSION = 'r34';
+export const GAME_VERSION = 'r35';
 
 /** 明かりの段階。広げるほど 視界↑・自然回復↑・敵の気づき距離↑。 */
 export const LIGHT = [
   { name: '絞る', see: 4.5, regenEvery: 10, aggro: 0.7 },
   { name: '普通', see: 6, regenEvery: 6, aggro: 1.0 },
   { name: '広げる', see: 8, regenEvery: 4, aggro: 1.35 },
-  // 4段階目「消す」(rogue-24)。灯火スキル hiShobo 装着中のみ cycleLight の循環に現れる。
+  // 4段階目「消す」(rogue-24)。心得「心眼」(shingan・rogue-35で旧hiShoboを吸収)装着中のみ cycleLight の循環に現れる。
   // regenEvery は「実質回復なし」を表す大きな整数(Infinity は JSON にできない)。
   { name: '消す', see: 2, regenEvery: 9999, aggro: 0.35 },
 ] as const;
@@ -173,8 +173,8 @@ export type SkillDraft = DraftEntry[] | 'free' | null;
  * ダンジョンの rng 関数は保存しない(生成はすべて座標導出 rng のため不要)。
  */
 export interface SaveData {
-  /** 10: rogue-30 cooldowns 一般化(trapCooldown → cooldowns.wanaAmi / cooldowns.rengeki)。旧 v9 は非互換。 */
-  v: 10;
+  /** 11: rogue-35 マスタリーv3(四道)+seisui フラグ追加。skillEquipped の id 集合が変わるため旧 v10 は非互換。 */
+  v: 11;
   seed: number;
   /** 戦闘乱数の内部状態(再開後もプレイ再現性を保つ)。 */
   rng: number;
@@ -203,8 +203,10 @@ export interface SaveData {
   skillDraft: SkillDraft;
   /** 見送り権(rogue-27): true なら次の関門でドラフトの代わりに 'free'(自由選択)が出る。 */
   skillFreePick: boolean;
-  /** スキルのクールダウン(rogue-30)。wanaAmi=罠編み・rengeki=連撃(rogue-30)。 */
+  /** スキルのクールダウン(rogue-30)。wanaAmi=罠編み・rengeki=連撃・tateuchi/tosshin/kawarimi(rogue-35)。 */
   cooldowns: Partial<Record<NodeId, number>>;
+  /** 静水(seisui・rogue-35): 回避成功時に立つ1回限りのフラグ。次の近接攻撃+2で消費する。 */
+  seisuiCharge: boolean;
   actionLog: ActionLogEntry[];
   log: string[];
 }

@@ -80,7 +80,6 @@ import {
 } from '../model/rogue/types';
 import { depthOf, weaponReach, placeableCells, gazeAngles } from '../model/rogue/rules';
 import {
-  masteryLevels,
   takeable,
   rankOf,
   cdOf,
@@ -126,21 +125,19 @@ export {
   isoDate,
   dailySeed,
 } from '../model/rogue/rules';
-export { parseSeed } from '../model/rogue/rules';
-// マスタリー・スキルノード(rogue-23。rogue-27でランク・結び・排他へ再編)は HUD が
-// 直接参照するのでここから再輸出する。
+export { parseSeed, dashCells } from '../model/rogue/rules';
+// マスタリー・スキルノード(rogue-23。rogue-27でランク・結び・排他へ再編。rogue-35で
+// 四道・ノード単位 deed へ再編)は HUD が直接参照するのでここから再輸出する。
 export {
-  MASTERY_NAME,
-  MASTERY_DEED,
+  ROAD_NAME,
+  DEED_LABEL,
   SKILL_NODES,
   NODE_IDS,
-  MASTERY_THRESHOLDS,
-  masteryLevels,
   takeable,
   draftLanes,
   unlockedRank,
   equippedCost,
-  counterFor,
+  hasAnyMastery,
   rankOf,
   cdOf,
   maxRank,
@@ -149,10 +146,12 @@ export {
   EXCLUDES,
 } from '../model/rogue/mastery';
 export type {
-  MasterySystem,
+  Road,
+  MasteryCounterKey,
   MasteryCounters,
   NodeId,
   SkillNode,
+  NodeDeed,
   EquippedSkill,
   DraftEntry,
   DraftLane,
@@ -195,15 +194,18 @@ export interface RogueState {
   skillDraft: SkillDraft;
   /** 見送り権(rogue-27): true なら次の関門でドラフトの代わりに 'free' が出る(永続保存)。 */
   skillFreePick: boolean;
-  /** スキルのクールダウン(rogue-30)。wanaAmi=罠編み・rengeki=連撃。endTurn で全キー1ずつ減算。 */
+  /** スキルのクールダウン(rogue-30)。wanaAmi=罠編み・rengeki=連撃・tateuchi/tosshin/kawarimi(rogue-35)。endTurn で全キー1ずつ減算。 */
   cooldowns: Partial<Record<NodeId, number>>;
+  /** 静水(seisui・rogue-35): 回避成功時に立つ1回限りのフラグ。次の近接攻撃+2で消費する。 */
+  seisuiCharge: boolean;
   /** ラン開始直後の「支度」(自由装着)モード中か。 */
   skillOutfitting: boolean;
   /** escaped(rogue-25): 脱出(生還)で終えたラン。dead と同様に操作停止・セーブ破棄。 */
   phase: 'play' | 'dead' | 'escaped';
   busy: boolean;
-  /** walk=移動 / throw=投擲対象選択 / place=罠を編む先の選択(足元+隣接。rogue-27) / sharpen=研ぐ対象選択(rogue-34)。 */
-  uiMode: 'walk' | 'throw' | 'place' | 'sharpen';
+  /** walk=移動 / throw=投擲対象選択 / place=罠を編む先の選択(足元+隣接。rogue-27) /
+      sharpen=研ぐ対象選択(rogue-34) / dash=突進の移動先選択(rogue-35)。 */
+  uiMode: 'walk' | 'throw' | 'place' | 'sharpen' | 'dash';
   /** 武具投擲時の対象アイテム index(uiMode=throw かつ throwItemIndex が undefined なら投げナイフ)。 */
   throwItemIndex?: number;
   /** 研ぐ(rogue-34): uiMode=sharpen 中に選択されている遺物(relics)の index。 */
@@ -270,6 +272,24 @@ export interface RogueState {
   detonateTrap: (id: number) => void;
   /** 連撃(rogue-30: 拳闘「連撃」ランクII以上)。素手で隣接敵へ2連撃。装填6ターン・1ターン消費。 */
   rengeki: (id: number) => void;
+  /**
+   * 盾打ち(rogue-35: 「盾打ち」ランクI以上・盾装備中のみ)。隣接する敵1体を反対方向へ
+   * 1歩ノックバック+固定3+盾品質ダメージ(押し先が塞がっていれば押せずダメージのみ)。
+   * 装填6ターン・1ターン消費。
+   */
+  tateuchi: (id: number) => void;
+  /**
+   * 突進(rogue-35: 「突進」ランクI以上)。装填クールダウンが0なら dash モードへ入る
+   * (uiMode='dash')。直線に最大2マス移動できる発見済みセルを clickCell すると、その場で
+   * 発動する(通過・終点は空セルのみ・終点で隣接敵1体へ通常近接攻撃)。装填6ターン。
+   * uiMode='dash' 中にもう一度呼ぶと解除(cancelThrow と同じ経路)。
+   */
+  tosshin: () => void;
+  /**
+   * 替り身(rogue-35: 「替り身」ランクI以上)。隣接する敵1体と場所を入れ替える(攻撃なし)。
+   * 疑似同士討ち込み。装填8ターン・1ターン消費。
+   */
+  kawarimi: (id: number) => void;
   /**
    * アイテム投擲(rogue-28)。pack[index] を敵 beastId へ投げる。
    * 武具(weapon/armor/shield)は落ちて拾い直せる。水薬は消滅。
@@ -486,6 +506,7 @@ export const useRogue = create<RogueState>((set, get) => {
     nextBeastSeq: () => beastSeq++,
     nextItemSeq: () => itemSeq++,
     weaveTrapAt,
+    tosshinAt,
   });
 
   // 戦闘オーケストレーション(近接/投擲攻撃・敵の1ターン・罠・砲塔・討伐処理)は
@@ -504,6 +525,7 @@ export const useRogue = create<RogueState>((set, get) => {
     checkDead: runEnd.checkDead,
     endTurn: () => stratum.endTurn(),
     settleAfterAction: () => move.settleAfterAction(),
+    discover: () => move.discover(),
     sleep,
     sfx,
     triggerPose,
@@ -543,6 +565,11 @@ export const useRogue = create<RogueState>((set, get) => {
    * (モード入場)側で既に確認済みだが、モード中に装備やランクが変わりうるので
    * ここでも再確認する(壊れた指し先の安全弁)。
    */
+  /** dash モード: 選んだセルへ突進(tosshin)を発動する(rogue.ts 分割A3で combat へ実装済み)。 */
+  function tosshinAt(c: Cell): void {
+    void combat.tosshin(c);
+  }
+
   function weaveTrapAt(c: Cell): void {
     const s = get();
     const rank = rankOf(s.skillEquipped, 'wanaAmi');
@@ -592,7 +619,7 @@ export const useRogue = create<RogueState>((set, get) => {
     | 'turn' | 'kills' | 'maxDepth' | 'stratum' | 'phase' | 'busy' | 'uiMode' | 'reach'
     | 'hoverMarker' | 'hoverBeastId' | 'armedKey' | 'focus' | 'log' | 'fx'
     | 'cellChamber' | 'visitedChambers' | 'exploreRev' | 'deathCause'
-    | 'skillSlots' | 'skillEquipped' | 'skillDraft' | 'skillFreePick' | 'cooldowns' | 'skillOutfitting'
+    | 'skillSlots' | 'skillEquipped' | 'skillDraft' | 'skillFreePick' | 'cooldowns' | 'seisuiCharge' | 'skillOutfitting'
   > {
     clearUnitAnims();
     runSeq++;
@@ -602,12 +629,12 @@ export const useRogue = create<RogueState>((set, get) => {
     // 支度(rogue-23): 解禁済みノードが1つ以上あればラン開始直後に自由装着パネルを開く
     // (マスタリー未育成の初回プレイヤーには出ない)。開いている間はゲーム操作をブロック。
     // skillEquipped はこの直後に空へリセットするので、ここでは絞り込まず単純に見る。
-    // rogue-27: wanaAmi(罠編み)ランクIは系統レベル0でも解禁済みという特別な閾値を持つため
-    // takeable([], levels) だけで判定すると真にマスタリー0のプレイヤーにも支度が開いてしまう
-    // — hasAnyMastery(何か1つでも系統が育っているか)を併せて見て、真にマスタリー0の
+    // rogue-27: wanaAmi(罠編み)ランクIはカウンタ0でも解禁済みという特別な閾値を持つため
+    // takeable([], counters) だけで判定すると真にマスタリー0のプレイヤーにも支度が開いてしまう
+    // — hasAnyMastery(何か1つでもカウンタが動いているか)を併せて見て、真にマスタリー0の
     // プレイヤー・ボット・ゴールデンテストの操作列を守る(mastery.ts の hasAnyMastery 参照)。
-    const levels0 = masteryLevels(masteryStore.readMastery());
-    const outfitting = hasAnyMastery(levels0) && takeable([], levels0).length > 0;
+    const counters0 = masteryStore.readMastery();
+    const outfitting = hasAnyMastery(counters0) && takeable([], counters0).length > 0;
     const dungeon = createDungeon(seed);
     // 入口に水薬をひとつ(手触り確認と「拾える」ことの提示)。
     const entrance = dungeon.chambers[0];
@@ -658,6 +685,7 @@ export const useRogue = create<RogueState>((set, get) => {
       skillDraft: null,
       skillFreePick: false,
       cooldowns: {},
+      seisuiCharge: false,
       skillOutfitting: outfitting,
       phase: 'play',
       busy: outfitting, // 支度パネルが開いている間はゲーム操作をブロック
@@ -752,6 +780,7 @@ export const useRogue = create<RogueState>((set, get) => {
         skillDraft: d.skillDraft,
         skillFreePick: d.skillFreePick,
         cooldowns: d.cooldowns,
+        seisuiCharge: d.seisuiCharge,
         skillOutfitting: false,
         phase: 'play',
         busy: d.skillDraft !== null,
@@ -1059,6 +1088,42 @@ export const useRogue = create<RogueState>((set, get) => {
       void combat.rengeki(b);
     },
 
+    tateuchi: (id) => {
+      logAction('TU', id);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      const b = s.beasts.find((x) => x.id === id);
+      if (!b || !b.alive) return;
+      void combat.tateuchi(b);
+    },
+
+    tosshin: () => {
+      logAction('TS');
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      if (s.uiMode === 'dash') {
+        get().cancelThrow(); // もう一度呼ぶと解除(投擲・罠設置モードと同じ経路)
+        return;
+      }
+      if (rankOf(s.skillEquipped, 'tosshin') < 1) return;
+      if (cdOf(s.cooldowns, 'tosshin') > 0) {
+        pushLog('まだ装填が終わっていない');
+        return;
+      }
+      sfx.play('select');
+      pushLog('突進: 直線上の水色マーカーをクリック(もう一度押すと解除)');
+      set({ uiMode: 'dash' });
+    },
+
+    kawarimi: (id) => {
+      logAction('KW', id);
+      const s = get();
+      if (s.phase !== 'play' || s.busy) return;
+      const b = s.beasts.find((x) => x.id === id);
+      if (!b || !b.alive) return;
+      void combat.kawarimi(b);
+    },
+
     mergeItem: (index) => {
       logAction('M', index);
       const s = get();
@@ -1097,8 +1162,9 @@ export const useRogue = create<RogueState>((set, get) => {
       logAction('L');
       const s = get();
       if (s.phase !== 'play') return;
-      // 消灯(rogue-24): hiShobo 装着中のみ 0→1→2→3→0 の4循環。未装着は従来の3循環。
-      const cycle = rankOf(s.skillEquipped, 'hiShobo') >= 1 ? 4 : 3;
+      // 消灯(rogue-24。rogue-35: hiShobo→心眼(shingan)に吸収): 装着中のみ 0→1→2→3→0 の4循環。
+      // 未装着は従来の3循環。
+      const cycle = rankOf(s.skillEquipped, 'shingan') >= 1 ? 4 : 3;
       const l = ((s.lightLevel + 1) % cycle) as LightLevel;
       set({ lightLevel: l });
       sfx.play('select');

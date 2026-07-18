@@ -49,6 +49,7 @@ export interface EncodeSaveInput {
   skillDraft: SkillDraft;
   skillFreePick: boolean;
   cooldowns: Partial<Record<NodeId, number>>;
+  seisuiCharge: boolean;
   actionLog: ActionLogEntry[];
   /** ストアの log 全体(末尾8件への切り詰めは encode 側で行う)。 */
   log: string[];
@@ -82,6 +83,7 @@ export interface DecodedSave {
   skillDraft: SkillDraft;
   skillFreePick: boolean;
   cooldowns: Partial<Record<NodeId, number>>;
+  seisuiCharge: boolean;
   actionLog: ActionLogEntry[];
   log: string[];
 }
@@ -89,7 +91,7 @@ export interface DecodedSave {
 /** ストアの状態片+モジュール値から SaveData スナップショットを組み立てる。 */
 export function encodeSave(s: EncodeSaveInput): SaveData {
   return {
-    v: 10,
+    v: 11,
     seed: s.seed,
     rng: s.rng,
     seqs: s.seqs,
@@ -119,19 +121,20 @@ export function encodeSave(s: EncodeSaveInput): SaveData {
     skillDraft: s.skillDraft,
     skillFreePick: s.skillFreePick,
     cooldowns: s.cooldowns,
+    seisuiCharge: s.seisuiCharge,
     actionLog: s.actionLog,
     log: s.log.slice(-8),
   };
 }
 
 /**
- * SaveData から状態片を復元する。バージョン不一致(v!==10)は null。
+ * SaveData から状態片を復元する。バージョン不一致(v!==11)は null。
  * Set/Map の再構築・dungeon の slots 再構築(slotKeyOfCell)・rng 関数の
  * 再付与(生成はすべて座標導出 rng なのでこの値は使われない)を担う。
- * v9 からの移行: trapCooldown → cooldowns.wanaAmi。
+ * v10 からの移行: マスタリーv3(四道)で skillEquipped の id 集合が変わるため非互換。
  */
 export function decodeSave(d: SaveData): DecodedSave | null {
-  if (d.v !== 10) return null;
+  if (d.v !== 11) return null;
   const dungeon: Dungeon = {
     open: new Set(d.dungeon.open),
     chambers: d.dungeon.chambers,
@@ -166,6 +169,7 @@ export function decodeSave(d: SaveData): DecodedSave | null {
     skillDraft: d.skillDraft,
     skillFreePick: d.skillFreePick,
     cooldowns: d.cooldowns,
+    seisuiCharge: d.seisuiCharge,
     actionLog: d.actionLog,
     log: d.log,
   };
