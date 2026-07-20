@@ -1,8 +1,16 @@
 import { useState } from 'react';
 import { useRogue, playerAtk, playerDef, playerEvade, SKILL_NODES, rankOf } from '../../state/rogue';
-import { ITEMS, itemLabel, statLabel, stackAtk, mergeable, type ItemStack } from '../../model/loot';
+import { ITEMS, itemLabel, statLabel, stackAtk, stackCount, mergeable, type ItemStack } from '../../model/loot';
 
 const SLOT_NAME = { weapon: '武器', armor: '防具', shield: '盾' } as const;
+
+/** 所持品一覧の表示名。名前(+品質)の後ろにスタック数を「(2)」形式で括弧づけする。 */
+function packLabel(s: ItemStack): string {
+  const name = ITEMS[s.item].name;
+  const quality = s.q > 0 ? `+${s.q}` : '';
+  const count = stackCount(s) >= 2 ? ` (${stackCount(s)})` : '';
+  return `${name}${quality}${count}`;
+}
 
 /** 装備枠1段(所持品パネル最上段)。総攻撃力/防御力/回避%をここに表示する。 */
 function EquipSlot({
@@ -98,7 +106,7 @@ export function PackPanel() {
   }
 
   // 各枠は既に実スタック化されている(rogue-33: 同一 (item,q) は1枠に n で束ねる)ので、
-  // ここでの見た目上のグルーピングは不要 — itemLabel の「×n」表示に一本化する。
+  // ここでの見た目上のグルーピングは不要 — packLabel の「(n)」表示に一本化する。
   // kind 順で並べる: weapon → shield → armor → potion → thrown → turret → decoy → relic
   const kindOrder = ['weapon', 'shield', 'armor', 'potion', 'thrown', 'turret', 'decoy', 'relic'];
   const rows: { stack: ItemStack; index: number }[] = pack.map((stack, index) => ({ stack, index }));
@@ -182,7 +190,6 @@ export function PackPanel() {
                 : def.kind === 'relic'
                   ? '調べる'
                   : '設置';
-        // 投げられる種類か(武具・水薬のみ)。装備中スロットは対象外。
         // rogue-30: 武器は左手(盾スロット)にも装備されうる — その一致も見る。
         const isEquipped =
           (def.kind === 'weapon' &&
@@ -190,71 +197,84 @@ export function PackPanel() {
               (player.shield?.item === stack.item && player.shield.q === stack.q))) ||
           (def.kind === 'armor' && player.armor?.item === stack.item && player.armor.q === stack.q) ||
           (def.kind === 'shield' && player.shield?.item === stack.item && player.shield.q === stack.q);
-        const canThrow = ['weapon', 'armor', 'shield', 'potion'].includes(def.kind) && !isEquipped;
+        // 種類として副動詞が「そもそも適用対象か」(show*) と「今使えるか」(can*) を分ける。
+        // 適用対象の副動詞は常に表示し、使えないときは disabled にする(枠位置を安定させる)。
+        const isMergeable = mergeable(stack.item); // 武具のみ
+        const showThrow = ['weapon', 'armor', 'shield', 'potion'].includes(def.kind);
+        const showOffhand = def.kind === 'weapon';
+        // 投げられる種類か。装備中スロットは対象外。
+        const canThrow = showThrow && !isEquipped;
         // 二刀流(rogue-30): nitoryu ランクI以上・片手武器・未装備なら左手にも装備できる。
-        const canOffhand =
-          def.kind === 'weapon' && !def.twoHanded && !isEquipped && rankOf(skillEquipped, 'nitoryu') >= 1;
-        // 合成できるか(rogue-34: 武具は束ねないので2枠方式のみ)。別枠に同 (item,q) がある行にだけ表示。
+        const canOffhand = showOffhand && !def.twoHanded && !isEquipped && rankOf(skillEquipped, 'nitoryu') >= 1;
+        // 合成できるか(rogue-34: 武具は束ねないので2枠方式のみ)。別枠に同 (item,q) がある行にだけ有効。
         const canMerge =
-          mergeable(stack.item) && pack.some((x, i) => i !== index && x.item === stack.item && x.q === stack.q);
+          isMergeable && pack.some((x, i) => i !== index && x.item === stack.item && x.q === stack.q);
         // 研ぐ対象選択中(rogue-34)。対象は武具のみ、遺物の層数(q+1)以下の品質まで。
-        const sharpenEligible =
-          !!sharpenTargetRelic && mergeable(stack.item) && stack.q <= sharpenTargetRelic.q + 1;
+        const canSharpen =
+          !!sharpenTargetRelic && isMergeable && stack.q <= sharpenTargetRelic.q + 1;
         return (
           <div className="pack-row" key={`${stack.item}:${stack.q}:${index}`}>
             <button
-              className={throwing || isThrowItemMode ? 'active' : ''}
+              className={`pack-main${throwing || isThrowItemMode ? ' active' : ''}`}
               disabled={locked}
               onClick={() => useItem(index)}
             >
-              {itemLabel(stack)}
+              <span className="name">{packLabel(stack)}</span>
               <span className="use">
                 {statLabel(stack)}·{verb}
               </span>
             </button>
-            {canThrow && (
+            <div className="pack-verbs">
+              {showThrow && (
+                <button
+                  className="throw"
+                  disabled={locked || !canThrow}
+                  onClick={() => setThrowMode(index)}
+                  title="敵をクリックして投擲"
+                >
+                  投げる
+                </button>
+              )}
+              {showOffhand && (
+                <button
+                  className="offhand"
+                  disabled={locked || !canOffhand}
+                  onClick={() => equipOffhand(index)}
+                  title="二刀流: 左手(盾スロット)に装備"
+                >
+                  左手
+                </button>
+              )}
+              {isMergeable && (
+                <button className="merge" disabled={locked || !canMerge} onClick={() => mergeItem(index)}>
+                  合成
+                </button>
+              )}
+              {isMergeable && (
+                <button
+                  className="sharpen"
+                  disabled={locked || !canSharpen}
+                  onClick={() => sharpenRelicIndex !== undefined && sharpenWithRelic(sharpenRelicIndex, { index })}
+                  title={
+                    !sharpenTargetRelic
+                      ? '遺物「王蟻の大顎」の研ぐを選ぶと使える'
+                      : canSharpen
+                        ? '研いで+1する'
+                        : 'この武具はこれ以上研げない(より深い大顎が要る)'
+                  }
+                >
+                  研ぐ
+                </button>
+              )}
               <button
-                className="throw"
+                className="drop"
                 disabled={locked}
-                onClick={() => setThrowMode(index)}
-                title="敵をクリックして投擲"
+                onClick={() => dropItem(index)}
+                title="束ごと足元に置く(ターン消費なし)"
               >
-                投げる
+                🗑️
               </button>
-            )}
-            {canOffhand && (
-              <button
-                className="offhand"
-                disabled={locked}
-                onClick={() => equipOffhand(index)}
-                title="二刀流: 左手(盾スロット)に装備"
-              >
-                左手に
-              </button>
-            )}
-            {canMerge && (
-              <button className="merge" disabled={locked} onClick={() => mergeItem(index)}>
-                合成
-              </button>
-            )}
-            {sharpenTargetRelic && mergeable(stack.item) && (
-              <button
-                className="sharpen"
-                disabled={locked || !sharpenEligible}
-                onClick={() => sharpenRelicIndex !== undefined && sharpenWithRelic(sharpenRelicIndex, { index })}
-                title={sharpenEligible ? '研いで+1する' : 'この武具はこれ以上研げない(より深い大顎が要る)'}
-              >
-                研ぐ対象に
-              </button>
-            )}
-            <button
-              className="drop"
-              disabled={locked}
-              onClick={() => dropItem(index)}
-              title="束ごと足元に置く(ターン消費なし)"
-            >
-              捨てる
-            </button>
+            </div>
           </div>
         );
       })}
@@ -264,7 +284,7 @@ export function PackPanel() {
         <>
           <h4 className="relic-head">遺物</h4>
           {relicGroups.map((g) => {
-            const label = `${ITEMS[g.item].name}${g.count > 1 ? ` ×${g.count}` : ''}`;
+            const label = `${ITEMS[g.item].name}${g.count > 1 ? ` (${g.count})` : ''}`;
             return (
               <div className="pack-row relic-row" key={`relic:${g.item}:${g.q}`}>
                 <span className="relic-item">

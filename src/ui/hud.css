@@ -351,26 +351,20 @@
   font-size: 13px;
 }
 .hud-pack button .use { font-size: 11px; color: #94a3b8; margin-left: 8px; white-space: nowrap; }
-.hud-pack .pack-row { display: flex; gap: 4px; }
-.hud-pack .pack-row > button:first-child { flex: 1; }
-.hud-pack .pack-row .merge {
-  padding: 5px 8px;
-  font-size: 11px;
-  border-color: #d9a441;
-  color: #fde68a;
-}
-.hud-pack .pack-row .throw {
-  padding: 5px 8px;
-  font-size: 11px;
-  border-color: #7c3aed;
-  color: #d8b4fe;
-}
-.hud-pack .pack-row .drop {
-  padding: 5px 8px;
-  font-size: 11px;
-  border-color: #64748b;
-  color: #94a3b8;
-}
+/* 1項目=2行(rogue-38): 1行目=名前と主動詞、2行目=副動詞と捨てる */
+.hud-pack .pack-row { display: flex; flex-direction: column; gap: 3px; }
+.hud-pack .pack-row .pack-main { width: 100%; }
+.hud-pack .pack-row .pack-main .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-pack .pack-verbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* 副動詞ボタンは小さめ。捨てるは行右端へ寄せる */
+.hud-pack .pack-verbs button { padding: 4px 7px; font-size: 11px; }
+.hud-pack .pack-verbs .drop { margin-left: auto; border-color: #64748b; }
+.hud-pack .pack-verbs .merge { border-color: #d9a441; color: #fde68a; }
+.hud-pack .pack-verbs .throw { border-color: #7c3aed; color: #d8b4fe; }
+.hud-pack .pack-verbs .offhand { border-color: #38bdf8; color: #7dd3fc; }
+.hud-pack .pack-verbs .sharpen { border-color: #d9a441; color: #fde68a; }
+/* 使えない副動詞は常時表示のまま淡色で無効化(枠位置を安定させる) */
+.hud-pack .pack-verbs button:disabled { opacity: 0.4; }
 .hud-pack h4 .full {
   margin-left: 4px;
   color: #ef4444;
@@ -383,7 +377,7 @@
   color: #fbbf24;
   cursor: default;
 }
-.hud-pack .relic-row { align-items: center; }
+.hud-pack .relic-row { flex-direction: row; align-items: center; gap: 4px; }
 .hud-pack .relic-item {
   flex: 1;
   padding: 5px 10px;
